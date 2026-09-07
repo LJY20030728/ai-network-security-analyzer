@@ -10,6 +10,8 @@
 A full-stack security engineering project that combines classical network analysis with large language models. It parses Wireshark packet captures, detects attacks through a deterministic rule engine, an EWMA statistical baseline, and an unsupervised isolation-forest engine, then performs AI threat assessment grounded in a MITRE ATT&CK knowledge base (RAG) — producing structured, auditable, evidence-backed analysis reports.
 
 > This project was built as a production-oriented engineering practice in network security + AI. All evaluation numbers in this document are reproducible from this repository.
+>
+> 📖 For a detailed bilingual system walkthrough (中文详解), see [PROJECT_OVERVIEW.md](PROJECT_OVERVIEW.md). 中文版另有 [README.zh-CN.md](README.zh-CN.md)。
 
 ---
 

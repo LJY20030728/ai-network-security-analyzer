@@ -1,0 +1,14 @@
+# Docker 构建排除（体积与安全）
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+installer_output/
+data/
+.git/
+.gitignore
+*.log
+_srv_*.log
+.idea/
+.vscode/
+tests/

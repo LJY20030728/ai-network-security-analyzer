@@ -1,0 +1,17 @@
+{
+  "n_packets": 300000,
+  "pcap_mb": 28.1,
+  "full": {
+    "seconds": 246.73,
+    "peak_mb": 1112.3,
+    "alerts": 15
+  },
+  "stream": {
+    "seconds": 244.0,
+    "peak_mb": 6.8,
+    "alerts": 15
+  },
+  "speedup_x": 1.01,
+  "memory_reduction_x": 162.8,
+  "alerts_consistent": true
+}

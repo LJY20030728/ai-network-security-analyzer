@@ -1,0 +1,85 @@
+{
+  "generated_at": "golden regression",
+  "normal_alerts": 0,
+  "attack_hits": [
+    {
+      "sample": "synflood",
+      "packets": 200,
+      "alerts": 7,
+      "hit": [
+        "BASELINE_DEVIATION",
+        "SYN_FLOOD_SUSPECTED"
+      ],
+      "missing": [],
+      "pass": true
+    },
+    {
+      "sample": "portscan",
+      "packets": 50,
+      "alerts": 7,
+      "hit": [
+        "BASELINE_DEVIATION",
+        "PORT_SCAN_SUSPECTED"
+      ],
+      "missing": [],
+      "pass": true
+    },
+    {
+      "sample": "dnstunnel",
+      "packets": 10,
+      "alerts": 1,
+      "hit": [
+        "DNS_TUNNEL_SUSPECTED"
+      ],
+      "missing": [],
+      "pass": true
+    },
+    {
+      "sample": "largeflow",
+      "packets": 8239,
+      "alerts": 3,
+      "hit": [
+        "BASELINE_DEVIATION",
+        "LARGE_DATA_TRANSFER"
+      ],
+      "missing": [],
+      "pass": true
+    },
+    {
+      "sample": "rststorm",
+      "packets": 80,
+      "alerts": 1,
+      "hit": [
+        "RST_STORM"
+      ],
+      "missing": [],
+      "pass": true
+    }
+  ],
+  "baseline_profile": {
+    "window_packets": {
+      "median": 7.0,
+      "mad": 2.1,
+      "raw_mad": 0.0,
+      "samples": 190
+    },
+    "window_bytes": {
+      "median": 499.0,
+      "mad": 249.5,
+      "raw_mad": 1.0,
+      "samples": 190
+    },
+    "window_syn": {
+      "median": 1.0,
+      "mad": 1.0,
+      "raw_mad": 0.0,
+      "samples": 190
+    },
+    "window_dports": {
+      "median": 2.0,
+      "mad": 1.0,
+      "raw_mad": 0.0,
+      "samples": 190
+    }
+  }
+}

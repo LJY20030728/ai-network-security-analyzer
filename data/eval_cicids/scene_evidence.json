@@ -1,0 +1,22 @@
+{
+  "dataset": "CICIDS2017 (Friday-Afternoon-PortScan / DDos, 官方流级标注 CSV)",
+  "source": "github.com/YigithanYY/CIC-IDS2017 (官方裁剪镜像)",
+  "scene_evidence": {
+    "PortScan文件": {
+      "BENIGN流": 127537,
+      "PortScan流": 158930,
+      "PortScan流SYN计数": 0,
+      "全文件SYN_distinct端口": 2885,
+      "阈值20判定": "告警"
+    },
+    "DDoS文件": {
+      "BENIGN流": 97718,
+      "DDoS流": 128027,
+      "DDoS目的端口数": 4,
+      "全文件SYN_distinct端口": 5463,
+      "阈值20判定": "告警"
+    }
+  },
+  "insight": "CICIDS2017 流级标注中 PortScan/DDoS 攻击流 SYN Flag Count=0（CICFlowMeter 流级口径），与包级检测存在语义差异；按源IP聚合的端口扫描设计可避免真实多主机流量中全文件 distinct 端口导致的误报（BENIGN 流量全文件 SYN 端口即达 2885）",
+  "limitation": "镜像为裁剪版（缺 Source IP/Timestamp），无法做源IP级与窗口级评测；完整 pcap 级独立评测列为后续项"
+}

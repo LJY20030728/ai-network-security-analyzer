@@ -1,0 +1,19 @@
+version: "3.8"
+
+services:
+  nsa:
+    build: .
+    image: ai-nsa:1.1.0
+    container_name: ai-nsa
+    ports:
+      - "8080:8080"
+    environment:
+      # 运行时注入（不在镜像中写死密钥）
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - LLM_BASE_URL=${LLM_BASE_URL:-https://open.bigmodel.cn/api/paas/v4}
+      - LLM_MODEL=${LLM_MODEL:-glm-4-flash}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-BAAI/bge-small-zh-v1.5}
+      - API_AUTH_TOKEN=${API_AUTH_TOKEN:-changeme}
+    volumes:
+      - ./data:/app/data          # 基线/知识库/审计/报告持久化
+    restart: unless-stopped

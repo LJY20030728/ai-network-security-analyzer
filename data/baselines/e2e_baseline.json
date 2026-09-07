@@ -1,0 +1,41 @@
+{
+  "name": "e2e_baseline",
+  "created_at": "2026-09-07 23:20:24",
+  "packets_used": 1480,
+  "alpha": 0.1,
+  "sigma": 3.0,
+  "window_sec": 10,
+  "learned": true,
+  "dimensions": [
+    "window_packets",
+    "window_bytes",
+    "window_syn",
+    "window_dports"
+  ],
+  "profile": {
+    "window_packets": {
+      "median": 7.0,
+      "mad": 2.1,
+      "raw_mad": 0.0,
+      "samples": 190
+    },
+    "window_bytes": {
+      "median": 499.0,
+      "mad": 249.5,
+      "raw_mad": 1.0,
+      "samples": 190
+    },
+    "window_syn": {
+      "median": 1.0,
+      "mad": 1.0,
+      "raw_mad": 0.0,
+      "samples": 190
+    },
+    "window_dports": {
+      "median": 2.0,
+      "mad": 1.0,
+      "raw_mad": 0.0,
+      "samples": 190
+    }
+  }
+}

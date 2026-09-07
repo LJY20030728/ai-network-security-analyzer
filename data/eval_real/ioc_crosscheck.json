@@ -1,0 +1,13 @@
+{
+  "ioc_ips": 0,
+  "ioc_domains": 6,
+  "pcap_dns": 47,
+  "pcap_dst_ips": 48,
+  "hit_dns": [
+    "gorcerie.com",
+    "memory-scanner.cc",
+    "pastebin.com",
+    "t.me"
+  ],
+  "hit_ip": []
+}

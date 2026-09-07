@@ -1,0 +1,140 @@
+{
+  "method": "Recall@k / MRR@5，BGE 中文 Embedding + ChromaDB cosine",
+  "golden_queries": 16,
+  "recall_at_1": 0.9375,
+  "recall_at_3": 0.9375,
+  "recall_at_5": 1.0,
+  "mrr_at_5": 0.95,
+  "category_recall_at_5": {
+    "mitre": {
+      "queries": 10,
+      "hit": 10,
+      "recall@5": 1.0
+    },
+    "handbook": {
+      "queries": 4,
+      "hit": 4,
+      "recall@5": 1.0
+    },
+    "protocol": {
+      "queries": 2,
+      "hit": 2,
+      "recall@5": 1.0
+    }
+  },
+  "per_query": [
+    {
+      "query": "短时间内同一IP向大量端口发SYN包，这属于什么攻击，怎么检测？",
+      "expected_keyword": "T1046",
+      "hit_rank": 1,
+      "hit": true,
+      "top1_title": "MITRE ATT&CK T1046 - 网络服务扫描"
+    },
+    {
+      "query": "攻击者用DNS、HTTP等常见协议做C2通信伪装，有哪些流量特征能暴露？",
+      "expected_keyword": "T1071",
+      "hit_rank": 1,
+      "hit": true,
+      "top1_title": "MITRE ATT&CK T1071 - 应用层协议"
+    },
+    {
+      "query": "内网主机向外部传输了超大流量，怀疑数据泄露，应该关注什么特征？",
+      "expected_keyword": "T1048",
+      "hit_rank": 1,
+      "hit": true,
+      "top1_title": "MITRE ATT&CK T1048 - 数据从网络中渗出"
+    },
+    {
+      "query": "攻击者通过多级代理隐藏C2服务器地址，流量上有什么异常？",
+      "expected_keyword": "T1090",
+      "hit_rank": 1,
+      "hit": true,
+      "top1_title": "MITRE ATT&CK T1090 - 代理"
+    },
+    {
+      "query": "DNS查询名特别长还带随机字符串，这是什么攻击？",
+      "expected_keyword": "T1572",
+      "hit_rank": 1,
+      "hit": true,
+      "top1_title": "MITRE ATT&CK T1572 - 协议隧道"
+    },
+    {
+      "query": "大量登录失败尝试来自同一IP，针对SSH的暴力破解怎么防护？",
+      "expected_keyword": "T1110",
+      "hit_rank": 1,
+      "hit": true,
+      "top1_title": "MITRE ATT&CK T1110 - 暴力破解"
+    },
+    {
+      "query": "SYN包数量远超ACK包、带宽被打满，这是哪种攻击？",
+      "expected_keyword": "T1498",
+      "hit_rank": 1,
+      "hit": true,
+      "top1_title": "MITRE ATT&CK T1498 - 网络拒绝服务"
+    },
+    {
+      "query": "一台内网主机同时连很多主机的445端口，是横向移动吗？",
+      "expected_keyword": "T1021",
+      "hit_rank": 1,
+      "hit": true,
+      "top1_title": "MITRE ATT&CK T1021 - 远程服务"
+    },
+    {
+      "query": "攻击者收集系统信息做侦察，网络流量上能看到什么？",
+      "expected_keyword": "T1082",
+      "hit_rank": 1,
+      "hit": true,
+      "top1_title": "MITRE ATT&CK T1082 - 系统信息发现"
+    },
+    {
+      "query": "收到端口扫描告警，作为安全工程师第一步该做什么？",
+      "expected_keyword": "端口扫描事件处置手册",
+      "hit_rank": 1,
+      "hit": true,
+      "top1_title": "端口扫描事件处置手册"
+    },
+    {
+      "query": "公司网站被DDoS了，网络层和应用层攻击分别怎么遏制？",
+      "expected_keyword": "DDoS攻击事件处置手册",
+      "hit_rank": 1,
+      "hit": true,
+      "top1_title": "DDoS攻击事件处置手册"
+    },
+    {
+      "query": "怀疑内网有DNS隧道在传输数据，处置流程是什么？",
+      "expected_keyword": "DNS隧道检测与处置手册",
+      "hit_rank": 1,
+      "hit": true,
+      "top1_title": "DNS隧道检测与处置手册"
+    },
+    {
+      "query": "RDP登录被爆破且疑似成功了，应急应该怎么处理？",
+      "expected_keyword": "暴力破解攻击处置手册",
+      "hit_rank": 1,
+      "hit": true,
+      "top1_title": "暴力破解攻击处置手册"
+    },
+    {
+      "query": "TCP三次握手具体是哪三步，SYN flood是怎么利用它的？",
+      "expected_keyword": "TCP三次握手",
+      "hit_rank": 1,
+      "hit": true,
+      "top1_title": "TCP三次握手与连接管理"
+    },
+    {
+      "query": "DNS放大攻击和DNS投毒的区别，检测上关注什么？",
+      "expected_keyword": "DNS协议安全分析",
+      "hit_rank": 5,
+      "hit": true,
+      "top1_title": "MITRE ATT&CK T1082 - 系统信息发现"
+    },
+    {
+      "query": "加密HTTPS流量看不到内容，安全分析还能看哪些特征？",
+      "expected_keyword": "HTTP/HTTPS",
+      "hit_rank": 1,
+      "hit": true,
+      "top1_title": "HTTP/HTTPS流量安全分析"
+    }
+  ],
+  "missed": []
+}

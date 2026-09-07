@@ -1,0 +1,155 @@
+[
+  {
+    "window_sec": 5,
+    "sigma": 2.0,
+    "normal_windows": 231,
+    "fpr": 0.0,
+    "tpr": 0.7143,
+    "hit_samples": 5,
+    "per_sample": {
+      "synflood": 24,
+      "portscan": 14,
+      "dnstunnel": 0,
+      "largeflow": 4,
+      "rststorm": 0,
+      "lightscan": 6,
+      "burst": 12
+    }
+  },
+  {
+    "window_sec": 5,
+    "sigma": 3.0,
+    "normal_windows": 231,
+    "fpr": 0.0,
+    "tpr": 0.4286,
+    "hit_samples": 3,
+    "per_sample": {
+      "synflood": 24,
+      "portscan": 0,
+      "dnstunnel": 0,
+      "largeflow": 4,
+      "rststorm": 0,
+      "lightscan": 0,
+      "burst": 1
+    }
+  },
+  {
+    "window_sec": 5,
+    "sigma": 4.0,
+    "normal_windows": 231,
+    "fpr": 0.0,
+    "tpr": 0.2857,
+    "hit_samples": 2,
+    "per_sample": {
+      "synflood": 12,
+      "portscan": 0,
+      "dnstunnel": 0,
+      "largeflow": 4,
+      "rststorm": 0,
+      "lightscan": 0,
+      "burst": 0
+    }
+  },
+  {
+    "window_sec": 10,
+    "sigma": 2.0,
+    "normal_windows": 219,
+    "fpr": 0.0046,
+    "tpr": 0.8571,
+    "hit_samples": 6,
+    "per_sample": {
+      "synflood": 18,
+      "portscan": 12,
+      "dnstunnel": 0,
+      "largeflow": 2,
+      "rststorm": 6,
+      "lightscan": 7,
+      "burst": 53
+    }
+  },
+  {
+    "window_sec": 10,
+    "sigma": 3.0,
+    "normal_windows": 219,
+    "fpr": 0.0,
+    "tpr": 0.7143,
+    "hit_samples": 5,
+    "per_sample": {
+      "synflood": 12,
+      "portscan": 12,
+      "dnstunnel": 0,
+      "largeflow": 2,
+      "rststorm": 0,
+      "lightscan": 4,
+      "burst": 10
+    }
+  },
+  {
+    "window_sec": 10,
+    "sigma": 4.0,
+    "normal_windows": 219,
+    "fpr": 0.0,
+    "tpr": 0.7143,
+    "hit_samples": 5,
+    "per_sample": {
+      "synflood": 12,
+      "portscan": 12,
+      "dnstunnel": 0,
+      "largeflow": 2,
+      "rststorm": 0,
+      "lightscan": 4,
+      "burst": 2
+    }
+  },
+  {
+    "window_sec": 30,
+    "sigma": 2.0,
+    "normal_windows": 120,
+    "fpr": 0.0,
+    "tpr": 0.8571,
+    "hit_samples": 6,
+    "per_sample": {
+      "synflood": 6,
+      "portscan": 6,
+      "dnstunnel": 0,
+      "largeflow": 2,
+      "rststorm": 2,
+      "lightscan": 3,
+      "burst": 20
+    }
+  },
+  {
+    "window_sec": 30,
+    "sigma": 3.0,
+    "normal_windows": 120,
+    "fpr": 0.0,
+    "tpr": 0.8571,
+    "hit_samples": 6,
+    "per_sample": {
+      "synflood": 6,
+      "portscan": 4,
+      "dnstunnel": 0,
+      "largeflow": 2,
+      "rststorm": 2,
+      "lightscan": 3,
+      "burst": 20
+    }
+  },
+  {
+    "window_sec": 30,
+    "sigma": 4.0,
+    "normal_windows": 120,
+    "fpr": 0.0,
+    "tpr": 0.8571,
+    "hit_samples": 6,
+    "per_sample": {
+      "synflood": 6,
+      "portscan": 4,
+      "dnstunnel": 0,
+      "largeflow": 2,
+      "rststorm": 2,
+      "lightscan": 2,
+      "burst": 20
+    }
+  }
+]

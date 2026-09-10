@@ -1,0 +1,323 @@
+{
+  "cases": 8,
+  "single": {
+    "judgment_accuracy": 0.625,
+    "structured_success_rate": 1.0,
+    "avg_confidence": 0.869,
+    "avg_latency_s": 8.47
+  },
+  "voting3": {
+    "judgment_accuracy": 0.625,
+    "structured_success_rate": 1.0,
+    "avg_confidence": 0.805,
+    "avg_latency_s": 27.881,
+    "avg_agreement": 0.875
+  },
+  "conclusion": "多温度投票缓解 LLM 非确定性：is_threat 由多数票决定，一致性 agreement 作为置信度加权因子；代价是延迟约 3 倍。若投票准确率 ≥ 单次且一致性高，则证明投票是有效的工程化手段。",
+  "per_case": [
+    {
+      "case": "synflood",
+      "note": "真实 SYN 洪水",
+      "expected_threat": true,
+      "single": {
+        "is_threat": true,
+        "confidence": 0.85,
+        "structured_ok": true,
+        "seconds": 10.95
+      },
+      "voting3": {
+        "is_threat": true,
+        "confidence": 0.85,
+        "structured_ok": true,
+        "agreement": 1.0,
+        "votes": [
+          {
+            "temperature": 0.1,
+            "ok": true,
+            "is_threat": true,
+            "confidence": 0.85
+          },
+          {
+            "temperature": 0.4,
+            "ok": true,
+            "is_threat": true,
+            "confidence": 0.85
+          },
+          {
+            "temperature": 0.7,
+            "ok": true,
+            "is_threat": true,
+            "confidence": 0.85
+          }
+        ],
+        "seconds": 33.62
+      }
+    },
+    {
+      "case": "portscan",
+      "note": "真实端口扫描",
+      "expected_threat": true,
+      "single": {
+        "is_threat": true,
+        "confidence": 0.85,
+        "structured_ok": true,
+        "seconds": 6.97
+      },
+      "voting3": {
+        "is_threat": true,
+        "confidence": 0.85,
+        "structured_ok": true,
+        "agreement": 1.0,
+        "votes": [
+          {
+            "temperature": 0.1,
+            "ok": true,
+            "is_threat": true,
+            "confidence": 0.85
+          },
+          {
+            "temperature": 0.4,
+            "ok": true,
+            "is_threat": true,
+            "confidence": 0.85
+          },
+          {
+            "temperature": 0.7,
+            "ok": true,
+            "is_threat": true,
+            "confidence": 0.85
+          }
+        ],
+        "seconds": 28.67
+      }
+    },
+    {
+      "case": "dnstunnel",
+      "note": "真实 DNS 隧道",
+      "expected_threat": true,
+      "single": {
+        "is_threat": true,
+        "confidence": 0.85,
+        "structured_ok": true,
+        "seconds": 9.12
+      },
+      "voting3": {
+        "is_threat": true,
+        "confidence": 0.85,
+        "structured_ok": true,
+        "agreement": 1.0,
+        "votes": [
+          {
+            "temperature": 0.1,
+            "ok": true,
+            "is_threat": true,
+            "confidence": 0.85
+          },
+          {
+            "temperature": 0.4,
+            "ok": true,
+            "is_threat": true,
+            "confidence": 0.85
+          },
+          {
+            "temperature": 0.7,
+            "ok": true,
+            "is_threat": true,
+            "confidence": 0.85
+          }
+        ],
+        "seconds": 31.44
+      }
+    },
+    {
+      "case": "largeflow",
+      "note": "真实大流量渗出",
+      "expected_threat": true,
+      "single": {
+        "is_threat": true,
+        "confidence": 0.85,
+        "structured_ok": true,
+        "seconds": 8.93
+      },
+      "voting3": {
+        "is_threat": true,
+        "confidence": 0.85,
+        "structured_ok": true,
+        "agreement": 1.0,
+        "votes": [
+          {
+            "temperature": 0.1,
+            "ok": true,
+            "is_threat": true,
+            "confidence": 0.85
+          },
+          {
+            "temperature": 0.4,
+            "ok": true,
+            "is_threat": true,
+            "confidence": 0.85
+          },
+          {
+            "temperature": 0.7,
+            "ok": true,
+            "is_threat": true,
+            "confidence": 0.85
+          }
+        ],
+        "seconds": 25.22
+      }
+    },
+    {
+      "case": "rststorm",
+      "note": "真实 RST 风暴",
+      "expected_threat": true,
+      "single": {
+        "is_threat": true,
+        "confidence": 0.85,
+        "structured_ok": true,
+        "seconds": 6.33
+      },
+      "voting3": {
+        "is_threat": true,
+        "confidence": 0.85,
+        "structured_ok": true,
+        "agreement": 1.0,
+        "votes": [
+          {
+            "temperature": 0.1,
+            "ok": true,
+            "is_threat": true,
+            "confidence": 0.85
+          },
+          {
+            "temperature": 0.4,
+            "ok": true,
+            "is_threat": true,
+            "confidence": 0.85
+          },
+          {
+            "temperature": 0.7,
+            "ok": true,
+            "is_threat": true,
+            "confidence": 0.85
+          }
+        ],
+        "seconds": 27.44
+      }
+    },
+    {
+      "case": "burst",
+      "note": "真实基线偏差（时序异常）",
+      "expected_threat": true,
+      "single": {
+        "is_threat": false,
+        "confidence": 1.0,
+        "structured_ok": true,
+        "seconds": 4.74
+      },
+      "voting3": {
+        "is_threat": false,
+        "confidence": 0.492,
+        "structured_ok": true,
+        "agreement": 0.0,
+        "votes": [
+          {
+            "temperature": 0.1,
+            "ok": true,
+            "is_threat": false,
+            "confidence": 0.95
+          },
+          {
+            "temperature": 0.4,
+            "ok": true,
+            "is_threat": false,
+            "confidence": 1.0
+          },
+          {
+            "temperature": 0.7,
+            "ok": true,
+            "is_threat": false,
+            "confidence": 1.0
+          }
+        ],
+        "seconds": 11.94
+      }
+    },
+    {
+      "case": "weak_synflood_fp",
+      "note": "弱特征 SYN（阈值下界，正常抖动误报候选）",
+      "expected_threat": false,
+      "single": {
+        "is_threat": true,
+        "confidence": 0.85,
+        "structured_ok": true,
+        "seconds": 10.81
+      },
+      "voting3": {
+        "is_threat": true,
+        "confidence": 0.85,
+        "structured_ok": true,
+        "agreement": 1.0,
+        "votes": [
+          {
+            "temperature": 0.1,
+            "ok": true,
+            "is_threat": true,
+            "confidence": 0.85
+          },
+          {
+            "temperature": 0.4,
+            "ok": true,
+            "is_threat": true,
+            "confidence": 0.85
+          },
+          {
+            "temperature": 0.7,
+            "ok": true,
+            "is_threat": true,
+            "confidence": 0.85
+          }
+        ],
+        "seconds": 33.41
+      }
+    },
+    {
+      "case": "noise_rst",
+      "note": "边界 RST 噪音（低严重）",
+      "expected_threat": false,
+      "single": {
+        "is_threat": true,
+        "confidence": 0.85,
+        "structured_ok": true,
+        "seconds": 9.91
+      },
+      "voting3": {
+        "is_threat": true,
+        "confidence": 0.85,
+        "structured_ok": true,
+        "agreement": 1.0,
+        "votes": [
+          {
+            "temperature": 0.1,
+            "ok": true,
+            "is_threat": true,
+            "confidence": 0.85
+          },
+          {
+            "temperature": 0.4,
+            "ok": true,
+            "is_threat": true,
+            "confidence": 0.85
+          },
+          {
+            "temperature": 0.7,
+            "ok": true,
+            "is_threat": true,
+            "confidence": 0.85
+          }
+        ],
+        "seconds": 31.31
+      }
+    }
+  ]
+}

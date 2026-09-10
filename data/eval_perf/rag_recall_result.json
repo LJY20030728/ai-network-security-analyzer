@@ -1,0 +1,585 @@
+{
+  "evaluation": "RAG 检索质量评测（Recall@5）",
+  "golden_set_size": 15,
+  "evaluated": 15,
+  "metrics": {
+    "avg_recall_at_5": 0.36,
+    "strict_recall_rate": 0.667,
+    "total_hits": 27,
+    "avg_search_time_sec": 0.207,
+    "missed_queries": 5
+  },
+  "missed_queries": [
+    {
+      "id": 1,
+      "query": "什么是 SQL 注入攻击？如何检测和防御？",
+      "category": "攻击技术"
+    },
+    {
+      "id": 7,
+      "query": "勒索软件的攻击链是什么？如何应急响应？",
+      "category": "影响"
+    },
+    {
+      "id": 8,
+      "query": "钓鱼攻击的社会工程学手段和检测方法",
+      "category": "初始访问"
+    },
+    {
+      "id": 10,
+      "query": "内存马的工作原理和检测方法",
+      "category": "防御规避"
+    },
+    {
+      "id": 13,
+      "query": "中间人攻击的原理和 HTTPS 如何防御",
+      "category": "凭据访问"
+    }
+  ],
+  "results": [
+    {
+      "query": "什么是 SQL 注入攻击？如何检测和防御？",
+      "expected_keywords": [
+        "SQL",
+        "注入",
+        "Injection",
+        "T1190",
+        "Exploit Public-Facing Application"
+      ],
+      "top_k": 5,
+      "results_count": 5,
+      "hits": 0,
+      "recall_at_k": 0.0,
+      "strict_recall": 0.0,
+      "search_time_sec": 1.068,
+      "hit_details": [],
+      "missed": true,
+      "id": 1,
+      "category": "攻击技术"
+    },
+    {
+      "query": "SYN Flood 攻击的原理是什么？如何缓解？",
+      "expected_keywords": [
+        "SYN",
+        "Flood",
+        "DoS",
+        "DDoS",
+        "T1498",
+        "Network Denial of Service"
+      ],
+      "top_k": 5,
+      "results_count": 5,
+      "hits": 3,
+      "recall_at_k": 0.6,
+      "strict_recall": 1.0,
+      "search_time_sec": 0.145,
+      "hit_details": [
+        {
+          "rank": 1,
+          "matched_keywords": [
+            "SYN",
+            "Flood",
+            "DoS",
+            "DDoS"
+          ],
+          "title": "",
+          "score": 0.32857000827789307
+        },
+        {
+          "rank": 4,
+          "matched_keywords": [
+            "SYN",
+            "Flood",
+            "DoS",
+            "DDoS",
+            "T1498"
+          ],
+          "title": "",
+          "score": 0.5
+        },
+        {
+          "rank": 5,
+          "matched_keywords": [
+            "SYN"
+          ],
+          "title": "",
+          "score": 0.5
+        }
+      ],
+      "missed": false,
+      "id": 2,
+      "category": "拒绝服务"
+    },
+    {
+      "query": "端口扫描属于 ATT&CK 哪个阶段？有哪些常见扫描技术？",
+      "expected_keywords": [
+        "端口扫描",
+        "Port Scan",
+        "Reconnaissance",
+        "T1046",
+        "Network Service Scanning"
+      ],
+      "top_k": 5,
+      "results_count": 5,
+      "hits": 2,
+      "recall_at_k": 0.4,
+      "strict_recall": 1.0,
+      "search_time_sec": 0.145,
+      "hit_details": [
+        {
+          "rank": 1,
+          "matched_keywords": [
+            "端口扫描"
+          ],
+          "title": "",
+          "score": 0.31633925437927246
+        },
+        {
+          "rank": 2,
+          "matched_keywords": [
+            "T1046"
+          ],
+          "title": "",
+          "score": 0.29208505153656006
+        }
+      ],
+      "missed": false,
+      "id": 3,
+      "category": "侦察"
+    },
+    {
+      "query": "DNS 隧道如何实现数据外泄？检测指标有哪些？",
+      "expected_keywords": [
+        "DNS",
+        "隧道",
+        "Tunneling",
+        "T1071",
+        "Application Layer Protocol",
+        "Exfiltration"
+      ],
+      "top_k": 5,
+      "results_count": 5,
+      "hits": 5,
+      "recall_at_k": 1.0,
+      "strict_recall": 1.0,
+      "search_time_sec": 0.147,
+      "hit_details": [
+        {
+          "rank": 1,
+          "matched_keywords": [
+            "DNS",
+            "隧道"
+          ],
+          "title": "",
+          "score": 0.25527095794677734
+        },
+        {
+          "rank": 2,
+          "matched_keywords": [
+            "DNS",
+            "隧道"
+          ],
+          "title": "",
+          "score": 0.2856612205505371
+        },
+        {
+          "rank": 3,
+          "matched_keywords": [
+            "DNS",
+            "隧道"
+          ],
+          "title": "",
+          "score": 0.29694485664367676
+        },
+        {
+          "rank": 4,
+          "matched_keywords": [
+            "隧道"
+          ],
+          "title": "",
+          "score": 0.3465612530708313
+        },
+        {
+          "rank": 5,
+          "matched_keywords": [
+            "Exfiltration"
+          ],
+          "title": "",
+          "score": 0.5
+        }
+      ],
+      "missed": false,
+      "id": 4,
+      "category": "命令控制"
+    },
+    {
+      "query": "暴力破解攻击的检测方法和防御措施",
+      "expected_keywords": [
+        "暴力破解",
+        "Brute Force",
+        "T1110",
+        "Credential Access"
+      ],
+      "top_k": 5,
+      "results_count": 5,
+      "hits": 2,
+      "recall_at_k": 0.4,
+      "strict_recall": 1.0,
+      "search_time_sec": 0.146,
+      "hit_details": [
+        {
+          "rank": 1,
+          "matched_keywords": [
+            "暴力破解"
+          ],
+          "title": "",
+          "score": 0.23983824253082275
+        },
+        {
+          "rank": 2,
+          "matched_keywords": [
+            "暴力破解",
+            "T1110"
+          ],
+          "title": "",
+          "score": 0.3099004030227661
+        }
+      ],
+      "missed": false,
+      "id": 5,
+      "category": "凭据访问"
+    },
+    {
+      "query": "横向移动有哪些常见技术？如何检测？",
+      "expected_keywords": [
+        "横向移动",
+        "Lateral Movement",
+        "T1021",
+        "Remote Services"
+      ],
+      "top_k": 5,
+      "results_count": 5,
+      "hits": 2,
+      "recall_at_k": 0.4,
+      "strict_recall": 1.0,
+      "search_time_sec": 0.146,
+      "hit_details": [
+        {
+          "rank": 1,
+          "matched_keywords": [
+            "横向移动",
+            "T1021"
+          ],
+          "title": "",
+          "score": 0.33623170852661133
+        },
+        {
+          "rank": 2,
+          "matched_keywords": [
+            "横向移动",
+            "Lateral Movement"
+          ],
+          "title": "",
+          "score": 0.38242602348327637
+        }
+      ],
+      "missed": false,
+      "id": 6,
+      "category": "横向移动"
+    },
+    {
+      "query": "勒索软件的攻击链是什么？如何应急响应？",
+      "expected_keywords": [
+        "勒索",
+        "Ransomware",
+        "T1486",
+        "Data Encrypted for Impact",
+        "Impact"
+      ],
+      "top_k": 5,
+      "results_count": 5,
+      "hits": 0,
+      "recall_at_k": 0.0,
+      "strict_recall": 0.0,
+      "search_time_sec": 0.144,
+      "hit_details": [],
+      "missed": true,
+      "id": 7,
+      "category": "影响"
+    },
+    {
+      "query": "钓鱼攻击的社会工程学手段和检测方法",
+      "expected_keywords": [
+        "钓鱼",
+        "Phishing",
+        "T1566",
+        "Spearphishing"
+      ],
+      "top_k": 5,
+      "results_count": 5,
+      "hits": 0,
+      "recall_at_k": 0.0,
+      "strict_recall": 0.0,
+      "search_time_sec": 0.145,
+      "hit_details": [],
+      "missed": true,
+      "id": 8,
+      "category": "初始访问"
+    },
+    {
+      "query": "恶意软件持久化技术有哪些？注册表启动项如何检测？",
+      "expected_keywords": [
+        "持久化",
+        "Persistence",
+        "T1547",
+        "Boot or Logon Autostart",
+        "注册表"
+      ],
+      "top_k": 5,
+      "results_count": 5,
+      "hits": 2,
+      "recall_at_k": 0.4,
+      "strict_recall": 1.0,
+      "search_time_sec": 0.144,
+      "hit_details": [
+        {
+          "rank": 1,
+          "matched_keywords": [
+            "持久化",
+            "Persistence"
+          ],
+          "title": "",
+          "score": 0.5
+        },
+        {
+          "rank": 2,
+          "matched_keywords": [
+            "注册表"
+          ],
+          "title": "",
+          "score": 0.36634981632232666
+        }
+      ],
+      "missed": false,
+      "id": 9,
+      "category": "持久化"
+    },
+    {
+      "query": "内存马的工作原理和检测方法",
+      "expected_keywords": [
+        "内存",
+        "马",
+        "Memory",
+        "T1055",
+        "Process Injection"
+      ],
+      "top_k": 5,
+      "results_count": 5,
+      "hits": 0,
+      "recall_at_k": 0.0,
+      "strict_recall": 0.0,
+      "search_time_sec": 0.147,
+      "hit_details": [],
+      "missed": true,
+      "id": 10,
+      "category": "防御规避"
+    },
+    {
+      "query": "零日漏洞利用的检测难点和防御策略",
+      "expected_keywords": [
+        "零日",
+        "0day",
+        "漏洞",
+        "Exploit",
+        "T1190",
+        "Vulnerability"
+      ],
+      "top_k": 5,
+      "results_count": 5,
+      "hits": 2,
+      "recall_at_k": 0.4,
+      "strict_recall": 1.0,
+      "search_time_sec": 0.147,
+      "hit_details": [
+        {
+          "rank": 1,
+          "matched_keywords": [
+            "漏洞"
+          ],
+          "title": "",
+          "score": 0.4187546372413635
+        },
+        {
+          "rank": 5,
+          "matched_keywords": [
+            "漏洞",
+            "Vulnerability"
+          ],
+          "title": "",
+          "score": 0.5
+        }
+      ],
+      "missed": false,
+      "id": 11,
+      "category": "初始访问"
+    },
+    {
+      "query": "数据外泄的常见渠道和检测指标",
+      "expected_keywords": [
+        "数据外泄",
+        "Exfiltration",
+        "T1041",
+        "T1048",
+        "Data Exfiltration"
+      ],
+      "top_k": 5,
+      "results_count": 5,
+      "hits": 1,
+      "recall_at_k": 0.2,
+      "strict_recall": 1.0,
+      "search_time_sec": 0.142,
+      "hit_details": [
+        {
+          "rank": 3,
+          "matched_keywords": [
+            "T1048"
+          ],
+          "title": "",
+          "score": 0.37410974502563477
+        }
+      ],
+      "missed": false,
+      "id": 12,
+      "category": "数据外泄"
+    },
+    {
+      "query": "中间人攻击的原理和 HTTPS 如何防御",
+      "expected_keywords": [
+        "中间人",
+        "MITM",
+        "Man-in-the-Middle",
+        "T1557",
+        "Adversary-in-the-Middle"
+      ],
+      "top_k": 5,
+      "results_count": 5,
+      "hits": 0,
+      "recall_at_k": 0.0,
+      "strict_recall": 0.0,
+      "search_time_sec": 0.154,
+      "hit_details": [],
+      "missed": true,
+      "id": 13,
+      "category": "凭据访问"
+    },
+    {
+      "query": "日志审计在入侵检测中的作用和关键日志源",
+      "expected_keywords": [
+        "日志",
+        "审计",
+        "Log",
+        "T1070",
+        "Indicator Removal",
+        "检测"
+      ],
+      "top_k": 5,
+      "results_count": 5,
+      "hits": 5,
+      "recall_at_k": 1.0,
+      "strict_recall": 1.0,
+      "search_time_sec": 0.142,
+      "hit_details": [
+        {
+          "rank": 1,
+          "matched_keywords": [
+            "日志",
+            "审计"
+          ],
+          "title": "",
+          "score": 0.3888245224952698
+        },
+        {
+          "rank": 2,
+          "matched_keywords": [
+            "检测"
+          ],
+          "title": "",
+          "score": 0.42670661211013794
+        },
+        {
+          "rank": 3,
+          "matched_keywords": [
+            "审计",
+            "检测"
+          ],
+          "title": "",
+          "score": 0.4279428720474243
+        },
+        {
+          "rank": 4,
+          "matched_keywords": [
+            "检测"
+          ],
+          "title": "",
+          "score": 0.44409406185150146
+        },
+        {
+          "rank": 5,
+          "matched_keywords": [
+            "检测"
+          ],
+          "title": "",
+          "score": 0.5
+        }
+      ],
+      "missed": false,
+      "id": 14,
+      "category": "检测"
+    },
+    {
+      "query": "应急响应的六个阶段是什么？每个阶段的关键动作",
+      "expected_keywords": [
+        "应急响应",
+        "Incident Response",
+        "处置",
+        "响应",
+        "阶段"
+      ],
+      "top_k": 5,
+      "results_count": 5,
+      "hits": 3,
+      "recall_at_k": 0.6,
+      "strict_recall": 1.0,
+      "search_time_sec": 0.141,
+      "hit_details": [
+        {
+          "rank": 1,
+          "matched_keywords": [
+            "响应"
+          ],
+          "title": "",
+          "score": 0.5
+        },
+        {
+          "rank": 2,
+          "matched_keywords": [
+            "响应"
+          ],
+          "title": "",
+          "score": 0.5
+        },
+        {
+          "rank": 5,
+          "matched_keywords": [
+            "处置"
+          ],
+          "title": "",
+          "score": 0.5266924500465393
+        }
+      ],
+      "missed": false,
+      "id": 15,
+      "category": "响应"
+    }
+  ]
+}

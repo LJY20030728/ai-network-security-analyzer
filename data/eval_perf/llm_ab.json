@@ -1,0 +1,206 @@
+{
+  "cases": 8,
+  "scoring_limitations": "自动启发式评分：证据引用为子串匹配（IP/计数），处置可执行性为动作词表命中率；不替代人工评审",
+  "A_rule_only_avg": {
+    "completeness": 0.875,
+    "evidence_accuracy": 0.875,
+    "actionability": 0.0
+  },
+  "B_rule_plus_llm_avg": {
+    "completeness": 0.9375,
+    "evidence_accuracy": 0.875,
+    "actionability": 0.6344
+  },
+  "increment_avg": {
+    "completeness_delta": 0.0625,
+    "evidence_delta": 0.0,
+    "actionability_delta": 0.6344
+  },
+  "conclusion": "LLM 增量定位：不提高检测率（确定性引擎兜底），而提供 (1) 逐告警解释与证据回引，(2) 可执行处置建议，(3) 结构化叙事。证据引用准确率与处置可行动性是 AI 的真实增量维度。",
+  "per_case": [
+    {
+      "case": "synflood",
+      "note": "真实 SYN 洪水",
+      "n_alerts": 1,
+      "A_rule_only": {
+        "completeness": 1.0,
+        "evidence_accuracy": 1.0,
+        "actionability": 0.0
+      },
+      "B_rule_plus_llm": {
+        "completeness": 1.0,
+        "evidence_accuracy": 1.0,
+        "actionability": 0.4,
+        "structured_ok": true,
+        "seconds": 12.92,
+        "evidence_match": true
+      },
+      "increment": {
+        "completeness_delta": 0.0,
+        "evidence_delta": 0.0,
+        "actionability_delta": 0.4
+      }
+    },
+    {
+      "case": "portscan",
+      "note": "真实端口扫描",
+      "n_alerts": 1,
+      "A_rule_only": {
+        "completeness": 1.0,
+        "evidence_accuracy": 1.0,
+        "actionability": 0.0
+      },
+      "B_rule_plus_llm": {
+        "completeness": 1.0,
+        "evidence_accuracy": 1.0,
+        "actionability": 0.8,
+        "structured_ok": true,
+        "seconds": 11.47,
+        "evidence_match": true
+      },
+      "increment": {
+        "completeness_delta": 0.0,
+        "evidence_delta": 0.0,
+        "actionability_delta": 0.8
+      }
+    },
+    {
+      "case": "dnstunnel",
+      "note": "真实 DNS 隧道",
+      "n_alerts": 1,
+      "A_rule_only": {
+        "completeness": 1.0,
+        "evidence_accuracy": 1.0,
+        "actionability": 0.0
+      },
+      "B_rule_plus_llm": {
+        "completeness": 1.0,
+        "evidence_accuracy": 1.0,
+        "actionability": 0.875,
+        "structured_ok": true,
+        "seconds": 9.84,
+        "evidence_match": true
+      },
+      "increment": {
+        "completeness_delta": 0.0,
+        "evidence_delta": 0.0,
+        "actionability_delta": 0.875
+      }
+    },
+    {
+      "case": "largeflow",
+      "note": "真实大流量渗出",
+      "n_alerts": 1,
+      "A_rule_only": {
+        "completeness": 1.0,
+        "evidence_accuracy": 1.0,
+        "actionability": 0.0
+      },
+      "B_rule_plus_llm": {
+        "completeness": 1.0,
+        "evidence_accuracy": 1.0,
+        "actionability": 0.6,
+        "structured_ok": true,
+        "seconds": 7.58,
+        "evidence_match": true
+      },
+      "increment": {
+        "completeness_delta": 0.0,
+        "evidence_delta": 0.0,
+        "actionability_delta": 0.6
+      }
+    },
+    {
+      "case": "rststorm",
+      "note": "真实 RST 风暴",
+      "n_alerts": 1,
+      "A_rule_only": {
+        "completeness": 1.0,
+        "evidence_accuracy": 1.0,
+        "actionability": 0.0
+      },
+      "B_rule_plus_llm": {
+        "completeness": 1.0,
+        "evidence_accuracy": 1.0,
+        "actionability": 0.5,
+        "structured_ok": true,
+        "seconds": 10.11,
+        "evidence_match": true
+      },
+      "increment": {
+        "completeness_delta": 0.0,
+        "evidence_delta": 0.0,
+        "actionability_delta": 0.5
+      }
+    },
+    {
+      "case": "burst",
+      "note": "真实基线偏差（时序异常）",
+      "n_alerts": 0,
+      "A_rule_only": {
+        "completeness": 0.0,
+        "evidence_accuracy": 0.0,
+        "actionability": 0.0
+      },
+      "B_rule_plus_llm": {
+        "completeness": 0.5,
+        "evidence_accuracy": 0.0,
+        "actionability": 1.0,
+        "structured_ok": true,
+        "seconds": 2.63,
+        "evidence_match": false
+      },
+      "increment": {
+        "completeness_delta": 0.5,
+        "evidence_delta": 0.0,
+        "actionability_delta": 1.0
+      }
+    },
+    {
+      "case": "weak_synflood_fp",
+      "note": "弱特征 SYN（阈值下界，正常抖动误报候选）",
+      "n_alerts": 1,
+      "A_rule_only": {
+        "completeness": 1.0,
+        "evidence_accuracy": 1.0,
+        "actionability": 0.0
+      },
+      "B_rule_plus_llm": {
+        "completeness": 1.0,
+        "evidence_accuracy": 1.0,
+        "actionability": 0.4,
+        "structured_ok": true,
+        "seconds": 8.54,
+        "evidence_match": true
+      },
+      "increment": {
+        "completeness_delta": 0.0,
+        "evidence_delta": 0.0,
+        "actionability_delta": 0.4
+      }
+    },
+    {
+      "case": "noise_rst",
+      "note": "边界 RST 噪音（低严重）",
+      "n_alerts": 1,
+      "A_rule_only": {
+        "completeness": 1.0,
+        "evidence_accuracy": 1.0,
+        "actionability": 0.0
+      },
+      "B_rule_plus_llm": {
+        "completeness": 1.0,
+        "evidence_accuracy": 1.0,
+        "actionability": 0.5,
+        "structured_ok": true,
+        "seconds": 9.63,
+        "evidence_match": true
+      },
+      "increment": {
+        "completeness_delta": 0.0,
+        "evidence_delta": 0.0,
+        "actionability_delta": 0.5
+      }
+    }
+  ]
+}

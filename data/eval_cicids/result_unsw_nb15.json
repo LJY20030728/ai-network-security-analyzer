@@ -1,0 +1,212 @@
+{
+  "dataset": "UNSW-NB15",
+  "csv": "UNSW_NB15_training-set.csv",
+  "has_ip_columns": false,
+  "flows_total": 175341,
+  "label_distribution": {
+    "normal": 56000,
+    "attack": 119341
+  },
+  "attack_cat_distribution": {
+    "Backdoor": 1746,
+    "Analysis": 2000,
+    "Fuzzers": 18184,
+    "Shellcode": 1133,
+    "Reconnaissance": 10491,
+    "Exploits": 33393,
+    "DoS": 12264,
+    "Worms": 130,
+    "Generic": 40000
+  },
+  "synthetic_time_axis": "行序 × 0.5s（UNSW 无时间戳，声明为合成）",
+  "rules": {
+    "mode": "flow_level_anonymized",
+    "note": "官方划分匿名化（无 IP/端口/SYN/DNS 内容）：SYN_FLOOD/PORT_SCAN/DNS_TUNNEL 不可测；LARGE 流级语义与产品一致，RST 为窗口级近似（产品为单源语义）",
+    "large_flow": {
+      "threshold_mb": 10.0,
+      "tp": 12,
+      "fp": 0,
+      "fn": 119329,
+      "precision": 1.0,
+      "recall": 0.0001,
+      "f1": 0.0002
+    },
+    "rst_window": {
+      "threshold_count": 50,
+      "tp": 0,
+      "fp": 0,
+      "fn": 6373,
+      "tn": 2395,
+      "tpr": 0.0,
+      "fpr": 0.0
+    },
+    "coverage_by_attack_cat": {
+      "Analysis": {
+        "attack_flows": 2000,
+        "large_flow_hits": 0,
+        "detect_rate_large": 0.0,
+        "mapped_rules": null
+      },
+      "Backdoor": {
+        "attack_flows": 1746,
+        "large_flow_hits": 0,
+        "detect_rate_large": 0.0,
+        "mapped_rules": null
+      },
+      "DoS": {
+        "attack_flows": 12264,
+        "large_flow_hits": 5,
+        "detect_rate_large": 0.0004,
+        "mapped_rules": [
+          "synflood",
+          "rststorm",
+          "burst"
+        ]
+      },
+      "Exploits": {
+        "attack_flows": 33393,
+        "large_flow_hits": 7,
+        "detect_rate_large": 0.0002,
+        "mapped_rules": [
+          "largeflow",
+          "burst"
+        ]
+      },
+      "Fuzzers": {
+        "attack_flows": 18184,
+        "large_flow_hits": 0,
+        "detect_rate_large": 0.0,
+        "mapped_rules": [
+          "burst"
+        ]
+      },
+      "Generic": {
+        "attack_flows": 40000,
+        "large_flow_hits": 0,
+        "detect_rate_large": 0.0,
+        "mapped_rules": [
+          "largeflow"
+        ]
+      },
+      "Reconnaissance": {
+        "attack_flows": 10491,
+        "large_flow_hits": 0,
+        "detect_rate_large": 0.0,
+        "mapped_rules": [
+          "portscan",
+          "lightscan"
+        ]
+      },
+      "Shellcode": {
+        "attack_flows": 1133,
+        "large_flow_hits": 0,
+        "detect_rate_large": 0.0,
+        "mapped_rules": null
+      },
+      "Worms": {
+        "attack_flows": 130,
+        "large_flow_hits": 0,
+        "detect_rate_large": 0.0,
+        "mapped_rules": null
+      }
+    },
+    "untestable_rules": [
+      "SYN_FLOOD_SUSPECTED",
+      "PORT_SCAN_SUSPECTED",
+      "DNS_TUNNEL_SUSPECTED"
+    ]
+  },
+  "baseline": {
+    "windows_total": 8768,
+    "windows_gt_positive": 6373,
+    "train_windows_normal_only": 2395,
+    "sigma_points": [
+      {
+        "sigma": 2.0,
+        "fpr": 0.2042,
+        "tpr": 0.5045
+      },
+      {
+        "sigma": 2.5,
+        "fpr": 0.0789,
+        "tpr": 0.3146
+      },
+      {
+        "sigma": 3.0,
+        "fpr": 0.0622,
+        "tpr": 0.1858
+      },
+      {
+        "sigma": 3.5,
+        "fpr": 0.0413,
+        "tpr": 0.1398
+      },
+      {
+        "sigma": 4.0,
+        "fpr": 0.033,
+        "tpr": 0.1029
+      }
+    ],
+    "metrics_by_sigma": {
+      "2.0": {
+        "tp": 3215,
+        "fp": 489,
+        "fn": 3158,
+        "tn": 1906,
+        "precision": 0.868,
+        "recall": 0.5045,
+        "f1": 0.6381
+      },
+      "2.5": {
+        "tp": 2005,
+        "fp": 189,
+        "fn": 4368,
+        "tn": 2206,
+        "precision": 0.9139,
+        "recall": 0.3146,
+        "f1": 0.4681
+      },
+      "3.0": {
+        "tp": 1184,
+        "fp": 149,
+        "fn": 5189,
+        "tn": 2246,
+        "precision": 0.8882,
+        "recall": 0.1858,
+        "f1": 0.3073
+      },
+      "3.5": {
+        "tp": 891,
+        "fp": 99,
+        "fn": 5482,
+        "tn": 2296,
+        "precision": 0.9,
+        "recall": 0.1398,
+        "f1": 0.242
+      },
+      "4.0": {
+        "tp": 656,
+        "fp": 79,
+        "fn": 5717,
+        "tn": 2316,
+        "precision": 0.8925,
+        "recall": 0.1029,
+        "f1": 0.1846
+      }
+    },
+    "note": "合成时间轴（行序×0.5s）；learn 仅 Normal 窗口"
+  },
+  "isolation_forest": {
+    "tp": 1343,
+    "fp": 238,
+    "fn": 5030,
+    "tn": 2157,
+    "tpr": 0.2107,
+    "fpr": 0.0994,
+    "precision": 0.8495,
+    "f1": 0.3377,
+    "train_windows_normal_only": 2395,
+    "score_threshold": -0.0002,
+    "contamination": 0.1
+  }
+}

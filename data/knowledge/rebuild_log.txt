@@ -1,0 +1,19 @@
+[21:11:13] 加载知识库条目...
+[21:11:13] 条目数: 32, 总字符 743KB
+[21:11:13] 清空旧索引...
+[21:11:14] 批次 1/7 完成, 累计 5 条
+[21:11:14] 批次 2/7 完成, 累计 10 条
+[21:11:14] 批次 3/7 完成, 累计 17 条
+[21:11:24] 批次 4/7 完成, 累计 488 条
+[21:11:41] 批次 5/7 完成, 累计 1184 条
+[21:12:07] 批次 6/7 完成, 累计 2145 条
+[21:12:25] 批次 7/7 完成, 累计 2768 条
+[21:12:25] 索引完成: 2768 条, 耗时 70.9s
+[21:12:25] 统计: {'total_documents': 2768, 'collection_name': 'security_knowledge', 'persist_dir': './data/chroma_db', 'categories': {'mitre_attack': 10, 'reconnaissance': 1, 'dos': 1, 'c2': 2, 'credential_access': 2, 'protocol': 4, 'external_doc': 2748}}
+[21:12:25] --- 检索验证 ---
+[21:12:25] Q[DNS隧道检测] -> ['DNS隧道检测与处置手册', 'MITRE ATT&CK T1572 - 协议隧道', 'DNS隧道检测与处置手册']
+[21:12:25] Q[数据渗出 exfiltration] -> ['mitre_attck_exfiltration', 'MITRE ATT&CK T1048 - 数据从网络中渗出', 'DNS隧道检测与处置手册']
+[21:12:25] Q[横向移动] -> ['mitre_attck_collection', 'mitre_attck_lateral-movement', 'mitre_attck_stealth']
+[21:12:25] Q[powershell 执行] -> ['mitre_attck_execution', 'mitre_attck_execution', 'mitre_attck_defense-impairment']
+[21:12:25] Q[权限提升] -> ['mitre_attck_persistence', 'mitre_attck_privilege-escalation', 'mitre_attck_privilege-escalation']
+[21:12:25] REBUILD_OK

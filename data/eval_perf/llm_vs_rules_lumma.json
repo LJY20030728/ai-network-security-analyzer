@@ -1,0 +1,25 @@
+{
+  "sample": "2025-12-30-Lumma-Stealer-infection-with-other-malware.pcap",
+  "ground_truth": "malicious (Lumma Stealer + 伴随恶意软件, malware-traffic-analysis.net)",
+  "rules": {
+    "alerts": 4,
+    "alert_types": [
+      "DNS_TUNNEL_SUSPECTED",
+      "DNS_TUNNEL_SUSPECTED",
+      "LARGE_DATA_TRANSFER",
+      "RST_STORM"
+    ],
+    "total_packets": 17013,
+    "total_flows": 102,
+    "note": "真实恶意样本：规则层告警=TP；无告警活动段=规则盲区（由基线/ML 兜底）"
+  },
+  "llm_judgment": {
+    "is_threat": true,
+    "confidence": null,
+    "attacks_count": 3,
+    "overview": "存在疑似DNS隧道和数据渗出风险，需进一步调查。",
+    "latency_sec": 20.9,
+    "note": "LLM 增量：对规则告警做真伪确认 + 攻击链叙事；真实样本上 is_threat 应为 True"
+  },
+  "conclusion": "规则负责检出（召回），LLM 负责确认与解释（降误报 + 可读性）"
+}

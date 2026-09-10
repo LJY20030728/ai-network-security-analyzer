@@ -1,0 +1,104 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environment
+venv/
+env/
+ENV/
+.venv/
+
+# Environment variables (contains API Key, NEVER commit!)
+.env
+.env.local
+.env.*.local
+
+# Runtime data (generated at startup, do not commit)
+data/db/
+data/history/
+data/uploads/
+data/chroma_db/
+data/reports/
+data/audit/
+data/logs/
+data/config/
+*.log
+logs/
+
+# Runtime-generated baselines (user-learned, default example in data/baselines/default/)
+data/baselines/*.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Build artifacts
+venv_broken/
+installer_output/
+installer_test/
+_build_log.txt
+_*.log
+_*.py
+
+# Large files - training data (not suitable for GitHub, download separately)
+data/eval_cicids/csv/*.csv
+data/eval_cicids/csv/*.zip
+
+# Large files - BGE embedding model (~90MB, download via tools/init_resources.py)
+models/bge-small-zh-v1.5/
+
+# Large files - MITRE ATT&CK knowledge base (~51MB, download via tools/init_resources.py)
+data/knowledge/mitre_attck/
+
+# Large files - real evaluation data (large PCAP, not suitable for GitHub)
+data/eval_real/
+
+# Old packaging files and temporary files
+*.zip
+*.spec
+_err*.png
+_time_ref*.png
+demo_analysis.py
+test_quick.py
+test_zhipu_api.py
+run.py
+run_dev.py
+
+# Temporary files
+*.tmp
+*.bak
+*.bak_*

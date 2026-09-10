@@ -1,0 +1,43 @@
+{
+  "method": "黄金样本全管道网格（syn/port/dns/rst/large 联合）",
+  "constraint": "攻击样本全命中优先，normal 0 误报强约束",
+  "grid": [
+    {
+      "syn_flood_min_count": [
+        80,
+        100,
+        150
+      ],
+      "port_scan_min_ports": [
+        15,
+        20
+      ],
+      "dns_tunnel_min_count": [
+        3,
+        5
+      ],
+      "rst_storm_min_count": [
+        30,
+        40,
+        50
+      ]
+    }
+  ],
+  "best": {
+    "params": {
+      "syn_flood_min_count": 80,
+      "port_scan_min_ports": 15,
+      "dns_tunnel_min_count": 3,
+      "rst_storm_min_count": 30
+    },
+    "attack_hits": 6,
+    "attack_total": 7,
+    "normal_fp": 0
+  },
+  "recommended_updates": {
+    "syn_flood_min_count": 80,
+    "port_scan_min_ports": 15,
+    "dns_tunnel_min_count": 3,
+    "rst_storm_min_count": 30
+  }
+}

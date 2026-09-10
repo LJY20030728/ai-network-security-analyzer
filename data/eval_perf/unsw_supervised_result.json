@@ -1,0 +1,43 @@
+{
+  "method": "HistGradientBoosting（UNSW-NB15 40+维数值特征+one-hot）",
+  "n_flows": 175341,
+  "n_features": 194,
+  "numeric_features": 39,
+  "categorical_features": [
+    "proto",
+    "service",
+    "state"
+  ],
+  "train_samples": 140272,
+  "test_samples": 35069,
+  "binary": {
+    "precision": 0.9633,
+    "recall": 0.9769,
+    "f1": 0.97,
+    "accuracy": 0.9589,
+    "tp": 23317,
+    "fp": 888,
+    "fn": 552,
+    "tn": 10312
+  },
+  "per_category_recall": {
+    "Backdoor": 1.0,
+    "Analysis": 0.9336,
+    "Fuzzers": 0.8655,
+    "Shellcode": 0.9911,
+    "Reconnaissance": 0.9995,
+    "Exploits": 0.9962,
+    "DoS": 0.9992,
+    "Worms": 1.0,
+    "Generic": 1.0,
+    "Normal": 0.9207
+  },
+  "comparison": {
+    "rule_engine_large_flow_recall": 0.0001,
+    "baseline_best_recall_sigma2": 0.5045,
+    "isolation_forest_recall": 0.2107,
+    "supervised_recall": 0.9769,
+    "improvement_vs_rule": "9769x"
+  },
+  "runtime_sec": 7.6
+}

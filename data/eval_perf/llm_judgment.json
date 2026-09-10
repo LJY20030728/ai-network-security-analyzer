@@ -1,0 +1,83 @@
+{
+  "cases": 8,
+  "structured_success_rate": 1.0,
+  "degradation_rate": 0.0,
+  "threat_judgment_accuracy": 0.75,
+  "rag_reference_usage": 1.0,
+  "avg_latency_s": 8.4,
+  "note": "真实 LLM 调用（glm-4-flash），8 个黄金告警案例；prompt 判读指引实验使准确率降至 0.625（LLM 非确定性），已回滚；误判模式：BASELINE_DEVIATION 被判假（证据链弱）、弱特征 SYN(20<阈值100) 被判真（LLM 未利用阈值语义）",
+  "per_case": [
+    {
+      "case": "synflood",
+      "expected_threat": true,
+      "llm_is_threat": true,
+      "confidence": 0.85,
+      "structured_ok": true,
+      "knowledge_refs": 2,
+      "seconds": 11.52
+    },
+    {
+      "case": "portscan",
+      "expected_threat": true,
+      "llm_is_threat": true,
+      "confidence": 0.85,
+      "structured_ok": true,
+      "knowledge_refs": 1,
+      "seconds": 7.76
+    },
+    {
+      "case": "dnstunnel",
+      "expected_threat": true,
+      "llm_is_threat": true,
+      "confidence": 0.85,
+      "structured_ok": true,
+      "knowledge_refs": 2,
+      "seconds": 10.56
+    },
+    {
+      "case": "largeflow",
+      "expected_threat": true,
+      "llm_is_threat": true,
+      "confidence": 0.85,
+      "structured_ok": true,
+      "knowledge_refs": 1,
+      "seconds": 6.65
+    },
+    {
+      "case": "rststorm",
+      "expected_threat": true,
+      "llm_is_threat": true,
+      "confidence": 0.85,
+      "structured_ok": true,
+      "knowledge_refs": 1,
+      "seconds": 12.32
+    },
+    {
+      "case": "burst",
+      "expected_threat": true,
+      "llm_is_threat": false,
+      "confidence": 1.0,
+      "structured_ok": true,
+      "knowledge_refs": 1,
+      "seconds": 4.0
+    },
+    {
+      "case": "weak_synflood_fp",
+      "expected_threat": false,
+      "llm_is_threat": true,
+      "confidence": 0.85,
+      "structured_ok": true,
+      "knowledge_refs": 2,
+      "seconds": 9.66
+    },
+    {
+      "case": "noise_rst",
+      "expected_threat": false,
+      "llm_is_threat": false,
+      "confidence": 0.65,
+      "structured_ok": true,
+      "knowledge_refs": 1,
+      "seconds": 4.54
+    }
+  ]
+}

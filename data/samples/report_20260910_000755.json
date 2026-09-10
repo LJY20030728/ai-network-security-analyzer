@@ -1,0 +1,204 @@
+{
+  "status": "success",
+  "packet_count": 50,
+  "analysis_report": {
+    "summary": {
+      "total_packets": 50,
+      "total_flows": 50,
+      "time_range": {
+        "start": "2023-11-15 06:13:20.000",
+        "end": "2023-11-15 06:14:18.800"
+      },
+      "total_bytes": 2000
+    },
+    "flow_stats": {
+      "total_flows": 50,
+      "top_flows": [
+        {
+          "flow": "10.0.0.1:1 -> 10.0.0.2:40000",
+          "protocol": "TCP",
+          "packets": 0,
+          "bytes": 40
+        },
+        {
+          "flow": "10.0.0.1:2 -> 10.0.0.2:40001",
+          "protocol": "TCP",
+          "packets": 0,
+          "bytes": 40
+        },
+        {
+          "flow": "10.0.0.1:3 -> 10.0.0.2:40002",
+          "protocol": "TCP",
+          "packets": 0,
+          "bytes": 40
+        },
+        {
+          "flow": "10.0.0.1:4 -> 10.0.0.2:40003",
+          "protocol": "TCP",
+          "packets": 0,
+          "bytes": 40
+        },
+        {
+          "flow": "10.0.0.1:5 -> 10.0.0.2:40004",
+          "protocol": "TCP",
+          "packets": 0,
+          "bytes": 40
+        },
+        {
+          "flow": "10.0.0.1:6 -> 10.0.0.2:40005",
+          "protocol": "TCP",
+          "packets": 0,
+          "bytes": 40
+        },
+        {
+          "flow": "10.0.0.1:7 -> 10.0.0.2:40006",
+          "protocol": "TCP",
+          "packets": 0,
+          "bytes": 40
+        },
+        {
+          "flow": "10.0.0.1:8 -> 10.0.0.2:40007",
+          "protocol": "TCP",
+          "packets": 0,
+          "bytes": 40
+        },
+        {
+          "flow": "10.0.0.1:9 -> 10.0.0.2:40008",
+          "protocol": "TCP",
+          "packets": 0,
+          "bytes": 40
+        },
+        {
+          "flow": "10.0.0.1:10 -> 10.0.0.2:40009",
+          "protocol": "TCP",
+          "packets": 0,
+          "bytes": 40
+        }
+      ]
+    },
+    "protocol_distribution": {
+      "TCP": 50
+    },
+    "top_talkers": [
+      {
+        "flow": "10.0.0.1:1 -> 10.0.0.2:40000",
+        "protocol": "TCP",
+        "packets": 0,
+        "bytes": 40
+      },
+      {
+        "flow": "10.0.0.1:2 -> 10.0.0.2:40001",
+        "protocol": "TCP",
+        "packets": 0,
+        "bytes": 40
+      },
+      {
+        "flow": "10.0.0.1:3 -> 10.0.0.2:40002",
+        "protocol": "TCP",
+        "packets": 0,
+        "bytes": 40
+      },
+      {
+        "flow": "10.0.0.1:4 -> 10.0.0.2:40003",
+        "protocol": "TCP",
+        "packets": 0,
+        "bytes": 40
+      },
+      {
+        "flow": "10.0.0.1:5 -> 10.0.0.2:40004",
+        "protocol": "TCP",
+        "packets": 0,
+        "bytes": 40
+      },
+      {
+        "flow": "10.0.0.1:6 -> 10.0.0.2:40005",
+        "protocol": "TCP",
+        "packets": 0,
+        "bytes": 40
+      },
+      {
+        "flow": "10.0.0.1:7 -> 10.0.0.2:40006",
+        "protocol": "TCP",
+        "packets": 0,
+        "bytes": 40
+      },
+      {
+        "flow": "10.0.0.1:8 -> 10.0.0.2:40007",
+        "protocol": "TCP",
+        "packets": 0,
+        "bytes": 40
+      },
+      {
+        "flow": "10.0.0.1:9 -> 10.0.0.2:40008",
+        "protocol": "TCP",
+        "packets": 0,
+        "bytes": 40
+      },
+      {
+        "flow": "10.0.0.1:10 -> 10.0.0.2:40009",
+        "protocol": "TCP",
+        "packets": 0,
+        "bytes": 40
+      }
+    ],
+    "anomaly_detection": {
+      "total_alerts": 1,
+      "alerts": [
+        {
+          "type": "PORT_SCAN_SUSPECTED",
+          "severity": "MEDIUM",
+          "src_ip": "10.0.0.2",
+          "unique_ports_scanned": 50,
+          "sample_ports": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20
+          ],
+          "detector": "port-scan-distinct-ports",
+          "rule_threshold": {
+            "port_scan_min_ports": 15
+          },
+          "time_window": "2023-11-15 06:13:20.000 ~ 2023-11-15 06:14:18.800",
+          "description": "源IP 10.0.0.2 访问了 50 个不同端口，疑似端口扫描"
+        }
+      ],
+      "severity_summary": {
+        "CRITICAL": 0,
+        "HIGH": 0,
+        "MEDIUM": 1,
+        "LOW": 0
+      }
+    },
+    "window_series": null,
+    "baseline_profile": null,
+    "baseline_drift": null,
+    "ml_profile": null,
+    "streaming": true
+  },
+  "evidence": {
+    "source_file": "upload_20260910_000755_portscan.pcap",
+    "source_sha256": "06e91d6969a0d88b2cb1d2cc04c5af20a86615f0566d388a2a2e9bcd728cb5d8",
+    "analyzed_at": "20260910_000755",
+    "rule_version": "2.0.0"
+  },
+  "report_html": "C:\\Users\\Curry\\Desktop\\项目一\\ai-network-security-analyzer\\data\\reports\\report_ASE-20260910-000755.html",
+  "file_size": "2.8 KB",
+  "filename": "portscan.pcap"
+}

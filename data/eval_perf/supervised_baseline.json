@@ -1,0 +1,37 @@
+{
+  "method": "HistGradientBoosting（监督）80/20 分层",
+  "n_flows": 447915,
+  "n_features": 76,
+  "binary": {
+    "precision": 0.9351,
+    "recall": 0.9628,
+    "f1": 0.9487,
+    "accuracy": 0.9792,
+    "tp": 17250,
+    "fp": 1197,
+    "fn": 667,
+    "tn": 70469
+  },
+  "per_category_recall": {
+    "Benign": 0.9833,
+    "Analysis": 0.2597,
+    "Backdoor": 0.4,
+    "DoS": 0.1678,
+    "Exploits": 0.73,
+    "Fuzzers": 0.8867,
+    "Generic": 0.5696,
+    "Reconnaissance": 0.6546,
+    "Shellcode": 0.2405,
+    "Worms": 0.3061
+  },
+  "macro_recall_attack": 0.4683,
+  "baseline_unsupervised": {
+    "isolation_forest_76d": {
+      "tpr": 0.506,
+      "f1": 0.531
+    },
+    "source": "data/eval_cicids/result_unsw_cic.json 流级76维"
+  },
+  "comparison_note": "监督模型为参照系：证明数据可学习性上界；产品定位为无监督冷启动（无标注也可用）",
+  "runtime_sec": 12.8
+}

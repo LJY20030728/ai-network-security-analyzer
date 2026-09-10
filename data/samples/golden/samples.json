@@ -1,0 +1,32 @@
+{
+  "normal": {
+    "description": "正常流量（HTTP+DNS+UDP）",
+    "packets": 1480,
+    "file": "data/samples/golden\\normal.pcap"
+  },
+  "synflood": {
+    "description": "SYN Flood 攻击",
+    "packets": 200,
+    "file": "data/samples/golden\\synflood.pcap"
+  },
+  "portscan": {
+    "description": "端口扫描",
+    "packets": 50,
+    "file": "data/samples/golden\\portscan.pcap"
+  },
+  "dnstunnel": {
+    "description": "DNS 隧道",
+    "packets": 10,
+    "file": "data/samples/golden\\dnstunnel.pcap"
+  },
+  "largeflow": {
+    "description": "异常大流量",
+    "packets": 8239,
+    "file": "data/samples/golden\\largeflow.pcap"
+  },
+  "rststorm": {
+    "description": "RST 风暴",
+    "packets": 80,
+    "file": "data/samples/golden\\rststorm.pcap"
+  }
+}

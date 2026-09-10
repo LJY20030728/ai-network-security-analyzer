@@ -1,0 +1,60 @@
+{
+  "status": "success",
+  "packet_count": 10,
+  "analysis_report": {
+    "summary": {
+      "total_packets": 10,
+      "total_flows": 0,
+      "time_range": {
+        "start": "2023-11-15 06:13:20.000",
+        "end": "2023-11-15 06:13:38.000"
+      },
+      "total_bytes": 1000
+    },
+    "flow_stats": {
+      "total_flows": 0,
+      "top_flows": []
+    },
+    "protocol_distribution": {
+      "DNS": 10
+    },
+    "top_talkers": [],
+    "anomaly_detection": {
+      "total_alerts": 1,
+      "alerts": [
+        {
+          "type": "DNS_TUNNEL_SUSPECTED",
+          "severity": "MEDIUM",
+          "src_ip": "10.0.0.2",
+          "suspicious_query_count": 10,
+          "detector": "dns-tunnel-query-length",
+          "rule_threshold": {
+            "dns_tunnel_max_query_len": 30
+          },
+          "time_window": "2023-11-15 06:13:20.000 ~ 2023-11-15 06:13:38.000",
+          "description": "源IP 10.0.0.2 发送了 10 个超长DNS查询（>30字符），疑似DNS隧道"
+        }
+      ],
+      "severity_summary": {
+        "CRITICAL": 0,
+        "HIGH": 0,
+        "MEDIUM": 1,
+        "LOW": 0
+      }
+    },
+    "window_series": null,
+    "baseline_profile": null,
+    "baseline_drift": null,
+    "ml_profile": null,
+    "streaming": true
+  },
+  "evidence": {
+    "source_file": "upload_20260909_210624_dnstunnel.pcap",
+    "source_sha256": "53a815f158642e42a34dd9ddbbdd43a96603932f3d4462edf758be7c4a81f6a2",
+    "analyzed_at": "20260909_210624",
+    "rule_version": "2.0.0"
+  },
+  "report_html": "C:\\Users\\Curry\\Desktop\\项目一\\ai-network-security-analyzer\\data\\reports\\report_ASE-20260909-210624.html",
+  "file_size": "1.2 KB",
+  "filename": "dnstunnel.pcap"
+}

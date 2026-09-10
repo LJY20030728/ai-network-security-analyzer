@@ -1,0 +1,184 @@
+{
+  "dataset": "CIC-UNSW-NB15（UNSW-NB15 底层流量的 CICFlowMeter 重提取版）",
+  "flows_total": 447915,
+  "label_distribution": {
+    "Exploits": 30951,
+    "Reconnaissance": 16735,
+    "DoS": 4467,
+    "Generic": 4632,
+    "Benign": 358332,
+    "Shellcode": 2102,
+    "Fuzzers": 29613,
+    "Worms": 246,
+    "Backdoor": 452,
+    "Analysis": 385
+  },
+  "synthetic_time_axis": "行序 × 0.5s（无时间戳，声明为合成）",
+  "flow_level_ml": {
+    "mode": "flow_level_76dim",
+    "feature_dim": 76,
+    "train_normal_flows": 358332,
+    "total_flows": 447915,
+    "tp": 45312,
+    "fp": 35803,
+    "fn": 44271,
+    "tn": 322529,
+    "tpr": 0.5058,
+    "fpr": 0.0999,
+    "precision": 0.5586,
+    "f1": 0.5309,
+    "score_threshold_percentile": "Normal 训练分位 10%（=contamination 0.10）",
+    "mean_score_normal": -0.4062,
+    "mean_score_attack": -0.5103,
+    "coverage_by_attack_cat": {
+      "Benign": {
+        "flows": 358332,
+        "false_positive_rate": 0.0999
+      },
+      "Analysis": {
+        "flows": 385,
+        "detect_rate": 0.8286,
+        "detected": 319
+      },
+      "Backdoor": {
+        "flows": 452,
+        "detect_rate": 0.3827,
+        "detected": 173
+      },
+      "DoS": {
+        "flows": 4467,
+        "detect_rate": 0.518,
+        "detected": 2314
+      },
+      "Exploits": {
+        "flows": 30951,
+        "detect_rate": 0.6185,
+        "detected": 19142
+      },
+      "Fuzzers": {
+        "flows": 29613,
+        "detect_rate": 0.4601,
+        "detected": 13626
+      },
+      "Generic": {
+        "flows": 4632,
+        "detect_rate": 0.7703,
+        "detected": 3568
+      },
+      "Reconnaissance": {
+        "flows": 16735,
+        "detect_rate": 0.3124,
+        "detected": 5228
+      },
+      "Shellcode": {
+        "flows": 2102,
+        "detect_rate": 0.3972,
+        "detected": 835
+      },
+      "Worms": {
+        "flows": 246,
+        "detect_rate": 0.435,
+        "detected": 107
+      }
+    },
+    "note": "复用产品 ML 配置（IsolationForest, contamination=0.10, seed=42）；仅 Normal 流训练（无监督）；76 维原始特征"
+  },
+  "rule_large_flow": {
+    "threshold_mb": 10.0,
+    "tp": 40,
+    "fp": 0,
+    "fn": 89543,
+    "precision": 1.0,
+    "recall": 0.0004,
+    "f1": 0.0009
+  },
+  "baseline": {
+    "windows_total": 22396,
+    "sigma_points": [
+      {
+        "sigma": 2.0,
+        "fpr": 0.4999,
+        "tpr": 0.5007
+      },
+      {
+        "sigma": 2.5,
+        "fpr": 0.4955,
+        "tpr": 0.4899
+      },
+      {
+        "sigma": 3.0,
+        "fpr": 0.4912,
+        "tpr": 0.4862
+      },
+      {
+        "sigma": 3.5,
+        "fpr": 0.4896,
+        "tpr": 0.4832
+      },
+      {
+        "sigma": 4.0,
+        "fpr": 0.4868,
+        "tpr": 0.4812
+      }
+    ],
+    "metrics_by_sigma": {
+      "2.0": {
+        "tp": 7244,
+        "fp": 3963,
+        "fn": 7225,
+        "tn": 3964,
+        "precision": 0.6464,
+        "recall": 0.5007,
+        "f1": 0.5643
+      },
+      "2.5": {
+        "tp": 7088,
+        "fp": 3928,
+        "fn": 7381,
+        "tn": 3999,
+        "precision": 0.6434,
+        "recall": 0.4899,
+        "f1": 0.5562
+      },
+      "3.0": {
+        "tp": 7035,
+        "fp": 3894,
+        "fn": 7434,
+        "tn": 4033,
+        "precision": 0.6437,
+        "recall": 0.4862,
+        "f1": 0.554
+      },
+      "3.5": {
+        "tp": 6991,
+        "fp": 3881,
+        "fn": 7478,
+        "tn": 4046,
+        "precision": 0.643,
+        "recall": 0.4832,
+        "f1": 0.5518
+      },
+      "4.0": {
+        "tp": 6963,
+        "fp": 3859,
+        "fn": 7506,
+        "tn": 4068,
+        "precision": 0.6434,
+        "recall": 0.4812,
+        "f1": 0.5506
+      }
+    },
+    "note": "合成时间轴（行序×0.5s）；CIC 版无 SYN/端口列 → syn/dports=0"
+  },
+  "window_level_ml": {
+    "tp": 1739,
+    "fp": 791,
+    "fn": 12730,
+    "tn": 7136,
+    "tpr": 0.1202,
+    "fpr": 0.0998,
+    "precision": 0.6874,
+    "f1": 0.2046,
+    "mode": "window_level_4dim_product_interface"
+  }
+}

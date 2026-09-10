@@ -1,0 +1,336 @@
+/* ============================================================
+   P2-6: AI Network Security Analyzer 自定义样式
+   蓝色二次元风格统一配色
+   ============================================================ */
+
+/* ===== 全局变量 ===== */
+:root {
+    --primary-blue: #2563eb;
+    --primary-light: #60a5fa;
+    --primary-dark: #1d4ed8;
+    --accent-cyan: #06b6d4;
+    --accent-purple: #8b5cf6;
+    --bg-gradient-start: #f0f7ff;
+    --bg-gradient-end: #e0ecff;
+    --card-bg: rgba(255, 255, 255, 0.85);
+    --card-border: #bfdbfe;
+    --text-primary: #1e293b;
+    --text-secondary: #64748b;
+    --success-green: #10b981;
+    --warning-amber: #f59e0b;
+    --danger-red: #ef4444;
+    --critical-red: #dc2626;
+    --radius-lg: 16px;
+    --radius-md: 12px;
+    --radius-sm: 8px;
+    --shadow-soft: 0 4px 20px rgba(37, 99, 235, 0.1);
+    --shadow-hover: 0 8px 30px rgba(37, 99, 235, 0.15);
+}
+
+/* ===== 全局背景 ===== */
+body {
+    background: linear-gradient(135deg, var(--bg-gradient-start) 0%, var(--bg-gradient-end) 100%) !important;
+    background-attachment: fixed !important;
+    font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif !important;
+    color: var(--text-primary) !important;
+}
+
+/* ===== 主容器 ===== */
+.gradio-container {
+    max-width: 1400px !important;
+    margin: 0 auto !important;
+    padding: 20px !important;
+}
+
+/* ===== 标题样式 ===== */
+h1, h2, h3 {
+    color: var(--primary-dark) !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.5px;
+}
+
+h1 {
+    font-size: 28px !important;
+    background: linear-gradient(135deg, var(--primary-blue), var(--accent-cyan));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+/* ===== 卡片/面板样式 ===== */
+.gr-box, .gr-panel, .gr-form {
+    background: var(--card-bg) !important;
+    border: 1px solid var(--card-border) !important;
+    border-radius: var(--radius-lg) !important;
+    box-shadow: var(--shadow-soft) !important;
+    backdrop-filter: blur(10px);
+    transition: all 0.3s ease;
+}
+
+.gr-box:hover, .gr-panel:hover {
+    box-shadow: var(--shadow-hover) !important;
+    transform: translateY(-2px);
+}
+
+/* ===== 按钮样式 ===== */
+.gr-button {
+    background: linear-gradient(135deg, var(--primary-blue), var(--primary-dark)) !important;
+    color: white !important;
+    border: none !important;
+    border-radius: var(--radius-md) !important;
+    padding: 12px 24px !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.5px;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 15px rgba(37, 99, 235, 0.3);
+}
+
+.gr-button:hover {
+    background: linear-gradient(135deg, var(--primary-light), var(--primary-blue)) !important;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(37, 99, 235, 0.4);
+}
+
+.gr-button:active {
+    transform: translateY(0);
+}
+
+/* 次要按钮 */
+.gr-button-secondary {
+    background: white !important;
+    color: var(--primary-blue) !important;
+    border: 2px solid var(--primary-blue) !important;
+}
+
+.gr-button-secondary:hover {
+    background: var(--bg-gradient-start) !important;
+}
+
+/* ===== 输入框样式 ===== */
+.gr-textbox input, .gr-textbox textarea,
+.gr-number input, .gr-dropdown select {
+    border: 2px solid var(--card-border) !important;
+    border-radius: var(--radius-sm) !important;
+    padding: 10px 14px !important;
+    transition: all 0.3s ease;
+    background: white !important;
+}
+
+.gr-textbox input:focus, .gr-textbox textarea:focus,
+.gr-number input:focus, .gr-dropdown select:focus {
+    border-color: var(--primary-blue) !important;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1) !important;
+    outline: none;
+}
+
+/* ===== Tab 样式 ===== */
+.gr-tab-nav button {
+    background: transparent !important;
+    color: var(--text-secondary) !important;
+    border: none !important;
+    border-bottom: 3px solid transparent !important;
+    border-radius: 0 !important;
+    padding: 12px 20px !important;
+    font-weight: 500 !important;
+    transition: all 0.3s ease;
+}
+
+.gr-tab-nav button:hover {
+    color: var(--primary-blue) !important;
+    background: rgba(37, 99, 235, 0.05) !important;
+}
+
+.gr-tab-nav button.selected {
+    color: var(--primary-blue) !important;
+    border-bottom-color: var(--primary-blue) !important;
+    font-weight: 600 !important;
+}
+
+/* ===== 表格样式 ===== */
+.gr-table table {
+    border-collapse: collapse !important;
+    width: 100% !important;
+    border-radius: var(--radius-md) !important;
+    overflow: hidden;
+}
+
+.gr-table th {
+    background: linear-gradient(135deg, var(--primary-blue), var(--primary-dark)) !important;
+    color: white !important;
+    padding: 12px 16px !important;
+    font-weight: 600 !important;
+    text-align: left;
+}
+
+.gr-table td {
+    padding: 10px 16px !important;
+    border-bottom: 1px solid var(--card-border) !important;
+}
+
+.gr-table tr:nth-child(even) {
+    background: rgba(37, 99, 235, 0.03) !important;
+}
+
+.gr-table tr:hover {
+    background: rgba(37, 99, 235, 0.08) !important;
+}
+
+/* ===== 严重度标签 ===== */
+.severity-critical {
+    background: var(--critical-red) !important;
+    color: white !important;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-weight: 600;
+    font-size: 12px;
+}
+
+.severity-high {
+    background: var(--danger-red) !important;
+    color: white !important;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-weight: 600;
+    font-size: 12px;
+}
+
+.severity-medium {
+    background: var(--warning-amber) !important;
+    color: white !important;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-weight: 600;
+    font-size: 12px;
+}
+
+.severity-low {
+    background: var(--success-green) !important;
+    color: white !important;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-weight: 600;
+    font-size: 12px;
+}
+
+/* ===== 状态指示器 ===== */
+.status-dot {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    margin-right: 8px;
+    animation: pulse 2s infinite;
+}
+
+.status-dot.success { background: var(--success-green); }
+.status-dot.warning { background: var(--warning-amber); }
+.status-dot.error { background: var(--danger-red); }
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.7; transform: scale(1.1); }
+}
+
+/* ===== 进度条 ===== */
+.gr-progress {
+    background: var(--card-border) !important;
+    border-radius: 10px !important;
+    overflow: hidden;
+    height: 12px !important;
+}
+
+.gr-progress > div {
+    background: linear-gradient(90deg, var(--primary-blue), var(--accent-cyan)) !important;
+    border-radius: 10px !important;
+    height: 100% !important;
+    transition: width 0.5s ease;
+}
+
+/* ===== Markdown 内容 ===== */
+.gr-markdown {
+    line-height: 1.8 !important;
+}
+
+.gr-markdown code {
+    background: rgba(37, 99, 235, 0.1) !important;
+    color: var(--primary-dark) !important;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-family: 'Consolas', 'Monaco', monospace;
+}
+
+.gr-markdown pre {
+    background: #1e293b !important;
+    color: #e2e8f0 !important;
+    padding: 16px;
+    border-radius: var(--radius-md);
+    overflow-x: auto;
+}
+
+/* ===== 滚动条美化 ===== */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--bg-gradient-start);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--primary-light);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--primary-blue);
+}
+
+/* ===== 加载动画 ===== */
+.gr-loading {
+    border-color: var(--primary-blue) !important;
+}
+
+/* ===== 响应式适配 ===== */
+@media (max-width: 768px) {
+    .gradio-container {
+        padding: 10px !important;
+    }
+
+    h1 {
+        font-size: 22px !important;
+    }
+
+    .gr-button {
+        padding: 10px 16px !important;
+        font-size: 14px !important;
+    }
+}
+
+/* ===== 二次元装饰元素 ===== */
+.anime-corner {
+    position: relative;
+}
+
+.anime-corner::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 60px;
+    height: 60px;
+    background: linear-gradient(135deg, transparent 50%, rgba(37, 99, 235, 0.1) 50%);
+    border-radius: 0 var(--radius-lg) 0 var(--radius-lg);
+    pointer-events: none;
+}
+
+/* ===== 数据高亮 ===== */
+.highlight-number {
+    font-size: 24px;
+    font-weight: 700;
+    background: linear-gradient(135deg, var(--primary-blue), var(--accent-cyan));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}

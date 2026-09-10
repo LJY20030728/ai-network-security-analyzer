@@ -1,0 +1,67 @@
+name: CI
+
+# 持续集成 / 持续交付流水线
+# - test:  每次 push 自动跑 105 个测试（质量门禁，失败则红叉拦截）
+# - build: 测试通过后自动 PyInstaller 打包 + Inno Setup 生成安装包
+# 手动触发：仓库 Actions 页 → "Run workflow"
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: 测试 · Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: 安装依赖
+        run: pip install -r requirements.txt
+      - name: 运行测试（105 用例全绿为通过标准）
+        run: pytest tests -q
+
+  build:
+    name: 打包 · PyInstaller + Inno Setup
+    runs-on: windows-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: 创建 venv 并安装依赖（含 PyInstaller）
+        shell: cmd
+        run: |
+          python -m venv venv
+          venv\Scripts\python.exe -m pip install --upgrade pip
+          venv\Scripts\python.exe -m pip install -r requirements.txt pyinstaller
+      - name: 下载 BGE ONNX Embedding 模型（~91MB，打包必需）
+        shell: cmd
+        run: |
+          if not exist models\bge-small-zh-v1.5 mkdir models\bge-small-zh-v1.5
+          curl -L -o models\bge-small-zh-v1.5\model.onnx "https://hf-mirror.com/Xenova/bge-small-zh-v1.5/resolve/main/onnx/model.onnx"
+          curl -L -o models\bge-small-zh-v1.5\tokenizer.json "https://hf-mirror.com/Xenova/bge-small-zh-v1.5/resolve/main/tokenizer.json"
+      - name: PyInstaller 打包（约 10-30 分钟）
+        shell: cmd
+        run: build_exe.bat < nul
+      - name: 安装 Inno Setup 6
+        run: choco install innosetup -y --no-progress
+      - name: 生成安装包
+        shell: cmd
+        run: 制作安装程序.bat < nul
+      - name: 上传安装包（14 天可下载）
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI网络安全智能分析系统-Setup
+          path: installer_output/*.exe
+          retention-days: 14

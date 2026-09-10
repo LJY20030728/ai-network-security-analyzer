@@ -1,0 +1,183 @@
+{
+  "status": "success",
+  "packet_count": 200,
+  "analysis_report": {
+    "summary": {
+      "total_packets": 200,
+      "total_flows": 198,
+      "time_range": {
+        "start": "2023-11-15 06:13:20.000",
+        "end": "2023-11-15 06:14:19.700"
+      },
+      "total_bytes": 8000
+    },
+    "flow_stats": {
+      "total_flows": 198,
+      "top_flows": [
+        {
+          "flow": "10.0.0.1:80 -> 10.0.0.2:11040",
+          "protocol": "TCP",
+          "packets": 0,
+          "bytes": 80
+        },
+        {
+          "flow": "10.0.0.1:80 -> 10.0.0.2:8355",
+          "protocol": "TCP",
+          "packets": 0,
+          "bytes": 80
+        },
+        {
+          "flow": "10.0.0.1:80 -> 10.0.0.2:25284",
+          "protocol": "TCP",
+          "packets": 0,
+          "bytes": 40
+        },
+        {
+          "flow": "10.0.0.1:80 -> 10.0.0.2:14754",
+          "protocol": "TCP",
+          "packets": 0,
+          "bytes": 40
+        },
+        {
+          "flow": "10.0.0.1:80 -> 10.0.0.2:47018",
+          "protocol": "TCP",
+          "packets": 0,
+          "bytes": 40
+        },
+        {
+          "flow": "10.0.0.1:80 -> 10.0.0.2:40944",
+          "protocol": "TCP",
+          "packets": 0,
+          "bytes": 40
+        },
+        {
+          "flow": "10.0.0.1:80 -> 10.0.0.2:36029",
+          "protocol": "TCP",
+          "packets": 0,
+          "bytes": 40
+        },
+        {
+          "flow": "10.0.0.1:80 -> 10.0.0.2:11732",
+          "protocol": "TCP",
+          "packets": 0,
+          "bytes": 40
+        },
+        {
+          "flow": "10.0.0.1:80 -> 10.0.0.2:25891",
+          "protocol": "TCP",
+          "packets": 0,
+          "bytes": 40
+        },
+        {
+          "flow": "10.0.0.1:80 -> 10.0.0.2:61670",
+          "protocol": "TCP",
+          "packets": 0,
+          "bytes": 40
+        }
+      ]
+    },
+    "protocol_distribution": {
+      "TCP": 200
+    },
+    "top_talkers": [
+      {
+        "flow": "10.0.0.1:80 -> 10.0.0.2:11040",
+        "protocol": "TCP",
+        "packets": 0,
+        "bytes": 80
+      },
+      {
+        "flow": "10.0.0.1:80 -> 10.0.0.2:8355",
+        "protocol": "TCP",
+        "packets": 0,
+        "bytes": 80
+      },
+      {
+        "flow": "10.0.0.1:80 -> 10.0.0.2:25284",
+        "protocol": "TCP",
+        "packets": 0,
+        "bytes": 40
+      },
+      {
+        "flow": "10.0.0.1:80 -> 10.0.0.2:14754",
+        "protocol": "TCP",
+        "packets": 0,
+        "bytes": 40
+      },
+      {
+        "flow": "10.0.0.1:80 -> 10.0.0.2:47018",
+        "protocol": "TCP",
+        "packets": 0,
+        "bytes": 40
+      },
+      {
+        "flow": "10.0.0.1:80 -> 10.0.0.2:40944",
+        "protocol": "TCP",
+        "packets": 0,
+        "bytes": 40
+      },
+      {
+        "flow": "10.0.0.1:80 -> 10.0.0.2:36029",
+        "protocol": "TCP",
+        "packets": 0,
+        "bytes": 40
+      },
+      {
+        "flow": "10.0.0.1:80 -> 10.0.0.2:11732",
+        "protocol": "TCP",
+        "packets": 0,
+        "bytes": 40
+      },
+      {
+        "flow": "10.0.0.1:80 -> 10.0.0.2:25891",
+        "protocol": "TCP",
+        "packets": 0,
+        "bytes": 40
+      },
+      {
+        "flow": "10.0.0.1:80 -> 10.0.0.2:61670",
+        "protocol": "TCP",
+        "packets": 0,
+        "bytes": 40
+      }
+    ],
+    "anomaly_detection": {
+      "total_alerts": 1,
+      "alerts": [
+        {
+          "type": "SYN_FLOOD_SUSPECTED",
+          "severity": "MEDIUM",
+          "src_ip": "10.0.0.2",
+          "syn_count": 200,
+          "syn_ack_received": 0,
+          "unanswered_syn": 200,
+          "detector": "syn-flood-rate",
+          "rule_threshold": {
+            "syn_flood_min_count": 80
+          },
+          "time_window": "2023-11-15 06:13:20.000 ~ 2023-11-15 06:14:19.700",
+          "description": "源IP 10.0.0.2 发出 200 个SYN，仅收到 0 个SYN-ACK，未完成握手 200 个，疑似SYN洪水攻击"
+        }
+      ],
+      "severity_summary": {
+        "CRITICAL": 0,
+        "HIGH": 0,
+        "MEDIUM": 1,
+        "LOW": 0
+      }
+    },
+    "baseline_profile": null,
+    "baseline_drift": null,
+    "ml_profile": null,
+    "streaming": true
+  },
+  "evidence": {
+    "source_file": "upload_20260909_002347_synflood.pcap",
+    "source_sha256": "f9602f6f4f3d775e7fad1226afb6aa21a35aa0d4fadeeea4d6abf52e0b2c0246",
+    "analyzed_at": "20260909_002347",
+    "rule_version": "2.0.0"
+  },
+  "report_html": "C:\\Users\\Curry\\Desktop\\项目一\\ai-network-security-analyzer\\data\\reports\\report_ASE-20260909-002347.html",
+  "file_size": "11.0 KB",
+  "filename": "synflood.pcap"
+}

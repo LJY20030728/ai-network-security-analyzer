@@ -1,0 +1,107 @@
+{
+  "window_sec": 1,
+  "train_windows": 197,
+  "fpr_test_windows": 50,
+  "attack_samples": 7,
+  "baseline": {
+    "engine": "ewma-median-mad",
+    "fpr": 0.0,
+    "tpr": 0.2857,
+    "per_sample": [
+      {
+        "sample": "synflood",
+        "windows": 60,
+        "anomaly_windows": 0,
+        "detected": false
+      },
+      {
+        "sample": "portscan",
+        "windows": 50,
+        "anomaly_windows": 0,
+        "detected": false
+      },
+      {
+        "sample": "dnstunnel",
+        "windows": 10,
+        "anomaly_windows": 0,
+        "detected": false
+      },
+      {
+        "sample": "largeflow",
+        "windows": 9,
+        "anomaly_windows": 18,
+        "detected": true
+      },
+      {
+        "sample": "rststorm",
+        "windows": 60,
+        "anomaly_windows": 0,
+        "detected": false
+      },
+      {
+        "sample": "burst",
+        "windows": 482,
+        "anomaly_windows": 184,
+        "detected": true
+      },
+      {
+        "sample": "lightscan",
+        "windows": 260,
+        "anomaly_windows": 0,
+        "detected": false
+      }
+    ]
+  },
+  "isolation_forest": {
+    "engine": "isolation-forest",
+    "fpr": 0.04,
+    "tpr": 0.8571,
+    "contamination": 0.1,
+    "score_threshold": 0.0,
+    "per_sample": [
+      {
+        "sample": "synflood",
+        "windows": 60,
+        "anomaly_windows": 60,
+        "detected": true
+      },
+      {
+        "sample": "portscan",
+        "windows": 50,
+        "anomaly_windows": 0,
+        "detected": false
+      },
+      {
+        "sample": "dnstunnel",
+        "windows": 10,
+        "anomaly_windows": 10,
+        "detected": true
+      },
+      {
+        "sample": "largeflow",
+        "windows": 9,
+        "anomaly_windows": 9,
+        "detected": true
+      },
+      {
+        "sample": "rststorm",
+        "windows": 60,
+        "anomaly_windows": 20,
+        "detected": true
+      },
+      {
+        "sample": "burst",
+        "windows": 482,
+        "anomaly_windows": 252,
+        "detected": true
+      },
+      {
+        "sample": "lightscan",
+        "windows": 260,
+        "anomaly_windows": 13,
+        "detected": true
+      }
+    ]
+  },
+  "conclusion": "同输入同口径对比：孤立森林与统计基线互补。统计基线捕捉单维幅值突变；孤立森林捕捉多维耦合异常。两引擎告警并集可提升覆盖，代价是 FPR 叠加（需调 contamination）。"
+}

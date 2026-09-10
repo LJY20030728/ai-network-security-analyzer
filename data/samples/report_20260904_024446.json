@@ -1,0 +1,278 @@
+{
+  "status": "success",
+  "packet_count": 50,
+  "analysis_report": {
+    "summary": {
+      "total_packets": 50,
+      "total_flows": 50,
+      "time_range": {
+        "start": "2023-11-15 06:13:20.000",
+        "end": "2023-11-15 06:14:18.800"
+      },
+      "total_bytes": 2000
+    },
+    "flow_stats": {
+      "total_flows": 50,
+      "total_packets": 50,
+      "total_bytes": 2000,
+      "total_payload_bytes": 0,
+      "protocol_distribution": {
+        "TCP": 50
+      },
+      "avg_packets_per_flow": 1.0,
+      "avg_bytes_per_flow": 40.0,
+      "max_flow_bytes": 40,
+      "max_flow_packets": 1,
+      "unique_src_ips": 1,
+      "unique_dst_ips": 1,
+      "unique_src_ports": 50,
+      "unique_dst_ports": 50,
+      "top_5_ports": {
+        "40000": 1,
+        "40001": 1,
+        "40002": 1,
+        "40003": 1,
+        "40004": 1
+      }
+    },
+    "protocol_distribution": {
+      "TCP": 50
+    },
+    "top_talkers": [
+      {
+        "flow": "10.0.0.1:1 -> 10.0.0.2:40000",
+        "protocol": "TCP",
+        "packets": 1,
+        "bytes": 40
+      },
+      {
+        "flow": "10.0.0.1:2 -> 10.0.0.2:40001",
+        "protocol": "TCP",
+        "packets": 1,
+        "bytes": 40
+      },
+      {
+        "flow": "10.0.0.1:3 -> 10.0.0.2:40002",
+        "protocol": "TCP",
+        "packets": 1,
+        "bytes": 40
+      },
+      {
+        "flow": "10.0.0.1:4 -> 10.0.0.2:40003",
+        "protocol": "TCP",
+        "packets": 1,
+        "bytes": 40
+      },
+      {
+        "flow": "10.0.0.1:5 -> 10.0.0.2:40004",
+        "protocol": "TCP",
+        "packets": 1,
+        "bytes": 40
+      },
+      {
+        "flow": "10.0.0.1:6 -> 10.0.0.2:40005",
+        "protocol": "TCP",
+        "packets": 1,
+        "bytes": 40
+      },
+      {
+        "flow": "10.0.0.1:7 -> 10.0.0.2:40006",
+        "protocol": "TCP",
+        "packets": 1,
+        "bytes": 40
+      },
+      {
+        "flow": "10.0.0.1:8 -> 10.0.0.2:40007",
+        "protocol": "TCP",
+        "packets": 1,
+        "bytes": 40
+      },
+      {
+        "flow": "10.0.0.1:9 -> 10.0.0.2:40008",
+        "protocol": "TCP",
+        "packets": 1,
+        "bytes": 40
+      },
+      {
+        "flow": "10.0.0.1:10 -> 10.0.0.2:40009",
+        "protocol": "TCP",
+        "packets": 1,
+        "bytes": 40
+      }
+    ],
+    "anomaly_detection": {
+      "total_alerts": 7,
+      "alerts": [
+        {
+          "type": "PORT_SCAN_SUSPECTED",
+          "severity": "MEDIUM",
+          "src_ip": "10.0.0.2",
+          "unique_ports_scanned": 50,
+          "sample_ports": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20
+          ],
+          "detector": "port-scan-distinct-ports",
+          "rule_threshold": {
+            "port_scan_min_ports": 20
+          },
+          "time_window": "2023-11-15 06:13:20.000 ~ 2023-11-15 06:14:18.800",
+          "description": "源IP 10.0.0.2 访问了 50 个不同端口，疑似端口扫描"
+        },
+        {
+          "type": "BASELINE_DEVIATION",
+          "severity": "MEDIUM",
+          "src_ip": "",
+          "dimension": "window_syn",
+          "dimension_label": "窗口SYN数",
+          "value": 9.0,
+          "baseline_median": 1.0,
+          "z_score": 5.4,
+          "window_index": 0,
+          "detector": "ewma-statistical-baseline",
+          "description": "时序基线偏差：窗口SYN数=9.0，基线中位数=1.0，z-score=5.4（阈值 3.0σ）"
+        },
+        {
+          "type": "BASELINE_DEVIATION",
+          "severity": "MEDIUM",
+          "src_ip": "",
+          "dimension": "window_syn",
+          "dimension_label": "窗口SYN数",
+          "value": 9.0,
+          "baseline_median": 1.0,
+          "z_score": 5.4,
+          "window_index": 3,
+          "detector": "ewma-statistical-baseline",
+          "description": "时序基线偏差：窗口SYN数=9.0，基线中位数=1.0，z-score=5.4（阈值 3.0σ）"
+        },
+        {
+          "type": "BASELINE_DEVIATION",
+          "severity": "MEDIUM",
+          "src_ip": "",
+          "dimension": "window_syn",
+          "dimension_label": "窗口SYN数",
+          "value": 8.0,
+          "baseline_median": 1.0,
+          "z_score": 4.72,
+          "window_index": 1,
+          "detector": "ewma-statistical-baseline",
+          "description": "时序基线偏差：窗口SYN数=8.0，基线中位数=1.0，z-score=4.72（阈值 3.0σ）"
+        },
+        {
+          "type": "BASELINE_DEVIATION",
+          "severity": "MEDIUM",
+          "src_ip": "",
+          "dimension": "window_dports",
+          "dimension_label": "窗口目的端口数",
+          "value": 9.0,
+          "baseline_median": 2.0,
+          "z_score": 4.72,
+          "window_index": 0,
+          "detector": "ewma-statistical-baseline",
+          "description": "时序基线偏差：窗口目的端口数=9.0，基线中位数=2.0，z-score=4.72（阈值 3.0σ）"
+        },
+        {
+          "type": "BASELINE_DEVIATION",
+          "severity": "MEDIUM",
+          "src_ip": "",
+          "dimension": "window_dports",
+          "dimension_label": "窗口目的端口数",
+          "value": 9.0,
+          "baseline_median": 2.0,
+          "z_score": 4.72,
+          "window_index": 3,
+          "detector": "ewma-statistical-baseline",
+          "description": "时序基线偏差：窗口目的端口数=9.0，基线中位数=2.0，z-score=4.72（阈值 3.0σ）"
+        },
+        {
+          "type": "BASELINE_DEVIATION",
+          "severity": "MEDIUM",
+          "src_ip": "",
+          "dimension": "window_dports",
+          "dimension_label": "窗口目的端口数",
+          "value": 8.0,
+          "baseline_median": 2.0,
+          "z_score": 4.05,
+          "window_index": 1,
+          "detector": "ewma-statistical-baseline",
+          "description": "时序基线偏差：窗口目的端口数=8.0，基线中位数=2.0，z-score=4.05（阈值 3.0σ）"
+        }
+      ],
+      "severity_summary": {
+        "CRITICAL": 0,
+        "HIGH": 0,
+        "MEDIUM": 7,
+        "LOW": 0
+      },
+      "baseline_deviations_added": 6
+    },
+    "baseline_profile": {
+      "name": "default",
+      "created_at": "2026-09-04 02:00:45",
+      "packets_used": 1480,
+      "alpha": 0.1,
+      "sigma": 3.0,
+      "window_sec": 10,
+      "learned": true,
+      "dimensions": [
+        "window_packets",
+        "window_bytes",
+        "window_syn",
+        "window_dports"
+      ],
+      "profile": {
+        "window_packets": {
+          "median": 7.0,
+          "mad": 2.1,
+          "raw_mad": 0.0,
+          "samples": 190
+        },
+        "window_bytes": {
+          "median": 499.0,
+          "mad": 249.5,
+          "raw_mad": 1.0,
+          "samples": 190
+        },
+        "window_syn": {
+          "median": 1.0,
+          "mad": 1.0,
+          "raw_mad": 0.0,
+          "samples": 190
+        },
+        "window_dports": {
+          "median": 2.0,
+          "mad": 1.0,
+          "raw_mad": 0.0,
+          "samples": 190
+        }
+      }
+    }
+  },
+  "evidence": {
+    "source_file": "upload_20260904_024446_portscan.pcap",
+    "source_sha256": "06e91d6969a0d88b2cb1d2cc04c5af20a86615f0566d388a2a2e9bcd728cb5d8",
+    "analyzed_at": "20260904_024446",
+    "rule_version": "2.0.0"
+  },
+  "report_html": "C:\\Users\\Curry\\Desktop\\项目一\\ai-network-security-analyzer\\data\\reports\\report_ASE-20260904-024446.html",
+  "file_size": "2.8 KB",
+  "filename": "portscan.pcap"
+}

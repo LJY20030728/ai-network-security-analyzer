@@ -1,0 +1,314 @@
+{
+  "experiment": "baseline_incremental_value",
+  "baseline_used": "data/baselines/default.json",
+  "seed": 42,
+  "results": {
+    "lightscan": {
+      "description": "轻度端口扫描（15端口<阈值20）",
+      "packets": 1495,
+      "rule_only_alerts": 0,
+      "dual_engine_alerts": 0,
+      "baseline_only_alerts": 0,
+      "baseline_alerts_detail": [],
+      "conclusion": "需人工复核"
+    },
+    "burst": {
+      "description": "流量突发（600请求/300s）",
+      "packets": 2080,
+      "rule_only_alerts": 0,
+      "dual_engine_alerts": 6,
+      "baseline_only_alerts": 6,
+      "baseline_alerts_detail": [
+        {
+          "severity": "HIGH",
+          "type": "BASELINE_DEVIATION",
+          "z_score": 8.67,
+          "value": 34.0,
+          "baseline_median": 7.0,
+          "dimension": "window_packets"
+        },
+        {
+          "severity": "HIGH",
+          "type": "BASELINE_DEVIATION",
+          "z_score": 8.67,
+          "value": 34.0,
+          "baseline_median": 7.0,
+          "dimension": "window_packets"
+        },
+        {
+          "severity": "HIGH",
+          "type": "BASELINE_DEVIATION",
+          "z_score": 8.35,
+          "value": 33.0,
+          "baseline_median": 7.0,
+          "dimension": "window_packets"
+        }
+      ],
+      "conclusion": "基线引擎检出纯规则漏检的轻度异常"
+    }
+  },
+  "headline": "低于规则阈值的轻度异常：纯规则检出 0 条，基线引擎通过行为突变检出",
+  "baseline_value": {
+    "experiment": "baseline_incremental_value",
+    "baseline_used": "data/baselines/default.json",
+    "seed": 42,
+    "results": {
+      "lightscan": {
+        "description": "轻度端口扫描（15端口<阈值20）",
+        "packets": 1495,
+        "rule_only_alerts": 0,
+        "dual_engine_alerts": 4,
+        "baseline_only_alerts": 4,
+        "baseline_alerts_detail": [
+          {
+            "severity": "HIGH",
+            "type": "BASELINE_DEVIATION",
+            "z_score": 6.07,
+            "value": 11.0,
+            "baseline_median": 2.0,
+            "dimension": "window_dports"
+          },
+          {
+            "severity": "MEDIUM",
+            "type": "BASELINE_DEVIATION",
+            "z_score": 5.4,
+            "value": 9.0,
+            "baseline_median": 1.0,
+            "dimension": "window_syn"
+          },
+          {
+            "severity": "MEDIUM",
+            "type": "BASELINE_DEVIATION",
+            "z_score": 4.72,
+            "value": 8.0,
+            "baseline_median": 1.0,
+            "dimension": "window_syn"
+          }
+        ],
+        "conclusion": "基线引擎检出纯规则漏检的轻度异常"
+      },
+      "burst": {
+        "description": "流量突发（600请求/300s）",
+        "packets": 2080,
+        "rule_only_alerts": 0,
+        "dual_engine_alerts": 6,
+        "baseline_only_alerts": 6,
+        "baseline_alerts_detail": [
+          {
+            "severity": "HIGH",
+            "type": "BASELINE_DEVIATION",
+            "z_score": 8.67,
+            "value": 34.0,
+            "baseline_median": 7.0,
+            "dimension": "window_packets"
+          },
+          {
+            "severity": "HIGH",
+            "type": "BASELINE_DEVIATION",
+            "z_score": 8.67,
+            "value": 34.0,
+            "baseline_median": 7.0,
+            "dimension": "window_packets"
+          },
+          {
+            "severity": "HIGH",
+            "type": "BASELINE_DEVIATION",
+            "z_score": 8.35,
+            "value": 33.0,
+            "baseline_median": 7.0,
+            "dimension": "window_packets"
+          }
+        ],
+        "conclusion": "基线引擎检出纯规则漏检的轻度异常"
+      }
+    },
+    "headline": "低于规则阈值的轻度异常：纯规则检出 0 条，基线引擎通过行为突变检出"
+  },
+  "evaluation": {
+    "rules_file_level": {
+      "tp": 5,
+      "fp": 0,
+      "tn": 1,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+    },
+    "baseline_self_test": {
+      "windows": 219,
+      "false_positive_windows": 0
+    },
+    "baseline_samples": [
+      {
+        "sample": "synflood",
+        "windows": 6,
+        "deviation_windows": 12,
+        "max_z": 22.34
+      },
+      {
+        "sample": "portscan",
+        "windows": 6,
+        "deviation_windows": 12,
+        "max_z": 5.47
+      },
+      {
+        "sample": "dnstunnel",
+        "windows": 2,
+        "deviation_windows": 0,
+        "max_z": 0
+      },
+      {
+        "sample": "largeflow",
+        "windows": 1,
+        "deviation_windows": 2,
+        "max_z": 34585.26
+      },
+      {
+        "sample": "rststorm",
+        "windows": 6,
+        "deviation_windows": 0,
+        "max_z": 0
+      },
+      {
+        "sample": "lightscan",
+        "windows": 219,
+        "deviation_windows": 4,
+        "max_z": 5.82
+      },
+      {
+        "sample": "burst",
+        "windows": 231,
+        "deviation_windows": 10,
+        "max_z": 7.1
+      }
+    ],
+    "sigma_roc_points": [
+      {
+        "sigma": 2.0,
+        "fpr": 0.0046,
+        "tpr": 0.8
+      },
+      {
+        "sigma": 2.5,
+        "fpr": 0.0,
+        "tpr": 0.6
+      },
+      {
+        "sigma": 3.0,
+        "fpr": 0.0,
+        "tpr": 0.6
+      },
+      {
+        "sigma": 3.5,
+        "fpr": 0.0,
+        "tpr": 0.6
+      },
+      {
+        "sigma": 4.0,
+        "fpr": 0.0,
+        "tpr": 0.6
+      }
+    ],
+    "rule_rows": [
+      {
+        "sample": "normal",
+        "packets": 1480,
+        "alerts": 0,
+        "types": [],
+        "expected": null,
+        "status": "TN(无告警)",
+        "alerted_ips": []
+      },
+      {
+        "sample": "synflood",
+        "packets": 200,
+        "alerts": 1,
+        "types": [
+          "SYN_FLOOD_SUSPECTED"
+        ],
+        "expected": "SYN_FLOOD_SUSPECTED",
+        "status": "TP(SYN_FLOOD_SUSPECTED)",
+        "alerted_ips": [
+          "10.0.0.2"
+        ]
+      },
+      {
+        "sample": "portscan",
+        "packets": 50,
+        "alerts": 1,
+        "types": [
+          "PORT_SCAN_SUSPECTED"
+        ],
+        "expected": "PORT_SCAN_SUSPECTED",
+        "status": "TP(PORT_SCAN_SUSPECTED)",
+        "alerted_ips": [
+          "10.0.0.2"
+        ]
+      },
+      {
+        "sample": "dnstunnel",
+        "packets": 10,
+        "alerts": 1,
+        "types": [
+          "DNS_TUNNEL_SUSPECTED"
+        ],
+        "expected": "DNS_TUNNEL_SUSPECTED",
+        "status": "TP(DNS_TUNNEL_SUSPECTED)",
+        "alerted_ips": [
+          "10.0.0.2"
+        ]
+      },
+      {
+        "sample": "largeflow",
+        "packets": 8239,
+        "alerts": 1,
+        "types": [
+          "LARGE_DATA_TRANSFER"
+        ],
+        "expected": "LARGE_DATA_TRANSFER",
+        "status": "TP(LARGE_DATA_TRANSFER)",
+        "alerted_ips": [
+          "10.0.0.1"
+        ]
+      },
+      {
+        "sample": "rststorm",
+        "packets": 80,
+        "alerts": 1,
+        "types": [
+          "RST_STORM"
+        ],
+        "expected": "RST_STORM",
+        "status": "TP(RST_STORM)",
+        "alerted_ips": [
+          "10.0.0.2"
+        ]
+      },
+      {
+        "sample": "lightscan",
+        "packets": 1495,
+        "alerts": 0,
+        "types": [],
+        "expected": "PORT_SCAN_SUSPECTED",
+        "status": "规则预期不触发(0条)",
+        "alerted_ips": []
+      },
+      {
+        "sample": "burst",
+        "packets": 2080,
+        "alerts": 0,
+        "types": [],
+        "expected": "BASELINE_DEVIATION",
+        "status": "规则预期不触发(0条)",
+        "alerted_ips": []
+      }
+    ],
+    "rag": {
+      "recall_at_1": 0.9375,
+      "recall_at_3": 0.9375,
+      "recall_at_5": 1.0,
+      "mrr_at_5": 0.95,
+      "golden_queries": 16
+    }
+  }
+}

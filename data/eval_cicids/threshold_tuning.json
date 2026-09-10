@@ -1,0 +1,198 @@
+{
+  "method": "网格搜索（数据驱动），UNSW-NB15 匿名流级",
+  "caveat": "UNSW 无 IP/SYN/DNS 字段：LARGE 为流级精确；RST 为窗口级近似（产品为单源语义）",
+  "large_flow": {
+    "grid": [
+      {
+        "mb": 1,
+        "tp": 274,
+        "fp": 748,
+        "fn": 119067,
+        "tn": 55252,
+        "precision": 0.2681,
+        "recall": 0.0023,
+        "f1": 0.0046
+      },
+      {
+        "mb": 2,
+        "tp": 186,
+        "fp": 1,
+        "fn": 119155,
+        "tn": 55999,
+        "precision": 0.9947,
+        "recall": 0.0016,
+        "f1": 0.0031
+      },
+      {
+        "mb": 5,
+        "tp": 98,
+        "fp": 0,
+        "fn": 119243,
+        "tn": 56000,
+        "precision": 1.0,
+        "recall": 0.0008,
+        "f1": 0.0016
+      },
+      {
+        "mb": 10,
+        "tp": 12,
+        "fp": 0,
+        "fn": 119329,
+        "tn": 56000,
+        "precision": 1.0,
+        "recall": 0.0001,
+        "f1": 0.0002
+      },
+      {
+        "mb": 15,
+        "tp": 0,
+        "fp": 0,
+        "fn": 119341,
+        "tn": 56000,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      {
+        "mb": 20,
+        "tp": 0,
+        "fp": 0,
+        "fn": 119341,
+        "tn": 56000,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      {
+        "mb": 30,
+        "tp": 0,
+        "fp": 0,
+        "fn": 119341,
+        "tn": 56000,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      {
+        "mb": 50,
+        "tp": 0,
+        "fp": 0,
+        "fn": 119341,
+        "tn": 56000,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      }
+    ],
+    "best": {
+      "mb": 1,
+      "tp": 274,
+      "fp": 748,
+      "fn": 119067,
+      "tn": 55252,
+      "precision": 0.2681,
+      "recall": 0.0023,
+      "f1": 0.0046
+    },
+    "current": 10.0
+  },
+  "rst_window": {
+    "grid": [
+      {
+        "count": 10,
+        "tp": 0,
+        "fp": 0,
+        "fn": 4248,
+        "tn": 1597,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      {
+        "count": 20,
+        "tp": 0,
+        "fp": 0,
+        "fn": 4248,
+        "tn": 1597,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      {
+        "count": 30,
+        "tp": 0,
+        "fp": 0,
+        "fn": 4248,
+        "tn": 1597,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      {
+        "count": 40,
+        "tp": 0,
+        "fp": 0,
+        "fn": 4248,
+        "tn": 1597,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      {
+        "count": 50,
+        "tp": 0,
+        "fp": 0,
+        "fn": 4248,
+        "tn": 1597,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      {
+        "count": 60,
+        "tp": 0,
+        "fp": 0,
+        "fn": 4248,
+        "tn": 1597,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      {
+        "count": 80,
+        "tp": 0,
+        "fp": 0,
+        "fn": 4248,
+        "tn": 1597,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      {
+        "count": 100,
+        "tp": 0,
+        "fp": 0,
+        "fn": 4248,
+        "tn": 1597,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      }
+    ],
+    "best": {
+      "count": 10,
+      "tp": 0,
+      "fp": 0,
+      "fn": 4248,
+      "tn": 1597,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0
+    },
+    "current": 50
+  },
+  "recommended_updates": {
+    "large_flow_min_mb": 1,
+    "rst_storm_min_count": 10
+  }
+}

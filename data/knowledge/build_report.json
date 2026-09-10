@@ -1,0 +1,24 @@
+{
+  "source": "https://raw.githubusercontent.com/mitre-attack/attack-stix-data/master/enterprise-attack/enterprise-attack.json",
+  "techniques_total": 709,
+  "tactics": {
+    "stealth": 151,
+    "privilege-escalation": 98,
+    "execution": 69,
+    "persistence": 117,
+    "command-and-control": 47,
+    "collection": 41,
+    "lateral-movement": 25,
+    "defense-impairment": 56,
+    "credential-access": 67,
+    "discovery": 49,
+    "resource-development": 50,
+    "reconnaissance": 46,
+    "impact": 33,
+    "initial-access": 22,
+    "exfiltration": 19
+  },
+  "docs_generated": 15,
+  "docs_bytes": 771986,
+  "generated_at": "2026-09-08 19:30:55"
+}

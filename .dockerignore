@@ -4,11 +4,50 @@ __pycache__/
 *.pyc
 .pytest_cache/
 installer_output/
-data/
+dist/
+build/
+*.spec
+*.zip
+
+# 运行时数据（通过数据卷挂载，不打包进镜像）
+data/db/
+data/history/
+data/uploads/
+data/chroma_db/
+data/reports/
+data/audit/
+data/logs/
+data/config/
+data/samples/analyzed/
+data/samples/report_*.json
+data/baselines/*.json
+data/eval_cicids/
+data/eval_real/
+
+# 保留知识文档（攻击类型知识库，RAG初始化用）
+# data/knowledge/ 不排除
+
+# Git
 .git/
 .gitignore
+.github/
+
+# 日志
 *.log
 _srv_*.log
+_*.log
+
+# IDE
 .idea/
 .vscode/
+
+# 测试
 tests/
+
+# 大模型文件（90MB，通过数据卷挂载或启动脚本下载，不打包进镜像）
+models/bge-small-zh-v1.5/
+
+# 临时文件
+*.tmp
+*.bak
+*.bak_*

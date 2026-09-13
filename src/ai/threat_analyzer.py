@@ -277,6 +277,18 @@ class ThreatAnalyzer:
         1. {"stage": "retrieval", "evidence": [{"title","similarity"}...]}  检索依据（思考过程）
         2. {"stage": "answer", "chunk": "..."}                              LLM 逐字输出
         """
+        # 输入验证：过滤无意义输入，避免LLM幻觉
+        q = (question or "").strip()
+        if len(q) < 2:
+            yield {"stage": "retrieval", "evidence": []}
+            yield {"stage": "answer", "chunk": "⚠️ 请输入完整的网络安全问题（至少2个字符）。例如：\n\n- 什么是SQL注入？如何防御？\n- 如何检测端口扫描？\n- 勒索软件的攻击链是什么？"}
+            return
+        # 纯数字或纯符号输入
+        if q.isdigit() or all(c in ".,!?;:\'\"[]{}()<>=+-*/\\|@#$%^&`~ " for c in q):
+            yield {"stage": "retrieval", "evidence": []}
+            yield {"stage": "answer", "chunk": "⚠️ 您输入的内容似乎不是一个有效的网络安全问题。请描述您想了解的安全主题，例如：\n\n- 网络攻击类型与检测方法\n- 安全事件应急响应流程\n- 特定协议的安全风险\n- 安全工具的使用方法"}
+            return
+        
         from src.ai.rag_engine import get_rag_engine
         rag = self.rag if self.rag is not None else get_rag_engine()
         rag_results = rag.search(question, top_k=5)

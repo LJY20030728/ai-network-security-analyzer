@@ -3,39 +3,13 @@
   "golden_set_size": 15,
   "evaluated": 15,
   "metrics": {
-    "avg_recall_at_5": 0.36,
-    "strict_recall_rate": 0.667,
-    "total_hits": 27,
-    "avg_search_time_sec": 0.207,
-    "missed_queries": 5
+    "avg_recall_at_5": 0.68,
+    "strict_recall_rate": 1.0,
+    "total_hits": 51,
+    "avg_search_time_sec": 0.345,
+    "missed_queries": 0
   },
-  "missed_queries": [
-    {
-      "id": 1,
-      "query": "什么是 SQL 注入攻击？如何检测和防御？",
-      "category": "攻击技术"
-    },
-    {
-      "id": 7,
-      "query": "勒索软件的攻击链是什么？如何应急响应？",
-      "category": "影响"
-    },
-    {
-      "id": 8,
-      "query": "钓鱼攻击的社会工程学手段和检测方法",
-      "category": "初始访问"
-    },
-    {
-      "id": 10,
-      "query": "内存马的工作原理和检测方法",
-      "category": "防御规避"
-    },
-    {
-      "id": 13,
-      "query": "中间人攻击的原理和 HTTPS 如何防御",
-      "category": "凭据访问"
-    }
-  ],
+  "missed_queries": [],
   "results": [
     {
       "query": "什么是 SQL 注入攻击？如何检测和防御？",
@@ -48,12 +22,50 @@
       ],
       "top_k": 5,
       "results_count": 5,
-      "hits": 0,
-      "recall_at_k": 0.0,
-      "strict_recall": 0.0,
-      "search_time_sec": 1.068,
-      "hit_details": [],
-      "missed": true,
+      "hits": 4,
+      "recall_at_k": 0.8,
+      "strict_recall": 1.0,
+      "search_time_sec": 2.112,
+      "hit_details": [
+        {
+          "rank": 1,
+          "matched_keywords": [
+            "SQL",
+            "注入",
+            "Injection"
+          ],
+          "title": "",
+          "score": 0.21867477893829346
+        },
+        {
+          "rank": 3,
+          "matched_keywords": [
+            "SQL",
+            "注入"
+          ],
+          "title": "",
+          "score": 0.5
+        },
+        {
+          "rank": 4,
+          "matched_keywords": [
+            "SQL",
+            "注入"
+          ],
+          "title": "",
+          "score": 0.5
+        },
+        {
+          "rank": 5,
+          "matched_keywords": [
+            "SQL",
+            "注入"
+          ],
+          "title": "",
+          "score": 0.5
+        }
+      ],
+      "missed": false,
       "id": 1,
       "category": "攻击技术"
     },
@@ -69,13 +81,13 @@
       ],
       "top_k": 5,
       "results_count": 5,
-      "hits": 3,
-      "recall_at_k": 0.6,
+      "hits": 1,
+      "recall_at_k": 0.2,
       "strict_recall": 1.0,
-      "search_time_sec": 0.145,
+      "search_time_sec": 0.21,
       "hit_details": [
         {
-          "rank": 1,
+          "rank": 4,
           "matched_keywords": [
             "SYN",
             "Flood",
@@ -84,26 +96,6 @@
           ],
           "title": "",
           "score": 0.32857000827789307
-        },
-        {
-          "rank": 4,
-          "matched_keywords": [
-            "SYN",
-            "Flood",
-            "DoS",
-            "DDoS",
-            "T1498"
-          ],
-          "title": "",
-          "score": 0.5
-        },
-        {
-          "rank": 5,
-          "matched_keywords": [
-            "SYN"
-          ],
-          "title": "",
-          "score": 0.5
         }
       ],
       "missed": false,
@@ -124,7 +116,7 @@
       "hits": 2,
       "recall_at_k": 0.4,
       "strict_recall": 1.0,
-      "search_time_sec": 0.145,
+      "search_time_sec": 0.217,
       "hit_details": [
         {
           "rank": 1,
@@ -159,10 +151,10 @@
       ],
       "top_k": 5,
       "results_count": 5,
-      "hits": 5,
-      "recall_at_k": 1.0,
+      "hits": 4,
+      "recall_at_k": 0.8,
       "strict_recall": 1.0,
-      "search_time_sec": 0.147,
+      "search_time_sec": 0.218,
       "hit_details": [
         {
           "rank": 1,
@@ -198,14 +190,6 @@
           ],
           "title": "",
           "score": 0.3465612530708313
-        },
-        {
-          "rank": 5,
-          "matched_keywords": [
-            "Exfiltration"
-          ],
-          "title": "",
-          "score": 0.5
         }
       ],
       "missed": false,
@@ -222,10 +206,10 @@
       ],
       "top_k": 5,
       "results_count": 5,
-      "hits": 2,
-      "recall_at_k": 0.4,
+      "hits": 3,
+      "recall_at_k": 0.6,
       "strict_recall": 1.0,
-      "search_time_sec": 0.146,
+      "search_time_sec": 0.209,
       "hit_details": [
         {
           "rank": 1,
@@ -243,6 +227,14 @@
           ],
           "title": "",
           "score": 0.3099004030227661
+        },
+        {
+          "rank": 3,
+          "matched_keywords": [
+            "暴力破解"
+          ],
+          "title": "",
+          "score": 0.5
         }
       ],
       "missed": false,
@@ -262,7 +254,7 @@
       "hits": 2,
       "recall_at_k": 0.4,
       "strict_recall": 1.0,
-      "search_time_sec": 0.146,
+      "search_time_sec": 0.234,
       "hit_details": [
         {
           "rank": 1,
@@ -298,12 +290,46 @@
       ],
       "top_k": 5,
       "results_count": 5,
-      "hits": 0,
-      "recall_at_k": 0.0,
-      "strict_recall": 0.0,
-      "search_time_sec": 0.144,
-      "hit_details": [],
-      "missed": true,
+      "hits": 4,
+      "recall_at_k": 0.8,
+      "strict_recall": 1.0,
+      "search_time_sec": 0.227,
+      "hit_details": [
+        {
+          "rank": 1,
+          "matched_keywords": [
+            "勒索",
+            "Ransomware"
+          ],
+          "title": "",
+          "score": 0.2740718126296997
+        },
+        {
+          "rank": 2,
+          "matched_keywords": [
+            "勒索"
+          ],
+          "title": "",
+          "score": 0.31252360343933105
+        },
+        {
+          "rank": 3,
+          "matched_keywords": [
+            "勒索"
+          ],
+          "title": "",
+          "score": 0.3125768303871155
+        },
+        {
+          "rank": 4,
+          "matched_keywords": [
+            "勒索"
+          ],
+          "title": "",
+          "score": 0.5
+        }
+      ],
+      "missed": false,
       "id": 7,
       "category": "影响"
     },
@@ -317,12 +343,47 @@
       ],
       "top_k": 5,
       "results_count": 5,
-      "hits": 0,
-      "recall_at_k": 0.0,
-      "strict_recall": 0.0,
-      "search_time_sec": 0.145,
-      "hit_details": [],
-      "missed": true,
+      "hits": 4,
+      "recall_at_k": 0.8,
+      "strict_recall": 1.0,
+      "search_time_sec": 0.226,
+      "hit_details": [
+        {
+          "rank": 1,
+          "matched_keywords": [
+            "钓鱼",
+            "Phishing"
+          ],
+          "title": "",
+          "score": 0.2869272232055664
+        },
+        {
+          "rank": 2,
+          "matched_keywords": [
+            "钓鱼",
+            "Phishing"
+          ],
+          "title": "",
+          "score": 0.3181915879249573
+        },
+        {
+          "rank": 3,
+          "matched_keywords": [
+            "钓鱼"
+          ],
+          "title": "",
+          "score": 0.3035120964050293
+        },
+        {
+          "rank": 4,
+          "matched_keywords": [
+            "钓鱼"
+          ],
+          "title": "",
+          "score": 0.5
+        }
+      ],
+      "missed": false,
       "id": 8,
       "category": "初始访问"
     },
@@ -337,19 +398,18 @@
       ],
       "top_k": 5,
       "results_count": 5,
-      "hits": 2,
-      "recall_at_k": 0.4,
+      "hits": 4,
+      "recall_at_k": 0.8,
       "strict_recall": 1.0,
-      "search_time_sec": 0.144,
+      "search_time_sec": 0.23,
       "hit_details": [
         {
           "rank": 1,
           "matched_keywords": [
-            "持久化",
-            "Persistence"
+            "注册表"
           ],
           "title": "",
-          "score": 0.5
+          "score": 0.36634981632232666
         },
         {
           "rank": 2,
@@ -357,7 +417,23 @@
             "注册表"
           ],
           "title": "",
-          "score": 0.36634981632232666
+          "score": 0.3876345753669739
+        },
+        {
+          "rank": 3,
+          "matched_keywords": [
+            "持久化"
+          ],
+          "title": "",
+          "score": 0.5
+        },
+        {
+          "rank": 4,
+          "matched_keywords": [
+            "持久化"
+          ],
+          "title": "",
+          "score": 0.5
         }
       ],
       "missed": false,
@@ -375,12 +451,59 @@
       ],
       "top_k": 5,
       "results_count": 5,
-      "hits": 0,
-      "recall_at_k": 0.0,
-      "strict_recall": 0.0,
-      "search_time_sec": 0.147,
-      "hit_details": [],
-      "missed": true,
+      "hits": 5,
+      "recall_at_k": 1.0,
+      "strict_recall": 1.0,
+      "search_time_sec": 0.219,
+      "hit_details": [
+        {
+          "rank": 1,
+          "matched_keywords": [
+            "内存",
+            "马",
+            "Memory"
+          ],
+          "title": "",
+          "score": 0.28329920768737793
+        },
+        {
+          "rank": 2,
+          "matched_keywords": [
+            "内存",
+            "马"
+          ],
+          "title": "",
+          "score": 0.2557656764984131
+        },
+        {
+          "rank": 3,
+          "matched_keywords": [
+            "内存",
+            "马"
+          ],
+          "title": "",
+          "score": 0.30261552333831787
+        },
+        {
+          "rank": 4,
+          "matched_keywords": [
+            "内存",
+            "马"
+          ],
+          "title": "",
+          "score": 0.3215731382369995
+        },
+        {
+          "rank": 5,
+          "matched_keywords": [
+            "内存",
+            "马"
+          ],
+          "title": "",
+          "score": 0.32813483476638794
+        }
+      ],
+      "missed": false,
       "id": 10,
       "category": "防御规避"
     },
@@ -396,10 +519,10 @@
       ],
       "top_k": 5,
       "results_count": 5,
-      "hits": 2,
-      "recall_at_k": 0.4,
+      "hits": 3,
+      "recall_at_k": 0.6,
       "strict_recall": 1.0,
-      "search_time_sec": 0.147,
+      "search_time_sec": 0.211,
       "hit_details": [
         {
           "rank": 1,
@@ -407,13 +530,20 @@
             "漏洞"
           ],
           "title": "",
+          "score": 0.4093829393386841
+        },
+        {
+          "rank": 3,
+          "matched_keywords": [
+            "漏洞"
+          ],
+          "title": "",
           "score": 0.4187546372413635
         },
         {
-          "rank": 5,
+          "rank": 4,
           "matched_keywords": [
-            "漏洞",
-            "Vulnerability"
+            "漏洞"
           ],
           "title": "",
           "score": 0.5
@@ -434,10 +564,10 @@
       ],
       "top_k": 5,
       "results_count": 5,
-      "hits": 1,
-      "recall_at_k": 0.2,
+      "hits": 2,
+      "recall_at_k": 0.4,
       "strict_recall": 1.0,
-      "search_time_sec": 0.142,
+      "search_time_sec": 0.218,
       "hit_details": [
         {
           "rank": 3,
@@ -445,7 +575,15 @@
             "T1048"
           ],
           "title": "",
-          "score": 0.37410974502563477
+          "score": 0.5
+        },
+        {
+          "rank": 4,
+          "matched_keywords": [
+            "数据外泄"
+          ],
+          "title": "",
+          "score": 0.5
         }
       ],
       "missed": false,
@@ -463,12 +601,40 @@
       ],
       "top_k": 5,
       "results_count": 5,
-      "hits": 0,
-      "recall_at_k": 0.0,
-      "strict_recall": 0.0,
-      "search_time_sec": 0.154,
-      "hit_details": [],
-      "missed": true,
+      "hits": 3,
+      "recall_at_k": 0.6,
+      "strict_recall": 1.0,
+      "search_time_sec": 0.222,
+      "hit_details": [
+        {
+          "rank": 1,
+          "matched_keywords": [
+            "中间人",
+            "MITM",
+            "Man-in-the-Middle"
+          ],
+          "title": "",
+          "score": 0.2351401448249817
+        },
+        {
+          "rank": 2,
+          "matched_keywords": [
+            "中间人",
+            "MITM"
+          ],
+          "title": "",
+          "score": 0.3826085329055786
+        },
+        {
+          "rank": 3,
+          "matched_keywords": [
+            "中间人"
+          ],
+          "title": "",
+          "score": 0.38585948944091797
+        }
+      ],
+      "missed": false,
       "id": 13,
       "category": "凭据访问"
     },
@@ -487,7 +653,7 @@
       "hits": 5,
       "recall_at_k": 1.0,
       "strict_recall": 1.0,
-      "search_time_sec": 0.142,
+      "search_time_sec": 0.217,
       "hit_details": [
         {
           "rank": 1,
@@ -501,13 +667,23 @@
         {
           "rank": 2,
           "matched_keywords": [
+            "审计",
             "检测"
           ],
           "title": "",
-          "score": 0.42670661211013794
+          "score": 0.4022775888442993
         },
         {
           "rank": 3,
+          "matched_keywords": [
+            "日志",
+            "审计"
+          ],
+          "title": "",
+          "score": 0.41986143589019775
+        },
+        {
+          "rank": 4,
           "matched_keywords": [
             "审计",
             "检测"
@@ -516,16 +692,10 @@
           "score": 0.4279428720474243
         },
         {
-          "rank": 4,
-          "matched_keywords": [
-            "检测"
-          ],
-          "title": "",
-          "score": 0.44409406185150146
-        },
-        {
           "rank": 5,
           "matched_keywords": [
+            "日志",
+            "审计",
             "检测"
           ],
           "title": "",
@@ -547,34 +717,55 @@
       ],
       "top_k": 5,
       "results_count": 5,
-      "hits": 3,
-      "recall_at_k": 0.6,
+      "hits": 5,
+      "recall_at_k": 1.0,
       "strict_recall": 1.0,
-      "search_time_sec": 0.141,
+      "search_time_sec": 0.212,
       "hit_details": [
         {
           "rank": 1,
           "matched_keywords": [
+            "应急响应",
             "响应"
           ],
           "title": "",
-          "score": 0.5
+          "score": 0.46243733167648315
         },
         {
           "rank": 2,
           "matched_keywords": [
+            "应急响应",
             "响应"
           ],
           "title": "",
-          "score": 0.5
+          "score": 0.48355746269226074
+        },
+        {
+          "rank": 3,
+          "matched_keywords": [
+            "应急响应",
+            "响应"
+          ],
+          "title": "",
+          "score": 0.499758243560791
+        },
+        {
+          "rank": 4,
+          "matched_keywords": [
+            "应急响应",
+            "响应"
+          ],
+          "title": "",
+          "score": 0.5193229913711548
         },
         {
           "rank": 5,
           "matched_keywords": [
-            "处置"
+            "应急响应",
+            "响应"
           ],
           "title": "",
-          "score": 0.5266924500465393
+          "score": 0.5233898758888245
         }
       ],
       "missed": false,

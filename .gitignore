@@ -102,3 +102,10 @@ run_dev.py
 *.tmp
 *.bak
 *.bak_*
+
+# Temporary report JSON files generated during testing
+data/samples/report_*.json
+data/samples/regression_result.json
+
+# Persisted analyzed PCAP files (copied at runtime)
+data/samples/analyzed/

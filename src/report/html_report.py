@@ -275,18 +275,36 @@ def save_html_report(analysis: Dict[str, Any],
                      ai_analysis: Optional[str] = None,
                      ai_traffic_summary: Optional[str] = None,
                      structured_report: Optional[Dict[str, Any]] = None,
-                     report_dir: str = "./data/reports") -> str:
-    """生成并保存 HTML 报告，返回文件路径"""
+                     report_dir: str = "./data/reports",
+                     case_id: Optional[str] = None) -> str:
+    """生成并保存 HTML 报告，返回文件路径
+    
+    Args:
+        case_id: 可选的案例号/文件名标识。传入时使用该标识作为文件名，
+                 避免重新生成历史报告时与最新报告同名覆盖。
+                 不传时使用当前时间戳（默认行为）。
+    """
     os.makedirs(report_dir, exist_ok=True)
-    cid = f"ASE-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    if case_id:
+        # 使用传入的案例号，清理非法字符
+        safe_cid = "".join(ch for ch in str(case_id) if ch.isalnum() or ch in "-_")
+        cid = safe_cid[:50] if safe_cid else f"ASE-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    else:
+        cid = f"ASE-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
     filepath = os.path.join(report_dir, f"report_{cid}.html")
-    html_content = build_html_report(analysis, evidence, ai_analysis, ai_traffic_summary,
+    # 构造完整的 evidence（防止空字典导致 build_html_report 内部 KeyError）
+    full_evidence = dict(evidence) if evidence else {}
+    full_evidence.setdefault("source_file", "历史记录重新生成")
+    full_evidence.setdefault("source_sha256", "N/A")
+    full_evidence.setdefault("analyzed_at", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    full_evidence.setdefault("rule_version", "2.0.0")
+    html_content = build_html_report(analysis, full_evidence, ai_analysis, ai_traffic_summary,
                                      structured_report=structured_report, case_id=cid)
     with open(filepath, "w", encoding="utf-8") as f:
         f.write(html_content)
     # 返回绝对路径（Gradio DownloadButton / 历史记录打开报告需绝对路径）
     filepath = os.path.abspath(filepath)
-    logger.info(f"HTML 报告已生成: {filepath}")
+    logger.info(f"HTML 报告已生成: {filepath} (case_id={cid})")
     return filepath
 
 

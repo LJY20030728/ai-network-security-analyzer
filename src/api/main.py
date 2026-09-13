@@ -48,8 +48,12 @@ from src.api.audit import AuditLogger
 from src.api.history_store import get_history_store
 from src.api.task_queue import get_task_queue
 
-# 初始化日志
-setup_logging(settings.log_level)
+# 初始化日志（同时输出到控制台和文件，文件路径与 LogObserver 一致）
+import os as _os
+_log_dir = data_dir("logs")
+ensure_dir(_log_dir)
+_log_file = _os.path.join(_log_dir, "analyzer.log")
+setup_logging(settings.log_level, log_file=_log_file)
 
 # 首次启动种子数据迁移（打包版：把内置预置基线复制到数据目录）
 seed_assets()
@@ -517,7 +521,7 @@ def _load_baseline_into(analyzer: TrafficAnalyzer, baseline_name: str) -> bool:
         # 从 SQLite 数据重建 TrafficBaseline 对象
         b = TrafficBaseline(window_sec=bl.get("window_sec", 5))
         b.name = baseline_name
-        b.learned = True
+        b._learned = True
         prof = bl.get("profile", {})
         if isinstance(prof, dict) and "profile" in prof:
             b.profile = prof["profile"]
@@ -1230,11 +1234,16 @@ def create_gradio_interface():
                     threat_output = gr.Textbox(label="⚠️ AI威胁分析", lines=10)
                 with gr.Row():
                     raw_output = gr.JSON(label="📊 完整分析报告（JSON）")
-                    report_download = gr.DownloadButton(
-                        label="📄 下载取证型HTML报告", value=None, visible=True)
+                # 下载报告区域：按钮在上，进度条和操作按钮在下
+                report_download = gr.DownloadButton(
+                    label="📄 下载取证型HTML报告", value=None, visible=True)
+                download_progress = gr.HTML(value="", visible=True)
+                with gr.Row():
+                    tab1_open_report_btn = gr.Button("📄 打开报告文件", size="sm", visible=False)
+                    tab1_open_report_dir_btn = gr.Button("📂 打开报告所在文件夹", size="sm", visible=False)
                 baseline_chart_output = gr.HTML(label="📈 流量 vs 基线对比图（选基线分析时显示）")
-                report_feedback = gr.Markdown("💡 分析完成后：点一次「下载」载入最新报告 → 再点一次下载文件")
-                open_report_dir_btn = gr.Button("📂 打开报告目录（保存位置）", size="sm")
+                report_feedback = gr.Markdown("💡 分析完成后点击「下载取证型HTML报告」，进度条显示下载状态，完成后可直接打开报告")
+                analysis_done = gr.State(False)  # 标记当前会话是否已完成至少一次分析
 
                 def refresh_baselines():
                     try:
@@ -1245,29 +1254,50 @@ def create_gradio_interface():
 
                 baseline_dropdown.focus(refresh_baselines, outputs=baseline_dropdown)
 
-                def on_report_download_click():
-                    """点击下载：定位最新生成的报告并载入下载按钮，给出明确状态反馈"""
+                def on_report_download_click(done):
+                    """点击下载：定位最新报告，设置下载按钮value触发浏览器下载，显示进度条和完成提示"""
+                    if not done:
+                        return (gr.update(value=None), "⚠️ 还未进行任何分析，请先上传PCAP文件并点击「开始分析」", "",
+                                gr.update(visible=False), gr.update(visible=False))
                     try:
                         d = data_dir("reports")
                         if not os.path.isdir(d):
-                            return gr.update(value=None), "❌ 尚无报告：请先完成一次 PCAP 分析"
+                            return (gr.update(value=None), "❌ 尚无报告：请先完成一次 PCAP 分析", "",
+                                    gr.update(visible=False), gr.update(visible=False))
                         fs = [os.path.join(d, f) for f in os.listdir(d) if f.endswith(".html")]
                         if not fs:
-                            return gr.update(value=None), "❌ 尚无报告：请先完成一次 PCAP 分析"
+                            return (gr.update(value=None), "❌ 尚无报告：请先完成一次 PCAP 分析", "",
+                                    gr.update(visible=False), gr.update(visible=False))
                         newest = max(fs, key=os.path.getmtime)
                         sz = os.path.getsize(newest) / 1024
+                        # 进度条 + 下载完成提示（包含是否打开报告的选项）
+                        progress_html = f"""
+                        <div style="margin:10px 0;padding:14px;background:linear-gradient(135deg,#e8f4fd,#f0f8ff);border-radius:12px;border:1px solid #b3d9f2;">
+                            <div style="font-size:13px;color:#1a5276;margin-bottom:8px;font-weight:600;">📥 下载进度</div>
+                            <div style="width:100%;height:22px;background:#e0e0e0;border-radius:11px;overflow:hidden;">
+                                <div style="width:100%;height:100%;background:linear-gradient(90deg,#3498db,#2980b9);border-radius:11px;animation:downloadProgress 1.2s ease-out forwards;"></div>
+                            </div>
+                            <div style="margin-top:8px;font-size:13px;color:#1e8449;font-weight:600;">✅ 下载完成！报告：{os.path.basename(newest)}（{sz:.1f} KB）</div>
+                            <div style="margin-top:4px;font-size:12px;color:#2980b9;">💡 浏览器已保存到下载栏，也可点击下方按钮直接打开报告或所在文件夹</div>
+                        </div>
+                        <style>@keyframes downloadProgress {{0%{{width:0%;}}40%{{width:60%;}}70%{{width:85%;}}100%{{width:100%;}}}}</style>
+                        """
                         return (gr.update(value=newest),
-                                f"✅ 报告已载入下载按钮：{os.path.basename(newest)}（{sz:.1f} KB）\n"
-                                f"👉 请**再点一次**「下载」按钮获取文件。\n"
-                                f"📌 文件保存位置：`{newest}`")
+                                f"✅ 报告已下载：{os.path.basename(newest)}（{sz:.1f} KB）\n"
+                                f"📌 保存位置：`{newest}`\n"
+                                f"💡 可点击下方按钮直接打开报告",
+                                progress_html,
+                                gr.update(visible=True), gr.update(visible=True))
                     except Exception as e:
-                        return gr.update(value=None), f"❌ 载入报告失败：{e}"
+                        return (gr.update(value=None), f"❌ 载入报告失败：{e}", "",
+                                gr.update(visible=False), gr.update(visible=False))
 
                 def analyze_pcap_gradio(file, ai_enabled, baseline_name):
                     """生成器版：分阶段输出分析过程 + AI 流式研判 + 写入历史记录"""
                     if not file:
                         yield ("❌ 请先上传PCAP文件", "请先上传PCAP文件", "", {}, None,
-                               gr.update(value=_history_table_value()), gr.update(value=None))
+                               gr.update(value=_history_table_value()), gr.update(value=None),
+                               False)
                         return
                     try:
                         # 阶段 1：解析 + 特征提取 + 规则/基线/ML 检测
@@ -1374,21 +1404,45 @@ def create_gradio_interface():
                                gr.update(value=_history_table_value()), gr.update(value=None))
                         html_path = None
                         try:
+                            file_sha256 = _quick_sha256(file.name)
                             evidence = {
                                 "source_file": os.path.basename(file.name),
-                                "source_sha256": _quick_sha256(file.name),
+                                "source_sha256": file_sha256,
                                 "analyzed_at": get_timestamp_str(),
                                 "rule_version": "2.0.0",
                             }
+                            # 使用PCAP文件SHA256作为报告case_id，相同PCAP反复分析覆盖旧报告（一一映射）
+                            report_cid = f"PCAP-{file_sha256[:16]}" if file_sha256 else None
                             html_path = save_html_report(report, evidence, ai_analysis=ai_threat,
-                                                         report_dir=data_dir("reports"))
+                                                         report_dir=data_dir("reports"),
+                                                         case_id=report_cid)
                         except Exception as e:
                             logger.warning(f"HTML报告生成失败: {e}")
 
+                        # 复制PCAP文件到项目目录（确保持久化，重新分析时源文件一定存在）
+                        import shutil as _shutil
+                        persisted_pcap_path = os.path.abspath(file.name)
+                        try:
+                            analyzed_dir = data_dir("samples", "analyzed")
+                            os.makedirs(analyzed_dir, exist_ok=True)
+                            src_path = os.path.abspath(file.name)
+                            if os.path.exists(src_path):
+                                # 使用时间戳+原文件名，避免重名覆盖
+                                import time as _t2
+                                ts_prefix = _t2.strftime("%Y%m%d_%H%M%S")
+                                dst_name = f"{ts_prefix}_{os.path.basename(src_path)}"
+                                dst_path = os.path.join(analyzed_dir, dst_name)
+                                _shutil.copy2(src_path, dst_path)
+                                persisted_pcap_path = dst_path
+                                logger.info(f"PCAP文件已持久化复制到: {dst_path}")
+                        except Exception as copy_err:
+                            logger.warning(f"PCAP文件持久化复制失败，使用原路径: {copy_err}")
+                        
                         # 写入分析历史（供「📜 分析历史」Tab 回看）
                         try:
                             get_history_store().add_analysis({
                                 "file": os.path.basename(file.name),
+                                "file_path": persisted_pcap_path,  # 持久化后的PCAP路径，用于重新分析
                                 "packets": report["summary"]["total_packets"],
                                 "flows": report["summary"]["total_flows"],
                                 "bytes": report["summary"]["total_bytes"],
@@ -1410,12 +1464,14 @@ def create_gradio_interface():
                                summary, ai_threat, report, html_path,
                                gr.update(value=_history_table_value()),
                                _build_baseline_compare_svg(report.get("window_series"),
-                                                           report.get("baseline_profile")))
+                                                           report.get("baseline_profile")),
+                               True)  # 设置 analysis_done=True
 
                     except Exception as e:
                         logger.error(f"分析失败: {e}")
                         yield (f"❌ 分析失败: {str(e)}", "分析失败", "", {}, None,
-                               gr.update(value=_history_table_value()), gr.update(value=None))
+                               gr.update(value=_history_table_value()), gr.update(value=None),
+                               False)  # 分析失败保持 analysis_done=False
 
                 # 注：analyze_btn 的事件注册在「📜 分析历史」Tab 定义之后（需引用 history_dropdown）
 
@@ -1468,21 +1524,208 @@ def create_gradio_interface():
                     headers=["时间", "文件", "包数", "流数", "告警数", "严重度", "摘要"],
                     datatype=["str", "str", "number", "number", "number", "str", "str"],
                     interactive=False, row_count=(5, "dynamic"), column_count=7, wrap=True)
+                # 下拉框选择记录（更可靠，不依赖表格点击的状态同步）
+
+                def _search_pcap_file(filename):
+                    """在常见目录搜索同名PCAP文件，返回找到的完整路径或None"""
+                    if not filename:
+                        return None
+                    import os as _os
+                    search_dirs = []
+                    # 1. 项目内的 samples 目录（含子目录）
+                    try:
+                        samples_dir = data_dir("samples")
+                        if _os.path.isdir(samples_dir):
+                            search_dirs.append(samples_dir)
+                    except Exception:
+                        pass
+                    # 2. 桌面
+                    try:
+                        desktop = _os.path.join(_os.path.expanduser("~"), "Desktop")
+                        if _os.path.isdir(desktop):
+                            search_dirs.append(desktop)
+                    except Exception:
+                        pass
+                    # 3. 下载目录
+                    try:
+                        downloads = _os.path.join(_os.path.expanduser("~"), "Downloads")
+                        if _os.path.isdir(downloads):
+                            search_dirs.append(downloads)
+                    except Exception:
+                        pass
+                    # 4. 项目根目录
+                    try:
+                        project_root = _os.getcwd()
+                        search_dirs.append(project_root)
+                    except Exception:
+                        pass
+                    
+                    # 在所有目录（含子目录）中搜索
+                    for base_dir in search_dirs:
+                        try:
+                            for root, dirs, files in _os.walk(base_dir):
+                                # 跳过 .git、venv、node_modules 等大目录
+                                dirs[:] = [d for d in dirs if d not in ('.git', 'venv', 'node_modules', '__pycache__', '.chroma')]
+                                for f in files:
+                                    if f.lower() == filename.lower():
+                                        return _os.path.join(root, f)
+                        except Exception:
+                            continue
+                    return None
+                
+                def _history_dropdown_choices():
+                    """生成下拉框选项：值=记录ID，显示=时间 | 文件名 | 告警数"""
+                    try:
+                        hs = get_history_store().list_analysis()
+                    except Exception:
+                        hs = []
+                    choices = []
+                    for h in hs:
+                        rid = h.get("id", "")
+                        ts = _fmt_time(h.get("ts", ""))
+                        fname = h.get("file", "?")
+                        alerts = h.get("alerts", 0)
+                        label = f"{ts} | {fname} | {alerts}条告警"
+                        choices.append((label, str(rid)))
+                    return choices
+                
+                history_select_dropdown = gr.Dropdown(
+                    choices=_history_dropdown_choices(),
+                    label="📌 选择要操作的记录（推荐：用下拉框精确选择，避免表格点击状态不同步）",
+                    interactive=True,
+                    allow_custom_value=False
+                )
                 with gr.Row():
                     refresh_history_btn = gr.Button("🔄 刷新列表")
                     load_history_btn = gr.Button("📂 加载到分析结果", variant="primary")
-                    open_report_btn = gr.Button("📄 打开报告")
+                    open_report_btn = gr.Button("📄 打开选中记录的报告", variant="primary")
                     clear_history_btn = gr.Button("🗑 清空全部历史")
+                
+                # 重新分析确认区域（默认隐藏，按钮紧下方，更醒目）
+                with gr.Row(visible=False) as regen_confirm_row:
+                    regen_confirm_msg = gr.Markdown(
+                        "### ⚠️ 报告已删除，是否重新分析？\n\n"
+                        "点击「✅ 确认重新分析」后，系统将在后台重新执行完整PCAP分析（含AI研判），\n"
+                        "分3阶段显示进度，完成后自动打开报告。**此操作不影响Tab1的PCAP分析页面。**",
+                        scale=3)
+                    with gr.Column(scale=1):
+                        confirm_regen_btn = gr.Button("✅ 确认重新分析", variant="primary")
+                        cancel_regen_btn = gr.Button("❌ 取消")
+                
+                # 重新分析进度显示（默认隐藏，确认区域下方）
+                regen_progress = gr.Markdown("", visible=False)
+                
                 history_detail = gr.JSON(label="记录详情（点击行后展示）")
                 history_feedback = gr.Markdown(
                     "💡 **用法**：点击表格任意行 → 下方查看详情；\n"
                     "「加载到分析结果」= 把该次分析回填到上方 Tab1 结果区；\n"
                     "「打开报告」= 在浏览器打开该次 HTML 取证报告")
+                
                 selected_history = gr.State(None)
+                pending_regen_id = gr.State(None)  # 待重新分析的记录ID
 
                 def refresh_history_ui():
                     return (gr.update(value=_history_table_value()), _history_count_text(),
-                            "🔄 列表已刷新")
+                            "🔄 列表已刷新（下拉框选项已同步更新）",
+                            gr.update(choices=_history_dropdown_choices()))
+                
+                def confirm_regen_report_ui(record_id):
+                    """确认重新分析：后台执行完整PCAP分析，生成报告，更新历史记录，打开报告"""
+                    if not record_id:
+                        yield "⚠️ 没有待重新分析的记录", gr.update(visible=False), gr.update(value="", visible=False)
+                        return
+                    
+                    # 从数据库获取记录
+                    h = None
+                    try:
+                        all_records = get_history_store().list_analysis()
+                        for r in all_records:
+                            if str(r.get("id", "")) == str(record_id):
+                                h = r
+                                break
+                    except Exception:
+                        pass
+                    
+                    if not h:
+                        yield "❌ 未找到该记录", gr.update(visible=False), gr.update(value="", visible=False)
+                        return
+                    
+                    actual_id = h.get("id", record_id)
+                    file_path = h.get("file_path", "")
+                    fname = h.get("file", "unknown")
+                    
+                    # 如果 file_path 不存在或文件已删除，自动在常见目录搜索同名PCAP文件
+                    if not file_path or not os.path.exists(file_path):
+                        logger.info(f"记录 {actual_id} 的 file_path 不存在或无效: {file_path}，开始自动搜索...")
+                        searched = _search_pcap_file(fname)
+                        if searched:
+                            file_path = searched
+                            logger.info(f"自动搜索到PCAP文件: {file_path}")
+                            # 更新历史记录中的 file_path
+                            try:
+                                get_history_store().update_analysis(record_id, {"file_path": file_path})
+                            except Exception:
+                                pass
+                        else:
+                            logger.warning(f"未找到PCAP文件: {fname}")
+                    
+                    if not file_path or not os.path.exists(file_path):
+                        yield (f"❌ PCAP源文件不存在：`{file_path or '未保存路径'}`\n\n"
+                               f"📋 记录文件名：`{fname}`\n"
+                               f"🔍 已自动搜索：data/samples/、桌面、下载目录，均未找到\n\n"
+                               f"💡 请切换到Tab1重新上传该PCAP文件进行分析",
+                               gr.update(visible=False), gr.update(value="", visible=False))
+                        return
+                    
+                    # 隐藏确认区域，显示进度
+                    yield f"🔄 正在后台重新分析 `{fname}`，请稍候...（阶段1/3：解析PCAP+特征提取+规则检测）", gr.update(visible=False), gr.update(value=f"🔄 正在后台重新分析 `{fname}`，请稍候...（阶段1/3：解析PCAP+特征提取+规则检测）", visible=True)
+                    
+                    try:
+                        # 后台执行完整分析（复用底层同步函数）
+                        import time as _t
+                        t0 = _t.time()
+                        result = _analyze_pcap_task(file_path, enable_ai=True, baseline_name="")
+                        elapsed = _t.time() - t0
+                        
+                        yield f"🔄 分析完成（耗时 {elapsed:.1f}秒），正在生成报告...（阶段2/3）", gr.update(visible=False), gr.update(value=f"🔄 分析完成（耗时 {elapsed:.1f}秒），正在生成报告...（阶段2/3）", visible=True)
+                        
+                        html_path = result.get("report_html", "")
+                        if not html_path:
+                            yield "❌ 报告生成失败", gr.update(visible=False), gr.update(value="", visible=False)
+                            return
+                        
+                        # 更新历史记录中的报告路径
+                        try:
+                            get_history_store().update_analysis(record_id, {"html_report": html_path})
+                        except Exception:
+                            pass
+                        
+                        yield f"✅ 报告已生成，正在打开...（阶段3/3）", gr.update(visible=False), gr.update(value=f"✅ 报告已生成，正在打开...（阶段3/3）", visible=True)
+                        
+                        # 打开报告
+                        try:
+                            os.startfile(html_path)
+                        except Exception:
+                            pass
+                        
+                        final_msg = (f"✅ **重新分析完成，报告已打开**\n"
+                               f"📋 记录：{fname}\n"
+                               f"📦 包数：{result.get('packet_count', 0)}\n"
+                               f"⏱ 耗时：{elapsed:.1f}秒\n"
+                               f"📂 报告：`{os.path.basename(html_path)}`\n\n"
+                               f"💡 重新分析在后台执行，Tab1的PCAP分析页面不受影响")
+                        yield final_msg, gr.update(visible=False), gr.update(value=final_msg, visible=True)
+                        
+                    except Exception as e:
+                        import traceback
+                        logger.error(f"重新分析失败: {e}\n{traceback.format_exc()}")
+                        err_msg = (f"❌ 重新分析失败：{type(e).__name__}: {e}\n\n"
+                               f"💡 建议：切换到Tab1重新上传该PCAP文件进行分析")
+                        yield err_msg, gr.update(visible=False), gr.update(value=err_msg, visible=True)
+                
+                def cancel_regen_ui():
+                    """取消重新分析"""
+                    return "已取消重新分析", gr.update(visible=False), gr.update(value="", visible=False), None
 
                 def on_history_row_click(evt: gr.SelectData):
                     """点击表格行 → 展示该记录详情 + 回填结果区 + 记录选中状态"""
@@ -1514,41 +1757,115 @@ def create_gradio_interface():
                             detail, h.get("summary_text", ""), h.get("ai_summary", ""),
                             h.get("raw", {}), h)
 
-                def open_selected_report_ui(sel):
-                    h = sel
-                    if not h:
-                        return "⚠️ 请先在表格中点击选择一条记录"
-                    rp = h.get("html_report")
-                    if not rp:
-                        return "⚠️ 该记录未生成 HTML 报告（本次分析未启用报告保存）"
-                    if not os.path.exists(rp):
-                        return f"❌ 报告文件已被移动或删除：`{rp}`"
+                def open_selected_report_ui(dropdown_val, sel):
+                    """打开选中记录的报告；若报告文件不存在，显示确认区域询问用户是否重新分析"""
+                    import traceback
+                    
+                    # 优先使用下拉框选择的记录ID（更可靠），其次使用表格点击的状态
+                    record_id = None
+                    if dropdown_val:
+                        record_id = str(dropdown_val)
+                        logger.info(f"使用下拉框选择的记录ID: {record_id}")
+                    elif sel and isinstance(sel, dict) and len(sel) > 0:
+                        record_id = sel.get("id")
+                        logger.info(f"使用表格点击状态的记录ID: {record_id}")
+                    
+                    # 严格的空值检查
+                    if not record_id:
+                        return ("⚠️ 请先选择一条记录：\n"
+                                "✅ **推荐方式**：在上方下拉框中选择一条记录\n"
+                                "或：点击表格中任意一行（行高亮）→ 再点「打开报告」",
+                                gr.update(visible=False), gr.update(value="", visible=False), None)
+                    
+                    # 根据记录ID从数据库获取完整记录（确保数据准确）
+                    h = None
                     try:
-                        os.startfile(rp)
-                        return (f"✅ **已在浏览器打开报告**：`{os.path.basename(rp)}`\n"
-                                f"📌 如未弹出窗口，可手动打开：`{rp}`")
-                    except Exception as e:
-                        return f"❌ 打开报告失败：{e}"
+                        all_records = get_history_store().list_analysis()
+                        for r in all_records:
+                            if str(r.get("id", "")) == str(record_id):
+                                h = r
+                                break
+                    except Exception as db_err:
+                        logger.warning(f"从数据库获取记录失败: {db_err}")
+                    
+                    # 如果数据库中找不到，使用传入的sel作为后备
+                    if h is None:
+                        if sel and isinstance(sel, dict):
+                            h = sel
+                        else:
+                            return (f"⚠️ 未找到ID为 {record_id} 的记录，请刷新列表后重试",
+                                    gr.update(visible=False), gr.update(value="", visible=False), None)
+                        logger.info(f"数据库中未找到记录ID={record_id}，使用传入状态数据")
+                    
+                    rp = h.get("html_report")
+                    raw = h.get("raw") or {}
+                    fname = h.get("file", "unknown")
+                    ts = h.get("ts", "unknown")
+                    actual_id = h.get("id", record_id)
+                    
+                    logger.info(f"打开报告请求: id={actual_id}, file={fname}, ts={ts}, saved_report={rp}, exists={os.path.exists(rp) if rp else False}")
+                    
+                    # 如果报告路径不存在或文件已删除，显示确认区域询问用户是否重新分析
+                    if not rp or not os.path.exists(rp):
+                        file_path = h.get("file_path", "")
+                        file_exists = os.path.exists(file_path) if file_path else False
+                        if file_exists:
+                            # 检查是否是项目内持久化的文件
+                            is_persisted = "samples\\analyzed" in file_path or "samples/analyzed" in file_path
+                            persist_tag = "✅ 已持久化" if is_persisted else "⚠️ 原始路径（建议重新分析后会自动持久化）"
+                            confirm_msg = (f"⚠️ 该记录的报告文件已删除。\n\n"
+                                           f"📋 记录：{fname} | {ts}\n"
+                                           f"📂 PCAP文件：`{file_path}`\n"
+                                           f"📦 状态：{persist_tag}\n\n"
+                                           f"是否重新执行PCAP分析生成报告？\n"
+                                           f"（重新分析在后台执行，分3阶段显示进度，完成后自动打开报告，不影响Tab1）")
+                        else:
+                            confirm_msg = (f"⚠️ 该记录的报告文件已删除，且PCAP源文件也找不到了。\n\n"
+                                           f"📋 记录：{fname} | {ts}\n"
+                                           f"📂 原PCAP路径：`{file_path or '未保存'}`\n\n"
+                                           f"❌ 无法重新分析（源文件不存在）。\n"
+                                           f"💡 建议：切换到Tab1重新上传该PCAP文件进行分析")
+                        return (confirm_msg, gr.update(visible=True), gr.update(value="", visible=False), actual_id)
+                    else:
+                        # 报告存在，直接打开
+                        try:
+                            logger.info(f"正在打开报告文件: {rp} (大小: {os.path.getsize(rp) if os.path.exists(rp) else 'N/A'} bytes)")
+                            os.startfile(rp)
+                            return (f"✅ **已在浏览器打开报告**：`{os.path.basename(rp)}`\n"
+                                    f"📌 对应记录：{fname} | {ts}\n"
+                                    f"📂 保存位置：`{rp}`",
+                                    gr.update(visible=False), gr.update(value="", visible=False), None)
+                        except Exception as e:
+                            return (f"❌ 打开报告失败：{e}\n\n📂 报告路径：`{rp}`",
+                                    gr.update(visible=False), gr.update(value="", visible=False), None)
 
                 def clear_history_ui():
                     n = get_history_store().clear_analysis()
                     return (gr.update(value=[]), "📊 当前 **0** 条分析记录",
-                            f"🗑 已清空全部历史记录（{n} 条）", {"cleared": n}, None)
+                            f"🗑 已清空全部历史记录（{n} 条）", {"cleared": n}, None,
+                            gr.update(choices=[], value=None))
 
                 history_table.select(on_history_row_click,
                                      outputs=[history_detail, summary_output, threat_output,
                                               raw_output, selected_history])
                 refresh_history_btn.click(refresh_history_ui,
-                                          outputs=[history_table, history_count, history_feedback])
+                                          outputs=[history_table, history_count, history_feedback,
+                                                   history_select_dropdown])
+                confirm_regen_btn.click(confirm_regen_report_ui, inputs=[pending_regen_id],
+                                         outputs=[history_feedback, regen_confirm_row, regen_progress])
+                cancel_regen_btn.click(cancel_regen_ui,
+                                        outputs=[history_feedback, regen_confirm_row, regen_progress, pending_regen_id])
                 load_history_btn.click(load_history_ui, inputs=[selected_history],
                                        outputs=[history_feedback, history_detail, summary_output,
                                                 threat_output, raw_output, selected_history])
-                open_report_btn.click(open_selected_report_ui, inputs=[selected_history],
-                                      outputs=history_feedback)
+                open_report_btn.click(open_selected_report_ui, inputs=[history_select_dropdown, selected_history],
+                                      outputs=[history_feedback, regen_confirm_row, regen_progress, pending_regen_id])
                 clear_history_btn.click(clear_history_ui,
                                         outputs=[history_table, history_count, history_feedback,
-                                                 history_detail, selected_history])
-                demo.load(refresh_history_ui, outputs=[history_table, history_count, history_feedback])
+                                                 history_detail, selected_history,
+                                                 history_select_dropdown])
+                demo.load(refresh_history_ui, outputs=[history_table, history_count, history_feedback,
+                                                         history_select_dropdown])
 
                 def open_report_dir_ui():
                     try:
@@ -1559,17 +1876,36 @@ def create_gradio_interface():
                     except Exception as e:
                         return f"❌ 打开失败: {e}"
 
-                open_report_dir_btn.click(open_report_dir_ui, outputs=process_output)
-                report_download.click(on_report_download_click,
-                                      outputs=[report_download, report_feedback])
+                def open_report_file_ui():
+                    """打开最新生成的报告文件"""
+                    try:
+                        d = data_dir("reports")
+                        fs = [os.path.join(d, f) for f in os.listdir(d) if f.endswith(".html")] if os.path.isdir(d) else []
+                        if not fs:
+                            return "❌ 尚无报告文件，请先完成一次PCAP分析"
+                        newest = max(fs, key=os.path.getmtime)
+                        os.startfile(newest)
+                        return f"✅ 已打开报告: {os.path.basename(newest)}"
+                    except Exception as e:
+                        return f"❌ 打开失败: {e}"
+
+                tab1_open_report_dir_btn.click(open_report_dir_ui, outputs=process_output)
+                tab1_open_report_btn.click(open_report_file_ui, outputs=process_output)
+                report_download.click(on_report_download_click, inputs=[analysis_done],
+                                      outputs=[report_download, report_feedback, download_progress,
+                                               tab1_open_report_btn, tab1_open_report_dir_btn])
 
                 # analyze_btn 事件注册（此处 history_dropdown 已定义）
                 analyze_btn.click(
                     analyze_pcap_gradio,
                     inputs=[pcap_file, enable_ai, baseline_dropdown],
                     outputs=[process_output, summary_output, threat_output, raw_output,
-                             report_download, history_table]
+                             report_download, history_table, baseline_chart_output,
+                             analysis_done]
                 )
+                # 分析完成后刷新下拉框选项（通过一个隐藏的辅助按钮触发）
+                def _refresh_dropdown_only():
+                    return gr.update(choices=_history_dropdown_choices())
 
             # Tab 3: 安全问答（v1.4.0：流式输出 + 对话历史持久化 + RAG 检索依据展示）
             with gr.Tab("💬 安全知识问答"):
@@ -1648,8 +1984,19 @@ def create_gradio_interface():
                         pass
                     return []
 
-                send_btn.click(chat_response_stream, inputs=[msg_input, chatbot],
-                               outputs=[chatbot])
+                def chat_and_clear(message, history):
+                    """包装：问答生成 + 最后清空输入框"""
+                    final_history = history
+                    for result in chat_response_stream(message, history):
+                        final_history = result
+                        yield result, gr.update(value="")
+                    # 最后再确保清空一次
+                    yield final_history, gr.update(value="")
+
+                send_btn.click(chat_and_clear, inputs=[msg_input, chatbot],
+                               outputs=[chatbot, msg_input])
+                msg_input.submit(chat_and_clear, inputs=[msg_input, chatbot],
+                                 outputs=[chatbot, msg_input])
                 clear_btn.click(clear_chat_ui, outputs=chatbot)
                 # 页面加载时恢复历史对话
                 demo.load(lambda: get_history_store().load_chat(), outputs=chatbot)
@@ -1657,26 +2004,39 @@ def create_gradio_interface():
             # Tab 3: 知识库管理
             with gr.Tab("📚 知识库管理"):
                 gr.Markdown("管理安全知识库（MITRE ATT&CK、处置手册、协议知识）")
+                # 第一行：两个操作按钮同高
+                with gr.Row(equal_height=True):
+                    init_btn = gr.Button("🔄 初始化/重建知识库", variant="primary", size="lg")
+                    import_btn = gr.Button("📥 导入到知识库", variant="secondary", size="lg")
+                # 第二行：文件上传（全宽）
+                kb_file = gr.File(label="导入知识文档（.txt/.md/.json）", file_types=[".txt", ".md", ".json"])
+                # 第三行：两个结果内容框同高
+                with gr.Row(equal_height=True):
+                    stats_output = gr.JSON(label="📊 知识库统计")
+                    import_output = gr.JSON(label="📥 导入结果")
+                # 第四行：搜索
                 with gr.Row():
-                    init_btn = gr.Button("🔄 初始化/重建知识库", variant="primary")
-                    stats_output = gr.JSON(label="知识库统计")
-                with gr.Row():
-                    kb_file = gr.File(label="导入知识文档（.txt/.md）", file_types=[".txt", ".md", ".json"])
-                    import_btn = gr.Button("📥 导入到知识库")
-                import_output = gr.JSON(label="导入结果")
-                search_input = gr.Textbox(label="搜索知识库", placeholder="输入关键词搜索...")
-                search_btn = gr.Button("🔍 搜索")
+                    search_input = gr.Textbox(label="搜索知识库", placeholder="输入关键词搜索...", scale=4)
+                    search_btn = gr.Button("🔍 搜索", scale=1)
                 search_output = gr.JSON(label="搜索结果")
 
                 def init_kb():
+                    """生成器版：分阶段输出初始化进度，避免长时间无响应"""
                     try:
+                        yield {"status": "正在清除旧知识库...", "progress": "10%"}
                         rag = get_rag_engine()
                         rag.clear()
+                        yield {"status": "正在加载知识条目（MITRE ATT&CK + 处置手册 + 协议知识 + 文件文档）...", "progress": "30%"}
                         items = get_all_knowledge()
+                        yield {"status": f"已加载 {len(items)} 条知识，正在向量化嵌入（BGE模型，分批处理）...", "progress": "50%", "items_count": len(items)}
                         count = rag.add_knowledge_base(items)
-                        return rag.get_stats()
+                        yield {"status": f"嵌入完成，共 {count} 个文档块，正在统计...", "progress": "90%", "chunks_added": count}
+                        stats = rag.get_stats()
+                        stats["status"] = "✅ 知识库初始化完成"
+                        stats["progress"] = "100%"
+                        yield stats
                     except Exception as e:
-                        return {"error": str(e)}
+                        yield {"error": str(e), "status": "❌ 初始化失败"}
 
                 def search_kb(query):
                     if not query:
@@ -1705,13 +2065,9 @@ def create_gradio_interface():
                 上传一份**正常流量** pcap，系统学习该网络的"日常画像"（每时间窗的包数/字节/SYN/端口数中位数），
                 之后分析可疑流量时可对照该基线，偏差超 σ 即告警。预置基线 `default`（学习自 normal.pcap）可直接使用。
                 """)
-                with gr.Row():
-                    baseline_file = gr.File(label="上传正常流量PCAP", file_types=[".pcap", ".pcapng", ".cap"])
-                    baseline_name_input = gr.Textbox(label="基线名称", value="default",
-                                                     placeholder="如: office-network")
-                learn_btn = gr.Button("🧠 一键学习基线", variant="primary")
-                learn_feedback = gr.Markdown("💡 上传正常流量 pcap → 命名 → 点「一键学习」→ 结果与列表即时刷新，Tab1 下拉框同步更新")
-                learn_output = gr.JSON(label="学习结果（基线画像）")
+                
+                # === 已有基线列表（放在最前面，用户进入即可看到）===
+                gr.Markdown("### 📋 已保存基线")
                 def _baseline_table_value():
                     rows = []
                     for b in _list_baselines():
@@ -1722,16 +2078,50 @@ def create_gradio_interface():
                 baseline_table = gr.Dataframe(
                     value=_baseline_table_value(),
                     headers=["名称", "学习包数", "窗口(s)", "σ", "创建时间", "文件"],
-                    label="已保存基线（点击行查看画像）",
+                    label="已保存基线（点击行查看画像图表）",
                     interactive=False)
-                baseline_feedback = gr.Markdown("")
+                baseline_feedback = gr.Markdown("💡 点击表格任意一行查看该基线的画像图表")
+                
+                # === 基线画像图表（紧跟表格，点击行立即可见）===
+                with gr.Row():
+                    baseline_profile_output = gr.JSON(label="选中基线画像数据")
+                    baseline_chart = gr.HTML(label="📊 基线画像图表（4维度中位数±MAD）")
+                
+                # 页面加载时自动显示默认基线图表（如果有default基线）
+                def _load_default_baseline_chart():
+                    try:
+                        for b in _list_baselines():
+                            if b["name"] == "default":
+                                chart = _build_baseline_profile_svg(b.get("profile"), "default")
+                                if chart:
+                                    return b["profile"], "✅ 已加载默认基线「default」画像图表，点击其他行可切换", b, chart
+                        # 没有default基线，显示第一个
+                        bl = _list_baselines()
+                        if bl:
+                            b = bl[0]
+                            chart = _build_baseline_profile_svg(b.get("profile"), b["name"])
+                            if chart:
+                                return b["profile"], f"✅ 已加载基线「{b['name']}」画像图表", b, chart
+                    except Exception:
+                        pass
+                    return {}, "💡 暂无基线，下方学习一份即可看到图表示例", None, ""
+                
+                baseline_selected = gr.State(None)
+                
+                # === 学习新基线 ===
+                gr.Markdown("### 🧠 学习新基线")
+                with gr.Row():
+                    baseline_file = gr.File(label="上传正常流量PCAP", file_types=[".pcap", ".pcapng", ".cap"])
+                    baseline_name_input = gr.Textbox(label="基线名称", value="my-network",
+                                                     placeholder="如: office-network")
+                learn_btn = gr.Button("🧠 一键学习基线", variant="primary")
+                learn_feedback = gr.Markdown("💡 上传正常流量 pcap → 命名 → 点「一键学习」→ 结果与列表即时刷新")
+                learn_output = gr.JSON(label="学习结果（基线画像）")
+                
+                # === 操作按钮 ===
                 with gr.Row():
                     refresh_baseline_btn = gr.Button("🔄 刷新列表")
                     delete_baseline_btn = gr.Button("🗑 删除选中基线", variant="stop")
-                with gr.Row():
-                    baseline_profile_output = gr.JSON(label="选中基线画像（点击表格行查看）")
-                    baseline_chart = gr.HTML(label="📊 基线画像图表（点击行生成）")
-                baseline_selected = gr.State(None)
 
                 def learn_baseline_ui(file, name):
                     if not file:
@@ -1752,9 +2142,21 @@ def create_gradio_interface():
                         ok = baseline.save(save_path)
                         if not ok:
                             return f"❌ 基线保存失败：{name}（名称含非法字符？）", None, gr.update(value=_baseline_table_value()), gr.update(choices=_baseline_names())
+                        # 关键修复：同步保存到SQLite数据库（_list_baselines从数据库读取）
+                        try:
+                            from src.storage.database import Database
+                            db = Database()
+                            db.save_baseline(
+                                name=name,
+                                profile=baseline.to_dict().get("profile", {}),
+                                window_sec=baseline.window_sec,
+                                total_packets=len(packets),
+                            )
+                        except Exception as db_err:
+                            logger.warning(f"基线保存到数据库失败: {db_err}")
                         secs = _t.time() - t0
                         msg = (f"✅ 基线「{name}」学习完成：{len(packets)} 包 / 窗口 {baseline.window_sec}s / σ={baseline.sigma} / 耗时 {secs:.1f}s\n"
-                               f"📌 已保存到 `{save_path}`，并已同步到 Tab1「基线选择」")
+                               f"📌 已保存到数据库和JSON文件，列表已自动刷新，点击上方表格行查看画像图表")
                         return msg, baseline.to_dict(), gr.update(value=_baseline_table_value()), gr.update(choices=_baseline_names())
                     except Exception as e:
                         return f"❌ 学习失败：{e}", None, gr.update(value=_baseline_table_value()), gr.update(choices=_baseline_names())
@@ -1774,30 +2176,52 @@ def create_gradio_interface():
                 def delete_baseline_ui(sel):
                     name = (sel or {}).get("name") if isinstance(sel, dict) else None
                     if not name:
-                        return "⚠️ 请先在表格中点击选择一条基线（行高亮后再点删除）", gr.update(value=_baseline_table_value()), gr.update(choices=_baseline_names())
+                        return "⚠️ 请先在表格中点击选择一条基线（行高亮后再点删除）", gr.update(value=_baseline_table_value()), gr.update(choices=_baseline_names()), {}, ""
+                    # 同时删除JSON文件和SQLite数据库记录
                     path = _baseline_path(name)
-                    if not os.path.exists(path):
-                        return f"❌ 基线文件不存在：{path}", gr.update(value=_baseline_table_value()), gr.update(choices=_baseline_names())
-                    os.remove(path)
+                    deleted_file = False
+                    if os.path.exists(path):
+                        os.remove(path)
+                        deleted_file = True
+                    try:
+                        from src.storage.database import Database
+                        db = Database()
+                        db.delete_baseline(name)
+                    except Exception as db_err:
+                        logger.warning(f"从数据库删除基线失败: {db_err}")
                     tip = ""
                     if name == "default":
                         tip = "\n⚠️ 已删除内置基线 default——Tab1 分析若仍选 default 将跳过基线对照，建议重新学习一份。"
-                    return (f"🗑 已删除基线「{name}」，Tab1 下拉框同步移除。{tip}",
-                            gr.update(value=_baseline_table_value()), gr.update(choices=_baseline_names()))
+                    file_msg = "JSON文件" if deleted_file else "（JSON文件不存在，仅删除数据库记录）"
+                    return (f"🗑 已删除基线「{name}」{file_msg}，Tab1 下拉框同步移除。{tip}\n"
+                            f"💡 画像图表和详情已清空",
+                            gr.update(value=_baseline_table_value()), gr.update(choices=_baseline_names()),
+                            {}, "")  # 清空baseline_profile_output和baseline_chart
 
                 def refresh_baselines_ui():
+                    # 强制重新从数据库读取（不使用缓存）
+                    try:
+                        from src.storage.database import Database
+                        db = Database()
+                        # 触发一次查询，确保连接是新的
+                        db.list_baselines()
+                    except Exception:
+                        pass
                     rows = _baseline_table_value()
-                    return gr.update(value=rows), f"🔄 列表已刷新（{len(rows)} 条基线）"
+                    return gr.update(value=rows), f"🔄 列表已刷新（{len(rows)} 条基线）—— 数据来源：SQLite数据库"
 
                 learn_btn.click(learn_baseline_ui, inputs=[baseline_file, baseline_name_input],
                                 outputs=[learn_feedback, learn_output, baseline_table, baseline_dropdown])
                 refresh_baseline_btn.click(refresh_baselines_ui, outputs=[baseline_table, baseline_feedback])
                 delete_baseline_btn.click(delete_baseline_ui, inputs=baseline_selected,
-                                          outputs=[baseline_feedback, baseline_table, baseline_dropdown])
+                                          outputs=[baseline_feedback, baseline_table, baseline_dropdown,
+                                                   baseline_profile_output, baseline_chart])
                 baseline_table.select(on_baseline_row_click,
                                       outputs=[baseline_profile_output, baseline_feedback,
                                                baseline_selected, baseline_chart])
-                demo.load(lambda: gr.update(value=_baseline_table_value()), outputs=baseline_table)
+                # 页面加载时自动显示默认基线图表
+                demo.load(_load_default_baseline_chart,
+                          outputs=[baseline_profile_output, baseline_feedback, baseline_selected, baseline_chart])
 
             with gr.Tab("⚙️ 设置"):
                 gr.Markdown("""

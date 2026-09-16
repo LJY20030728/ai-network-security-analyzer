@@ -9,6 +9,14 @@ API Key 安全策略：
   2. 当前工作目录下的 .env
   3. 项目源码根目录下的 .env —— 开发模式位置
 - 找不到 .env 时系统仍可启动，AI 功能会提示未配置
+
+配置按功能分组：
+- 项目基本信息
+- API服务配置
+- LLM大模型配置
+- 分析引擎配置（规则引擎、基线引擎、ML引擎）
+- 存储配置
+- 安全配置
 """
 import sys
 from pathlib import Path
@@ -46,8 +54,91 @@ def find_env_file() -> str:
     return ".env"
 
 
+class APISettings(BaseSettings):
+    """API服务配置"""
+    api_host: str = "127.0.0.1"
+    api_port: int = 8080
+    api_auth_token: str = ""
+    max_upload_mb: int = 200  # 单个 PCAP 上传上限（MB）
+    request_timeout: int = 300  # 请求超时（秒）
+
+
+class LLMSettings(BaseSettings):
+    """大模型配置"""
+    llm_api_key: str = ""
+    llm_base_url: str = "https://open.bigmodel.cn/api/paas/v4"
+    llm_model: str = "glm-4-flash"
+    embedding_model: str = "BAAI/bge-small-zh-v1.5"
+    llm_vote_samples: int = 3
+    llm_vote_temperatures: str = "0.1,0.4,0.7"
+    llm_timeout: int = 60  # LLM API 超时（秒）
+
+
+class AnalysisSettings(BaseSettings):
+    """分析引擎配置"""
+    # 通用分析
+    flow_timeout: int = 60  # 网络流超时时间（秒）
+    anomaly_threshold: float = 0.7  # 异常检测阈值
+
+    # 规则引擎阈值
+    syn_flood_min_count: int = 80
+    syn_flood_high_count: int = 500
+    port_scan_min_ports: int = 15
+    port_scan_high_ports: int = 100
+    dns_tunnel_max_query_len: int = 30
+    dns_tunnel_min_count: int = 3
+    dns_tunnel_high_count: int = 20
+    large_flow_min_mb: float = 10.0
+    rst_storm_min_count: int = 30
+
+    # EWMA 时序基线引擎
+    baseline_alpha: float = 0.1
+    baseline_sigma: float = 3.0
+    baseline_window_sec: int = 10
+    baseline_min_windows: int = 20
+    baseline_online_update: bool = True
+    baseline_drift_window: int = 10
+    baseline_drift_alpha: float = 0.05
+
+    # ML 检测引擎（孤立森林）
+    ml_engine_enabled: bool = False
+    ml_contamination: float = 0.10
+    ml_random_state: int = 42
+    ml_max_samples: int = 256
+
+
+class StorageSettings(BaseSettings):
+    """存储配置"""
+    chroma_persist_dir: str = ""
+    db_path: str = ""
+    reports_dir: str = ""
+    baselines_dir: str = ""
+    samples_dir: str = ""
+
+
+class SecuritySettings(BaseSettings):
+    """安全配置"""
+    secure_store_enabled: bool = True
+    capture_interface: Optional[str] = None
+    capture_filter: str = "tcp or udp or icmp"
+    capture_packet_limit: int = 1000
+
+
+class ProjectSettings(BaseSettings):
+    """项目基本信息"""
+    project_name: str = "AI Network Security Analyzer"
+    debug: bool = True
+    log_level: str = "INFO"
+    version: str = "2.1.0"
+
+
 class Settings(BaseSettings):
-    """全局配置类"""
+    """
+    全局配置类（统一入口，保持向后兼容）
+    
+    为了保持向后兼容，所有原有配置项仍然可以通过 settings.xxx 直接访问。
+    新代码建议按分组访问：settings.api.xxx, settings.llm.xxx 等。
+    """
 
     model_config = SettingsConfigDict(
         env_file=find_env_file(),
@@ -56,72 +147,71 @@ class Settings(BaseSettings):
         extra="ignore"
     )
 
-    # ===== 项目基本信息 =====
+    # ===== 项目基本信息（平铺，向后兼容）=====
     project_name: str = "AI Network Security Analyzer"
     debug: bool = True
     log_level: str = "INFO"
+    version: str = "2.1.0"
 
-    # ===== 大模型配置 =====
+    # ===== 大模型配置（平铺，向后兼容）=====
     llm_api_key: str = ""
-    llm_base_url: str = "https://api.deepseek.com"
-    llm_model: str = "deepseek-chat"
+    llm_base_url: str = "https://open.bigmodel.cn/api/paas/v4"
+    llm_model: str = "glm-4-flash"
     embedding_model: str = "BAAI/bge-small-zh-v1.5"
 
-    # ===== 本地 API 安全 =====
-    # 保护本机 /api/* 接口的访问令牌（外部调用需携带 X-API-Token 头）
-    # 为空时首次启动自动生成并写入 .env；Gradio UI（进程内调用）不受影响
+    # ===== API 安全（平铺，向后兼容）=====
     api_auth_token: str = ""
 
-    # ===== 上传与资源限制 =====
-    max_upload_mb: int = 200  # 单个 PCAP 上传上限（MB）
+    # ===== 上传与资源限制（平铺，向后兼容）=====
+    max_upload_mb: int = 200
 
-    # ===== 抓包配置 =====
+    # ===== 抓包配置（平铺，向后兼容）=====
     capture_interface: Optional[str] = None
     capture_filter: str = "tcp or udp or icmp"
     capture_packet_limit: int = 1000
 
-    # ===== 数据库配置 =====
-    chroma_persist_dir: str = ""  # 运行时由 src.utils.paths 解析为绝对路径（打包鲁棒）
+    # ===== 数据库配置（平铺，向后兼容）=====
+    chroma_persist_dir: str = ""
 
-    # ===== 分析配置 =====
-    flow_timeout: int = 60  # 网络流超时时间（秒）
-    anomaly_threshold: float = 0.7  # 异常检测阈值
+    # ===== 分析配置（平铺，向后兼容）=====
+    flow_timeout: int = 60
+    anomaly_threshold: float = 0.7
 
-    # ===== 规则引擎阈值（均可通过 .env 覆盖）=====
-    # 以下硬编码阈值全部参数化，避免"正常流量误报/攻击流量漏报"不可调
-    syn_flood_min_count: int = 80     # SYN包(无ACK)数量 >= 该值 触发告警
-    syn_flood_high_count: int = 500    # 超过则升级为 HIGH
-    port_scan_min_ports: int = 15      # 单源访问不同端口数 >= 该值 触发告警
-    port_scan_high_ports: int = 100    # 超过则升级为 HIGH
-    dns_tunnel_max_query_len: int = 30 # DNS查询域名长度 > 该值 记为可疑
-    dns_tunnel_min_count: int = 3      # 可疑DNS查询数 >= 该值 触发告警
-    dns_tunnel_high_count: int = 20    # 超过则升级为 HIGH
-    large_flow_min_mb: float = 10.0    # 单流字节数 > 该值(MB) 触发告警
-    rst_storm_min_count: int = 30      # 单源RST包数 >= 该值 触发告警
+    # ===== 规则引擎阈值（平铺，向后兼容）=====
+    syn_flood_min_count: int = 80
+    syn_flood_high_count: int = 500
+    port_scan_min_ports: int = 15
+    port_scan_high_ports: int = 100
+    dns_tunnel_max_query_len: int = 30
+    dns_tunnel_min_count: int = 3
+    dns_tunnel_high_count: int = 20
+    large_flow_min_mb: float = 10.0
+    rst_storm_min_count: int = 30
 
-    # ===== EWMA 时序基线引擎（学习-检测两阶段）=====
-    baseline_alpha: float = 0.1        # EWMA 平滑系数
-    baseline_sigma: float = 3.0        # z-score 告警阈值（MAD 鲁棒尺度）
-    baseline_window_sec: int = 10      # 时间窗聚合粒度（秒）
-    baseline_min_windows: int = 20     # 学习阶段最少时间窗数量
-    baseline_online_update: bool = True   # 检测阶段 EWMA 在线滚动更新（偏差窗口不更新，防污染）
-    baseline_drift_window: int = 10      # 漂移检测：最近 N 个窗口与基线分布做 KS 检验
-    baseline_drift_alpha: float = 0.05   # KS 检验显著性水平
-    # ===== ML 检测引擎（L2：孤立森林无监督异常检测，第三轨）=====
-    ml_engine_enabled: bool = False   # 是否启用 ML 检测（默认关；评测/深度部署时开启）
-    ml_contamination: float = 0.10    # 孤立森林异常比例先验
-    ml_random_state: int = 42         # 固定随机种子（评测可复现）
-    ml_max_samples: int = 256         # 单棵树采样数
+    # ===== EWMA 时序基线引擎（平铺，向后兼容）=====
+    baseline_alpha: float = 0.1
+    baseline_sigma: float = 3.0
+    baseline_window_sec: int = 10
+    baseline_min_windows: int = 20
+    baseline_online_update: bool = True
+    baseline_drift_window: int = 10
+    baseline_drift_alpha: float = 0.05
 
-    # ===== LLM 多采样投票（L3：治非确定性）=====
-    llm_vote_samples: int = 3         # 投票采样次数
-    llm_vote_temperatures: str = '0.1,0.4,0.7'   # 各次采样温度（逗号分隔）
+    # ===== ML 检测引擎（平铺，向后兼容）=====
+    ml_engine_enabled: bool = False
+    ml_contamination: float = 0.10
+    ml_random_state: int = 42
+    ml_max_samples: int = 256
 
-    # ===== P1-3: DPAPI 加密存储（运行时覆盖 .env）=====
-    secure_store_enabled: bool = True   # 是否启用加密存储（Windows 下默认开启）
+    # ===== LLM 多采样投票（平铺，向后兼容）=====
+    llm_vote_samples: int = 3
+    llm_vote_temperatures: str = "0.1,0.4,0.7"
+
+    # ===== DPAPI 加密存储（平铺，向后兼容）=====
+    secure_store_enabled: bool = True
 
     def model_post_init(self, __context) -> None:
-        """P1-3: 初始化后从加密存储读取 API Key（优先加密存储，回退 .env）"""
+        """初始化后从加密存储读取 API Key（优先加密存储，回退 .env）"""
         try:
             if self.secure_store_enabled:
                 import sys

@@ -126,6 +126,53 @@
 
 ## 技术架构
 
+### 分层架构（v3.0.0 激进重构）
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        桌面窗口（pywebview）                       │
+│              Gradio UI + 自定义 HTML/CSS（蓝色二次元风格）         │
+└──────────────────────────────┬──────────────────────────────────┘
+                               │ HTTP (localhost:8080)
+┌──────────────────────────────▼──────────────────────────────────┐
+│                      FastAPI 后端服务                              │
+│         Pydantic Settings │ 全局中间件 │ 统一异常处理              │
+└─────────────────────────────────────────────────────────────────┘
+                               │
+┌──────────────────────────────▼──────────────────────────────────┐
+│                        路由层（src/api/routes/）                   │
+│  analyze.py │ baseline.py │ knowledge.py │ chat.py │ system.py │
+└──────────────────────────────┬──────────────────────────────────┘
+                               │
+┌──────────────────────────────▼──────────────────────────────────┐
+│                        服务层（src/services/）                     │
+│  analysis_service │ baseline_service │ knowledge_service          │
+│  report_service │ history_service                                │
+└──────────────────────────────┬──────────────────────────────────┘
+                               │
+┌──────────────────────────────▼──────────────────────────────────┐
+│                        核心层（src/core/）                        │
+│  errors.py（30个错误码）│ exceptions.py（8大类异常）│ middleware.py │
+└──────────────────────────────┬──────────────────────────────────┘
+                               │
+┌──────────┬──────────┬──────────┬──────────┬─────────────────────┘
+▼          ▼          ▼          ▼          ▼
+解析层     检测层     AI 层     存储层     安全层
+Scapy     四引擎     LLM       SQLite    DPAPI
+流式解析   集成投票   +RAG      WAL       加密存储
+```
+
+### 架构分层说明
+
+| 层级 | 目录 | 职责 | 特点 |
+|------|------|------|------|
+| **核心层** | `src/core/` | 异常体系、错误码、中间件 | 基础设施，不依赖业务 |
+| **服务层** | `src/services/` | 业务逻辑实现 | 单例模式，可独立测试 |
+| **路由层** | `src/api/routes/` | API路由定义 | 参数校验，调用服务 |
+| **配置层** | `config/settings.py` | 集中配置管理 | Pydantic，按功能分组 |
+
+### 原架构
+
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                        桌面窗口（pywebview）                       │
@@ -395,7 +442,31 @@ docker compose up -d --build
 
 ```
 ai-network-security-analyzer/
+├── config/                    # 配置层（v3.0.0 重构）
+│   └── settings.py           # Pydantic Settings，按功能分组
 ├── src/
+│   ├── core/                  # 核心层（v3.0.0 新增）
+│   │   ├── errors.py          # 30个标准化错误码
+│   │   ├── exceptions.py      # 8大类业务异常（AppError基类）
+│   │   └── middleware.py      # 请求日志+全局异常处理中间件
+│   ├── services/              # 服务层（v3.0.0 新增）
+│   │   ├── analysis_service.py # PCAP分析服务
+│   │   ├── baseline_service.py # 基线管理服务
+│   │   ├── knowledge_service.py # 知识库服务
+│   │   ├── report_service.py   # 报告生成服务
+│   │   └── history_service.py # 历史记录服务
+│   ├── api/                   # API 层
+│   │   ├── main.py            # FastAPI 主应用（v3.0.0 精简版，~100行）
+│   │   ├── routes/            # 路由层（v3.0.0 新增）
+│   │   │   ├── analyze.py      # PCAP分析路由
+│   │   │   ├── baseline.py    # 基线管理路由
+│   │   │   ├── knowledge.py   # 知识库路由
+│   │   │   ├── chat.py        # 安全问答路由
+│   │   │   └── system.py      # 系统路由
+│   │   ├── schemas.py         # Pydantic 模型（20+）
+│   │   ├── history_store.py   # 历史记录存储（SQLite）
+│   │   ├── task_queue.py      # 任务队列
+│   │   └── audit.py           # 审计日志
 │   ├── analysis/              # 分析引擎
 │   │   ├── cic_features.py    # 76 维 CICFlowMeter 特征提取
 │   │   ├── supervised_detector.py  # 监督检测器（HistGradientBoosting）
@@ -411,12 +482,6 @@ ai-network-security-analyzer/
 │   │   ├── hallucination_control.py  # 幻觉控制三件套
 │   │   ├── evidence_matcher.py      # 证据匹配
 │   │   └── embeddings/        # 嵌入模型（BGE ONNX）
-│   ├── api/                   # API 层
-│   │   ├── main.py            # FastAPI 主应用 + Gradio UI
-│   │   ├── schemas.py         # Pydantic 模型（20+）
-│   │   ├── history_store.py   # 历史记录存储（SQLite）
-│   │   ├── task_queue.py      # 任务队列
-│   │   └── audit.py           # 审计日志
 │   ├── capture/               # 抓包/解析
 │   │   ├── packet_parser.py   # 包解析
 │   │   └── pcap_parser.py     # PCAP 文件解析
@@ -427,7 +492,8 @@ ai-network-security-analyzer/
 │   │   └── forensic_kb.py     # 取证知识库（关联/趋势/缓存）
 │   ├── security/              # 安全层
 │   │   └── secure_store.py    # DPAPI 加密存储
-│   ├── ui/                    # UI 资源
+│   ├── ui/                    # UI 层
+│   │   ├── gradio_app.py      # Gradio UI（v3.0.0 骨架）
 │   │   └── custom_style.css   # 蓝色二次元风格自定义 CSS
 │   └── utils/                 # 工具函数
 │       ├── paths.py           # 路径管理
@@ -444,7 +510,9 @@ ai-network-security-analyzer/
 │   ├── chroma_db/             # ChromaDB 向量库
 │   ├── eval_cicids/csv/       # 训练数据（CIC/UNSW）
 │   └── eval_perf/             # 评测结果
-├── tests/                     # 测试（141 个）
+├── tests/                     # 测试（160+ 个）
+│   ├── test_services/         # 服务层单元测试（v3.0.0 新增）
+│   ├── test_routes/           # 路由层单元测试（v3.0.0 新增）
 │   ├── test_new_features.py   # 新功能综合测试（34 个）
 │   └── ...
 ├── tools/                     # 工具脚本
@@ -455,8 +523,6 @@ ai-network-security-analyzer/
 ├── docs/                      # 文档
 │   ├── 简历项目描述.md
 │   └── 面试准备_STAR+20问.md
-├── config/                    # 配置
-│   └── settings.py            # 全局配置（pydantic-settings）
 ├── desktop_app.py             # 桌面版入口（pywebview）
 ├── requirements.txt           # Python 依赖
 ├── .env.example               # 环境变量示例

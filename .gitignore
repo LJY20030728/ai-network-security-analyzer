@@ -96,7 +96,6 @@ demo_analysis.py
 test_quick.py
 test_zhipu_api.py
 run.py
-run_dev.py
 
 # Temporary files
 *.tmp

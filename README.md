@@ -210,12 +210,25 @@ python -m uvicorn src.api.main:app --host 127.0.0.1 --port 8080
 3. 安装完成后，桌面快捷方式启动
 4. 首次启动会引导配置 API Key（DPAPI 加密存储，不写死）
 
-### 方式三：Docker（待支持）
+### 方式三：Docker 部署（服务器/跨平台推荐）
 
 ```bash
-docker build -t ai-network-security-analyzer .
-docker run -p 8080:8080 -v ./data:/app/data ai-network-security-analyzer
+# 1. 克隆项目
+git clone https://github.com/LJY20030728/ai-network-security-analyzer.git
+cd ai-network-security-analyzer
+
+# 2. 配置环境变量
+cp .env.example .env
+# 编辑 .env，填入你的 LLM_API_KEY
+
+# 3. 构建并启动（推荐用 docker compose）
+docker compose up -d --build
+
+# 4. 访问服务
+# 浏览器打开 http://localhost:8080
 ```
+
+> 📖 完整 Docker 部署指南请查看 [docs/DOCKER_DEPLOYMENT.md](docs/DOCKER_DEPLOYMENT.md)（含环境变量配置、数据持久化、生产环境建议、故障排查）
 
 ---
 

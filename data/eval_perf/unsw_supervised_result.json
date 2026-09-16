@@ -1,5 +1,5 @@
 {
-  "method": "HistGradientBoosting（UNSW-NB15 40+维数值特征+one-hot）",
+  "method": "HistGradientBoosting（UNSW-NB15 40+维数值特征+one-hot + L2正则化 + 早停）",
   "n_flows": 175341,
   "n_features": 194,
   "numeric_features": 39,
@@ -10,34 +10,59 @@
   ],
   "train_samples": 140272,
   "test_samples": 35069,
+  "regularization": {
+    "l2_regularization": 1.0,
+    "min_samples_leaf": 20,
+    "early_stopping": true,
+    "validation_fraction": 0.1,
+    "n_iter_no_change": 10
+  },
+  "overfitting_check": {
+    "train_f1": 0.9791,
+    "test_f1": 0.9704,
+    "f1_gap": 0.0088,
+    "overfitting_risk": "low"
+  },
+  "cross_validation_5fold": {
+    "f1_scores": [
+      0.9473,
+      0.966,
+      0.9831,
+      0.942,
+      0.8585
+    ],
+    "f1_mean": 0.9394,
+    "f1_std": 0.0429,
+    "stability": "medium"
+  },
   "binary": {
-    "precision": 0.9633,
-    "recall": 0.9769,
-    "f1": 0.97,
-    "accuracy": 0.9589,
-    "tp": 23317,
-    "fp": 888,
-    "fn": 552,
-    "tn": 10312
+    "precision": 0.9637,
+    "recall": 0.9772,
+    "f1": 0.9704,
+    "accuracy": 0.9594,
+    "tp": 23324,
+    "fp": 879,
+    "fn": 545,
+    "tn": 10321
   },
   "per_category_recall": {
     "Backdoor": 1.0,
-    "Analysis": 0.9336,
-    "Fuzzers": 0.8655,
+    "Analysis": 0.9171,
+    "Fuzzers": 0.8715,
     "Shellcode": 0.9911,
-    "Reconnaissance": 0.9995,
-    "Exploits": 0.9962,
-    "DoS": 0.9992,
+    "Reconnaissance": 0.9991,
+    "Exploits": 0.9953,
+    "DoS": 0.9988,
     "Worms": 1.0,
     "Generic": 1.0,
-    "Normal": 0.9207
+    "Normal": 0.9215
   },
   "comparison": {
     "rule_engine_large_flow_recall": 0.0001,
     "baseline_best_recall_sigma2": 0.5045,
     "isolation_forest_recall": 0.2107,
-    "supervised_recall": 0.9769,
-    "improvement_vs_rule": "9769x"
+    "supervised_recall": 0.9772,
+    "improvement_vs_rule": "9772x"
   },
-  "runtime_sec": 7.6
+  "runtime_sec": 47.0
 }

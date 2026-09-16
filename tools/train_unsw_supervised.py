@@ -97,10 +97,10 @@ def load_unsw():
 
 
 def train_and_eval(X, y, y_cat, feature_names):
-    """训练 HistGradientBoosting 并评测"""
-    from sklearn.model_selection import train_test_split
+    """训练 HistGradientBoosting 并评测（含过拟合检测优化）"""
+    from sklearn.model_selection import train_test_split, cross_val_score
     from sklearn.ensemble import HistGradientBoostingClassifier
-    from sklearn.metrics import classification_report, confusion_matrix
+    from sklearn.metrics import classification_report, confusion_matrix, f1_score
 
     print("[3/4] 训练 HistGradientBoosting（80/20 分层划分）...")
     Xtr, Xte, ytr, yte, cat_tr, cat_te = train_test_split(
@@ -108,15 +108,54 @@ def train_and_eval(X, y, y_cat, feature_names):
     print(f"  训练集: {Xtr.shape[0]}, 测试集: {Xte.shape[0]}")
 
     t0 = time.time()
+    # 优化3+4：增加 L2 正则化 + 早停机制，减少过拟合
     clf = HistGradientBoostingClassifier(
-        max_iter=300, learning_rate=0.1, max_depth=None,
-        min_samples_leaf=20, random_state=42)
+        max_iter=300,
+        learning_rate=0.1,
+        max_depth=None,
+        min_samples_leaf=20,
+        l2_regularization=1.0,  # 优化3：L2正则化，防止过拟合
+        early_stopping=True,    # 优化4：早停机制，防止过拟合
+        validation_fraction=0.1,
+        n_iter_no_change=10,
+        random_state=42)
     clf.fit(Xtr, ytr)
     print(f"  训练完成，耗时 {time.time()-t0:.1f}s")
 
     # 预测
     pred = clf.predict(Xte)
     proba = clf.predict_proba(Xte)
+
+    # 优化1：训练集 vs 测试集对比，检测过拟合
+    train_pred = clf.predict(Xtr)
+    train_f1 = f1_score(ytr, train_pred)
+    train_acc = (train_pred == ytr).mean()
+    test_f1 = f1_score(yte, pred)
+    test_acc = (pred == yte).mean()
+    f1_gap = train_f1 - test_f1
+
+    print(f"\n  === 过拟合检测（优化1） ===")
+    print(f"  训练集 F1: {train_f1:.4f} | Accuracy: {train_acc:.4f}")
+    print(f"  测试集 F1: {test_f1:.4f} | Accuracy: {test_acc:.4f}")
+    print(f"  F1 差距: {f1_gap:.4f}")
+    if f1_gap < 0.03:
+        print(f"  ✅ 过拟合风险低（F1差距 < 0.03）")
+    elif f1_gap < 0.08:
+        print(f"  ⚠️ 轻微过拟合风险（F1差距 0.03-0.08）")
+    else:
+        print(f"  ❌ 过拟合风险较高（F1差距 > 0.08）")
+
+    # 优化2：5折交叉验证，验证模型稳定性
+    print(f"\n  === 5折交叉验证（优化2） ===")
+    cv_scores = cross_val_score(clf, X, y, cv=5, scoring='f1', n_jobs=-1)
+    cv_mean = cv_scores.mean()
+    cv_std = cv_scores.std()
+    print(f"  5折 F1: {cv_scores.round(4)}")
+    print(f"  平均 F1: {cv_mean:.4f} ± {cv_std:.4f}")
+    if cv_std < 0.01:
+        print(f"  ✅ 模型稳定性好（标准差 < 0.01）")
+    else:
+        print(f"  ⚠️ 模型稳定性一般（标准差 > 0.01）")
 
     # 二分类指标
     tp = int(np.sum((pred == 1) & (yte == 1)))
@@ -160,13 +199,32 @@ def train_and_eval(X, y, y_cat, feature_names):
     print(f"  监督模型 recall: {recall:.4f} (提升 {recall/0.0001:.0f}x vs 规则引擎)")
 
     result = {
-        "method": "HistGradientBoosting（UNSW-NB15 40+维数值特征+one-hot）",
+        "method": "HistGradientBoosting（UNSW-NB15 40+维数值特征+one-hot + L2正则化 + 早停）",
         "n_flows": int(X.shape[0]),
         "n_features": int(X.shape[1]),
         "numeric_features": len(NUMERIC_FEATURES),
         "categorical_features": CATEGORICAL_FEATURES,
         "train_samples": int(Xtr.shape[0]),
         "test_samples": int(Xte.shape[0]),
+        "regularization": {
+            "l2_regularization": 1.0,
+            "min_samples_leaf": 20,
+            "early_stopping": True,
+            "validation_fraction": 0.1,
+            "n_iter_no_change": 10,
+        },
+        "overfitting_check": {
+            "train_f1": round(train_f1, 4),
+            "test_f1": round(test_f1, 4),
+            "f1_gap": round(f1_gap, 4),
+            "overfitting_risk": "low" if f1_gap < 0.03 else ("medium" if f1_gap < 0.08 else "high"),
+        },
+        "cross_validation_5fold": {
+            "f1_scores": [round(s, 4) for s in cv_scores],
+            "f1_mean": round(cv_mean, 4),
+            "f1_std": round(cv_std, 4),
+            "stability": "good" if cv_std < 0.01 else "medium",
+        },
         "binary": {
             "precision": round(precision, 4),
             "recall": round(recall, 4),

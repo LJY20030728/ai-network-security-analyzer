@@ -6,7 +6,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110-green.svg)](https://fastapi.tiangolo.com/)
 [![Gradio](https://img.shields.io/badge/Gradio-6.x-orange.svg)](https://www.gradio.app/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-141%20passed-brightgreen.svg)](#testing)
+[![Tests](https://img.shields.io/badge/tests-148%20passed-brightgreen.svg)](#testing)
 
 **[中文版 README](README.md) | English Version**
 
@@ -44,7 +44,7 @@ This project is an **AI-assisted offline network forensics analysis tool** that 
 |-----------|-------------|
 | **Algorithm Depth** | 76-dim CICFlowMeter feature extraction, four-engine ensemble voting, adaptive threshold, STL time-series decomposition |
 | **AI Engineering** | Hallucination control trilogy, RAG hybrid retrieval + reranking, local vector inference |
-| **Engineering Quality** | 141 unit tests, FastAPI + Pydantic, SQLite WAL, DPAPI encryption, global exception handling |
+| **Engineering Quality** | 148 unit tests, FastAPI + Pydantic, SQLite WAL, DPAPI encryption, global exception handling |
 | **Lightweight & Portable** | Average memory peak 23MB, local inference no external service dependency, Windows .exe packaging |
 | **Verifiable** | All metrics have evaluation scripts and result files — no "guesstimates" |
 
@@ -139,13 +139,13 @@ This project is an **AI-assisted offline network forensics analysis tool** that 
 | **Desktop** | pywebview | 5.x | Native window, system WebView |
 | **Parsing** | Scapy | 2.5+ | PCAP stream parsing |
 | **Algorithm** | scikit-learn | 1.3+ | HistGradientBoosting / IsolationForest |
-| **AI** | LLM API | - | Zhipu / DeepSeek / OpenAI compatible |
-| **Vector** | ChromaDB | 0.4+ | Local vector database |
-| **Embedding** | BGE ONNX | - | Chinese-optimized, local inference |
+| **AI** | Zhipu GLM LLM | glm-4.5-air | Default LLM; also supports DeepSeek / OpenAI / Ollama |
+| **Vector** | ChromaDB | 0.5+ | Local vector database |
+| **Embedding** | BGE ONNX | bge-small-zh-v1.5 | Chinese-optimized, local inference, no API needed |
 | **Storage** | SQLite | 3.x | WAL mode, three tables + indexes |
 | **Security** | DPAPI (ctypes) | - | Windows built-in encryption |
 | **Logging** | loguru | 0.7+ | Structured logging |
-| **Testing** | pytest | 7.x+ | 141 tests all green |
+| **Testing** | pytest | 8.x+ | 148 passed / 19 skipped |
 
 ---
 
@@ -154,46 +154,50 @@ This project is an **AI-assisted offline network forensics analysis tool** that 
 ### Requirements
 
 - Windows 10/11 (recommended, DPAPI encryption requires)
-- Python 3.11+
+- Python 3.11+ (only for running from source; the installer bundles it)
+- WebView2 Runtime (needed to render the desktop window; preinstalled on Windows 10 2004+ / Windows 11; if missing on a stripped-down system, download 'WebView2 Runtime' from Microsoft)
 - Memory: Minimum 2GB, recommended 4GB+
 - Disk: Minimum 500MB (including models and dependencies)
 
 ### Method 1: Source Code Run (Recommended for Development)
 
+> **Easiest: double-click `安装依赖.bat`** in the project root. It automatically: checks for Python 3.11 -> creates the `venv` -> upgrades pip -> installs **ALL dependencies** from `requirements.txt` (a Tsinghua mirror is preconfigured; takes ~5-15 min; it shows a completion message and pauses, and reports clearly on failure).
+
+Manual steps (equivalent to the script):
+
 ```bash
 # 1. Clone the repository
-git clone https://github.com/your-username/ai-network-security-analyzer.git
+git clone https://github.com/LJY20030728/ai-network-security-analyzer.git
 cd ai-network-security-analyzer
 
-# 2. Create virtual environment
+# 2. Create a virtual environment and install [ALL dependencies] (required)
 python -m venv venv
 venv\Scripts\activate
-
-# 3. Install dependencies
 pip install -r requirements.txt
 
-# 4. Download large file resources (required for first run, ~140 MB)
-# BGE embedding model + MITRE ATT&CK knowledge base, not included in repo due to size
+# 3. Download large file resources (required for first run, ~90 MB)
+# BGE embedding model (ONNX), not included in the repo due to size
 python tools/init_resources.py
 
-# 5. Configure API Key (first run)
-# Copy .env.example to .env, fill in LLM_API_KEY
+# 4. Configure API Key (only needed for AI features, not for core detection)
 copy .env.example .env
-# Edit .env, fill in your API Key (can also configure in UI Settings, will use DPAPI encrypted storage)
+# Edit .env and fill in LLM_API_KEY; you can also do it later in UI Settings (DPAPI encrypted)
 
-# 6. Start desktop version
+# 5. Start the desktop version
 python desktop_app.py
 
-# Or start API service (browser access http://127.0.0.1:8080)
+# Or start the API service (browser access http://127.0.0.1:8080)
 python -m uvicorn src.api.main:app --host 127.0.0.1 --port 8080
 ```
 
+> Core detection (rule engine / supervised model / time-series baseline / isolation forest) runs **without any API Key**; only AI threat triage and security Q&A need an LLM key.
+
 ### Method 2: Windows Installer (Recommended for Users)
 
-1. Download the latest `AI-Network-Security-Analyzer-Setup.exe`
-2. Double-click to run the installer, select installation directory
-3. After installation, launch from desktop shortcut
-4. First launch will guide API Key configuration (DPAPI encrypted storage, not hardcoded)
+1. Go to the [Releases page](https://github.com/LJY20030728/ai-network-security-analyzer/releases) and download `AI网络安全智能分析系统_Setup_3.0.0.exe`
+2. Double-click the installer and choose a directory (it bundles all runtime dependencies and models; no Python needed)
+3. After installation, launch from the desktop / Start Menu shortcut
+4. Core detection works out of the box; for AI threat triage & Q&A, configure an LLM key in the in-app **Settings** (DPAPI encrypted, not hardcoded)
 
 ---
 
@@ -555,7 +559,7 @@ ai-network-security-analyzer/
 │   ├── baselines/             # Baseline files (JSON compatible backup)
 │   ├── eval_perf/             # Evaluation results
 │   └── ...                    # (db/history/chroma_db generated at runtime)
-├── tests/                     # Tests (141)
+├── tests/                     # Tests (148)
 ├── tools/                     # Tool scripts
 │   ├── init_resources.py      # Resource initialization (download BGE + MITRE)
 │   ├── train_unsw_supervised.py  # UNSW model training
@@ -678,13 +682,13 @@ Project positioning is "offline forensics tool" — core detection functionality
 
 ### Q3: Which LLMs are supported?
 
-**A**: Any OpenAI-compatible interface LLM, including:
-- Zhipu AI (GLM-4-Flash / GLM-4)
-- DeepSeek (deepseek-chat / deepseek-coder)
-- OpenAI (GPT-3.5 / GPT-4)
-- Locally deployed vLLM / Ollama (OpenAI-compatible interface)
+**A**: The default LLM is **Zhipu GLM (`glm-4.5-air`, Base URL `https://open.bigmodel.cn/api/paas/v4`)**. Any OpenAI-compatible interface also works, including:
+- Zhipu AI (GLM-4.5-Air / GLM-4-Flash / GLM-4)
+- DeepSeek (deepseek-chat)
+- OpenAI (GPT-4 / GPT-4o)
+- Locally deployed Ollama / vLLM (OpenAI-compatible interface)
 
-Configure Base URL and model name in Settings.
+The local embedding model is fixed to `BAAI/bge-small-zh-v1.5` (ONNX, offline). Configure the Base URL and model name in Settings.
 
 ### Q4: Is memory usage high?
 

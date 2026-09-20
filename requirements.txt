@@ -12,11 +12,20 @@ dpkt>=1.9.8
 langchain>=0.3.0
 langchain-openai>=0.2.0
 langchain-community>=0.3.0
+openai>=1.30.0
 chromadb>=0.5.0
 tiktoken>=0.7.0
+# BGE 中文嵌入模型的 ONNX 本地推理（RAG 检索，离线运行，无需 API）
+onnxruntime>=1.17.0
+
+# 机器学习 / 数值计算 / 绘图（项目核心代码直接 import，显式声明以防间接依赖变动）
+scikit-learn>=1.4.0
+numpy>=1.26.0
+pandas>=2.0.0
+matplotlib>=3.8.0
+joblib>=1.3.0
 
 # 工具库
-scikit-learn>=1.4.0
 python-dotenv>=1.0.0
 pydantic>=2.9.0
 pydantic-settings>=2.4.0
@@ -24,6 +33,10 @@ loguru>=0.7.0
 tqdm>=4.66.0
 aiohttp>=3.10.0
 httpx>=0.27.0
+
+# 报告导出（Word / 读取 PDF 资料）
+python-docx>=1.1.0
+PyPDF2>=3.0.0
 
 # 前端界面（简单Web UI，无需学React）
 gradio>=4.40.0

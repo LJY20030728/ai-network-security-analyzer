@@ -201,13 +201,13 @@ Scapy     四引擎     LLM       SQLite    DPAPI
 | **桌面** | pywebview | 5.x | 原生窗口，系统 WebView |
 | **解析** | Scapy | 2.5+ | PCAP 流式解析 |
 | **算法** | scikit-learn | 1.3+ | HistGradientBoosting / IsolationForest |
-| **AI** | 大模型 API | - | 智谱/DeepSeek/OpenAI 兼容 |
-| **向量** | ChromaDB | 0.4+ | 本地向量库 |
-| **嵌入** | BGE ONNX | - | 中文优化，本地推理 |
+| **AI** | 智谱 GLM 大模型 | glm-4.5-air | 默认大模型；兼容 DeepSeek / OpenAI 接口 / Ollama |
+| **向量** | ChromaDB | 0.5+ | 本地向量库 |
+| **嵌入** | BGE ONNX | bge-small-zh-v1.5 | 中文优化，本地推理，无需 API |
 | **存储** | SQLite | 3.x | WAL 模式，三表+索引 |
 | **安全** | DPAPI (ctypes) | - | Windows 内置加密 |
 | **日志** | loguru | 0.7+ | 结构化日志 |
-| **测试** | pytest | 7.x+ | 141 测试全绿 |
+| **测试** | pytest | 8.x+ | 148 passed / 19 skipped |
 
 ---
 
@@ -216,46 +216,50 @@ Scapy     四引擎     LLM       SQLite    DPAPI
 ### 环境要求
 
 - Windows 10/11（推荐，DPAPI 加密需要）
-- Python 3.11+
+- Python 3.11+（仅源码运行需要；安装包已内置，无需安装）
+- WebView2 Runtime（桌面窗口渲染需要，Windows 10 2004+ / Windows 11 已内置；极少数精简系统缺失时，可在微软官网下载「WebView2 Runtime」）
 - 内存：最低 2GB，推荐 4GB+
 - 磁盘：最低 500MB（含模型和依赖）
 
 ### 方式一：源码运行（推荐开发）
 
+> **最省事：双击运行根目录的 `安装依赖.bat`**。脚本会自动：检测 Python 3.11 → 创建虚拟环境 `venv` → 升级 pip → 安装 `requirements.txt` 中的**全部依赖**（已配置清华镜像，约需 5–15 分钟，结束会显示「依赖安装完成」并暂停，失败也会明确提示）。
+
+手动步骤（与脚本等价）：
+
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/your-username/ai-network-security-analyzer.git
+git clone https://github.com/LJY20030728/ai-network-security-analyzer.git
 cd ai-network-security-analyzer
 
-# 2. 创建虚拟环境
+# 2. 创建虚拟环境并安装【全部依赖】（必须步骤）
 python -m venv venv
 venv\Scripts\activate
-
-# 3. 安装依赖
 pip install -r requirements.txt
 
-# 4. 下载大文件资源（首次运行必须，约 140 MB）
-# BGE 嵌入模型 + MITRE ATT&CK 知识库，因体积较大不包含在仓库中
+# 3. 下载大文件资源（首次运行必须，约 90 MB）
+# BGE 嵌入模型（ONNX）等，因体积较大不包含在仓库中
 python tools/init_resources.py
 
-# 5. 配置 API Key（首次运行）
-# 复制 .env.example 为 .env，填写 LLM_API_KEY
+# 4. 配置 API Key（仅 AI 功能需要，核心检测不需要）
 copy .env.example .env
-# 编辑 .env，填写你的 API Key（也可以在 UI 设置中配置，会用 DPAPI 加密存储）
+# 编辑 .env 填写 LLM_API_KEY；也可启动后在 UI「⚙️ 设置」中配置（DPAPI 加密）
 
-# 6. 启动桌面版
+# 5. 启动桌面版
 python desktop_app.py
 
 # 或者启动 API 服务（浏览器访问 http://127.0.0.1:8080）
 python -m uvicorn src.api.main:app --host 127.0.0.1 --port 8080
 ```
 
-### 方式二：Windows 安装包（推荐用户）
+> 核心检测（规则引擎 / 监督模型 / 时序基线 / 孤立森林）**无需任何 API Key 即可运行**；只有「AI 威胁研判」与「安全问答」需要大模型 Key。
 
-1. 下载最新发布的 `AI-Network-Security-Analyzer-Setup.exe`
-2. 双击运行安装程序，选择安装目录
-3. 安装完成后，桌面快捷方式启动
-4. 首次启动会引导配置 API Key（DPAPI 加密存储，不写死）
+### 方式二：Windows 安装包（推荐普通用户）
+
+1. 前往 [Releases 页面](https://github.com/LJY20030728/ai-network-security-analyzer/releases) 下载 `AI网络安全智能分析系统_Setup_3.0.0.exe`
+2. 双击运行安装程序，选择安装目录（安装包已内置全部运行依赖与模型，无需另装 Python）
+3. 安装完成后，通过桌面 / 开始菜单快捷方式启动
+4. 核心检测开箱即用；如需 AI 威胁研判与安全问答，在应用内「⚙️ 设置」中配置大模型 Key（DPAPI 加密存储，不写死）
 
 ### 方式三：Docker 部署（服务器/跨平台推荐）
 
@@ -326,9 +330,9 @@ docker compose up -d --build
 
 1. 进入「⚙️ 设置」Tab
 2. 配置 API Key（密码输入框，保存后用 DPAPI 加密存储）
-3. 配置 Base URL 和模型名称
+3. 配置 Base URL 和模型名称（**默认：智谱 GLM，Base URL `https://open.bigmodel.cn/api/paas/v4`，模型 `glm-4.5-air`**；本地嵌入固定为 `BAAI/bge-small-zh-v1.5`）
 4. 点击「测试连接」验证 API Key 有效性
-5. 保存后立即生效，无需重启
+5. 保存后立即生效，无需重启；也可切换为 DeepSeek / OpenAI 兼容接口或 Ollama 本地模型
 
 ---
 

@@ -4,6 +4,16 @@
 
 ---
 
+## [3.0.1] - 2026-09-21
+
+### 依赖完整性与文档事实补正 📝
+- **requirements.txt 补全 8 个项目直接 import 但此前未显式声明的依赖**：`onnxruntime`（BGE ONNX 推理）、`python-docx`（Word 报告）、`matplotlib`、`pandas`、`numpy`、`joblib`、`openai`、`PyPDF2`，避免源码安装在不同环境下因间接依赖变动而缺包。
+- **README 模型配置写明事实**：默认大模型为智谱 GLM `glm-4.5-air`（Base URL `https://open.bigmodel.cn/api/paas/v4`），本地嵌入固定为 `BAAI/bge-small-zh-v1.5`（ONNX，离线）；并说明兼容 DeepSeek / OpenAI / Ollama。
+- **安装流程完整提示依赖**：源码运行突出一键脚本 `安装依赖.bat`（自动建 venv 并安装全部依赖）；补充系统级依赖 WebView2 Runtime 的环境要求与下载说明。
+- 说明：本次仅完善依赖清单与文档，未改动检测/AI 运行逻辑，已发布的 v3.0.0 安装包内置 Python 依赖、不受影响。
+
+---
+
 ## [3.0.0] - 2026-09-20
 
 ### 架构修复 🔧

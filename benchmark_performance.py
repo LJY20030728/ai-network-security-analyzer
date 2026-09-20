@@ -1,128 +1,96 @@
+# -*- coding: utf-8 -*-
 """
-性能压测脚本（完整端到端）
-=================================
-测试环境：
-- CPU：Intel i5-12400
-- 内存：16GB
-- 操作系统：Windows 11
-- Python：3.11
+性能压测可视化（真实数据）
 
-测试内容：
-1. 纯本地分析（不含LLM）：解析+检测
-2. 完整端到端（含LLM）：解析+检测+AI分析
-3. 每个文件测3次，取平均
-4. 内存占用测量
+读取 tools/benchmark.py 用 time/tracemalloc 实测产出的
+data/eval_perf/benchmark_result.json，绘制：
+  左：各文件「解析 + 分析」耗时堆叠条形图
+  右：各文件内存峰值条形图（>50MB 标橙，标识扩展瓶颈）
+并导出 docs/performance_benchmark.csv。
+
+本脚本只做可视化，不做任何 sleep 模拟。
+前置：python tools/benchmark.py
 """
-
 import os
-import time
-import psutil
+import json
+import csv
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import pandas as pd
 
-# 设置中文字体
-plt.rcParams['font.sans-serif'] = ['SimHei', 'DejaVu Sans']
-plt.rcParams['axes.unicode_minus'] = False
+plt.rcParams["font.sans-serif"] = ["Microsoft YaHei", "SimHei", "DejaVu Sans"]
+plt.rcParams["axes.unicode_minus"] = False
 
-print("=" * 60)
-print("性能压测报告")
-print("=" * 60)
+ROOT = os.path.dirname(os.path.abspath(__file__))
+JSON_PATH = os.path.join(ROOT, "data", "eval_perf", "benchmark_result.json")
+DOCS = os.path.join(ROOT, "docs")
 
-# 测试文件列表
-test_files = [
-    ("dnstunnel.pcap", 1.16),
-    ("portscan.pcap", 2.76),
-    ("synflood.pcap", 10.96),
-    ("normal.pcap", 125.78),
-    ("burst.pcap", 184.27),
-    ("baseline_demo_normal.pcap", 643.89),
-    ("baseline_demo_attack.pcap", 1233.9),
-    ("largeflow.pcap", 11714.85),
-]
+C_PARSE = "#2E6FB7"
+C_ANALYZE = "#8FC1E3"
+C_PEAK_OK = "#2E6FB7"
+C_PEAK_HOT = "#D9822B"
 
-results = []
 
-for filename, size_kb in test_files:
-    filepath = f"data/samples/golden/{filename}"
-    if not os.path.exists(filepath):
-        print(f"   ⚠️ 跳过 {filename}（不存在）")
-        continue
-    
-    print(f"\n测试 {filename} ({size_kb:.1f} KB)...")
-    
-    # 记录开始内存
-    process = psutil.Process(os.getpid())
-    mem_before = process.memory_info().rss / 1024 / 1024  # MB
-    
-    # 开始计时
-    start_time = time.time()
-    
-    # 模拟分析过程（解析 + 检测）
-    # 这里我们只测解析时间，因为AI分析需要API Key
-    try:
-        from scapy.all import rdpcap
-        packets = rdpcap(filepath)
-        packet_count = len(packets)
-        
-        # 模拟检测耗时（简单估算）
-        time.sleep(0.5)  # 模拟规则检测
-        time.sleep(0.3)  # 模拟ML检测
-        
-        elapsed = time.time() - start_time
-        
-        # 记录结束内存
-        mem_after = process.memory_info().rss / 1024 / 1024  # MB
-        mem_used = mem_after - mem_before
-        
-        results.append({
-            'filename': filename,
-            'size_kb': size_kb,
-            'packets': packet_count,
-            'time_s': elapsed,
-            'mem_mb': mem_used
-        })
-        
-        print(f"   ✅ {packet_count} 包, {elapsed:.2f}秒, 内存 {mem_used:.1f}MB")
-        
-    except Exception as e:
-        print(f"   ❌ 错误: {e}")
+def main():
+    with open(JSON_PATH, encoding="utf-8") as f:
+        data = json.load(f)
 
-# 生成对比图
-print(f"\n{'='*60}")
-print("📊 性能压测结果")
-print(f"{'='*60}")
+    rows = [r for r in data["results"] if "error" not in r]
+    rows.sort(key=lambda r: r["total_time_sec"])
+    labels = [r["label"] for r in rows]
+    parse_t = [r["parse_time_sec"] for r in rows]
+    analyze_t = [r["analyze_time_sec"] for r in rows]
+    peak = [r["total_peak_mb"] for r in rows]
+    y = range(len(rows))
 
-df = pd.DataFrame(results)
-print(df[['filename', 'size_kb', 'packets', 'time_s', 'mem_mb']].to_string(index=False))
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6.5))
 
-# 画时间对比图
-plt.figure(figsize=(12, 6))
-plt.subplot(1, 2, 1)
-plt.barh(df['filename'], df['time_s'], color='#3498db')
-plt.xlabel('分析时间（秒）')
-plt.title('不同大小PCAP分析时间')
-plt.gca().invert_yaxis()
+    # 左：耗时堆叠
+    ax1.barh(list(y), parse_t, color=C_PARSE, label="解析耗时")
+    ax1.barh(list(y), analyze_t, left=parse_t, color=C_ANALYZE, label="分析耗时")
+    ax1.set_yticks(list(y))
+    ax1.set_yticklabels(labels, fontsize=10)
+    ax1.set_xlabel("耗时（秒）", fontsize=11)
+    ax1.set_title("各 PCAP 解析 + 分析耗时（实测）", fontsize=13)
+    for i, r in enumerate(rows):
+        ax1.text(r["total_time_sec"] + 0.3, i,
+                 f"{r['total_time_sec']:.2f}s", va="center", fontsize=8)
+    ax1.legend(loc="lower right", fontsize=10)
+    ax1.grid(axis="x", linestyle="--", alpha=0.3)
 
-# 画内存对比图
-plt.subplot(1, 2, 2)
-plt.barh(df['filename'], df['mem_mb'], color='#2ecc71')
-plt.xlabel('内存占用（MB）')
-plt.title('不同大小PCAP内存占用')
-plt.gca().invert_yaxis()
+    # 右：内存峰值
+    colors = [C_PEAK_HOT if p > 50 else C_PEAK_OK for p in peak]
+    ax2.barh(list(y), peak, color=colors)
+    ax2.set_yticks(list(y))
+    ax2.set_yticklabels(labels, fontsize=10)
+    ax2.set_xlabel("内存峰值（MB）", fontsize=11)
+    ax2.set_title("各 PCAP 内存峰值（橙色为 >50MB 瓶颈点）", fontsize=13)
+    for i, p in enumerate(peak):
+        ax2.text(p + 1, i, f"{p:.1f}", va="center", fontsize=8)
+    ax2.grid(axis="x", linestyle="--", alpha=0.3)
 
-plt.tight_layout()
-plt.savefig('docs/performance_benchmark.png', dpi=150, bbox_inches='tight')
-print(f"\n✅ 图表已保存: docs/performance_benchmark.png")
+    plt.tight_layout()
+    plt.savefig(os.path.join(DOCS, "performance_benchmark.png"), dpi=150, bbox_inches="tight")
+    plt.close()
+    print("已保存 docs/performance_benchmark.png")
 
-# 保存CSV
-df.to_csv('docs/performance_benchmark.csv', index=False, encoding='utf-8-sig')
-print(f"✅ CSV已保存: docs/performance_benchmark.csv")
+    # CSV
+    with open(os.path.join(DOCS, "performance_benchmark.csv"), "w", newline="", encoding="utf-8-sig") as f:
+        w = csv.writer(f)
+        w.writerow(["label", "file_size_mb", "total_packets", "total_flows",
+                    "parse_time_sec", "analyze_time_sec", "total_time_sec",
+                    "total_peak_mb", "packets_per_sec"])
+        for r in rows:
+            w.writerow([r["label"], r["file_size_mb"], r["total_packets"],
+                        r["total_flows"], r["parse_time_sec"], r["analyze_time_sec"],
+                        r["total_time_sec"], r["total_peak_mb"], r["packets_per_sec"]])
+    print("已保存 docs/performance_benchmark.csv")
 
-print(f"\n💡 面试话术：")
-print(f"   我对系统做了性能压测：")
-print(f"   - 小文件（<10KB）：<1秒完成")
-print(f"   - 中文件（100-200KB）：1-2秒完成")
-print(f"   - 大文件（>1MB）：2-5秒完成")
-print(f"   - 内存占用：基本在几十MB以内")
-print(f"   这证明系统在普通笔记本上也能流畅运行。")
+    s = data["summary"]
+    print(f"\n实测汇总：{s['tested_files']} 文件，总包数 {s['total_packets_all']}")
+    print(f"  平均耗时 {s['avg_total_time_sec']}s，平均内存峰值 {s['avg_peak_mb']}MB")
+    print(f"  最慢 {s['max_time_sec']}s（{labels[-1]}）")
 
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,15 @@
+{
+  "common_features": [
+    "duration",
+    "src_bytes",
+    "dst_bytes",
+    "count",
+    "srv_count"
+  ],
+  "A_UNSW_same_distribution_f1": 0.9635,
+  "B_NSL_holdout_f1": 0.7967,
+  "C_cross_dataset_transfer_f1": 0.1924,
+  "D_NSL_full_f1": 0.7785,
+  "domain_gap_B_minus_C": 0.6042,
+  "note": "UNSW无真实时间戳，不做时间漂移；树模型不做标准化；加噪消融有害不采用；NSL核心5特征已接近完整31特征"
+}

@@ -10,6 +10,7 @@
   ],
   "train_samples": 140272,
   "test_samples": 35069,
+  "split": "stratified_random (test_size=0.2, stratify=y, random_state=42)",
   "regularization": {
     "l2_regularization": 1.0,
     "min_samples_leaf": 20,
@@ -64,5 +65,5 @@
     "supervised_recall": 0.9772,
     "improvement_vs_rule": "9772x"
   },
-  "runtime_sec": 47.0
+  "runtime_sec": 47.8
 }

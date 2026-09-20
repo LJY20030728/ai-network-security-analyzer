@@ -102,23 +102,14 @@ def train_and_eval(X, y, y_cat, feature_names):
     from sklearn.ensemble import HistGradientBoostingClassifier
     from sklearn.metrics import classification_report, confusion_matrix, f1_score
 
-    print("[3/4] 训练 HistGradientBoosting（时间划分：前80%训练，后20%测试）...")
-    # 时间划分（网络安全数据集标准做法）
-    # 假设数据是按时间排序的，前80%训练，后20%测试
-    # 模拟"用过去的数据预测未来的攻击"的真实场景
-    n_total = X.shape[0]
-    train_size = int(0.8 * n_total)
-    
-    Xtr = X[:train_size]
-    ytr = y[:train_size]
-    cat_tr = y_cat[:train_size]
-    
-    Xte = X[train_size:]
-    yte = y[train_size:]
-    cat_te = y_cat[train_size:]
-    
-    print(f"  训练集: {Xtr.shape[0]} (前80%), 测试集: {Xte.shape[0]} (后20%)")
-    print(f"  说明：时间划分，模拟真实场景的泛化能力")
+    print("[3/4] 训练 HistGradientBoosting（分层随机划分 80/20）...")
+    # UNSW-NB15 无真实时间戳，且原文件行序后段攻击占比畸高（后20%几乎全攻击），
+    # 不能用"前80%/后20%"行序切分（会导致测试集无正常样本 TN=0、指标虚高）。
+    # 采用分层随机划分，保证训练/测试集类别比例一致，是同分布泛化的标准做法。
+    cat_arr = np.asarray(y_cat)
+    Xtr, Xte, ytr, yte, cat_tr, cat_te = train_test_split(
+        X, y, cat_arr, test_size=0.2, stratify=y, random_state=42)
+    print(f"  训练集: {Xtr.shape[0]} (80%), 测试集: {Xte.shape[0]} (20%)，按标签分层")
 
     t0 = time.time()
     # 优化3+4：增加 L2 正则化 + 早停机制，减少过拟合
@@ -219,6 +210,7 @@ def train_and_eval(X, y, y_cat, feature_names):
         "categorical_features": CATEGORICAL_FEATURES,
         "train_samples": int(Xtr.shape[0]),
         "test_samples": int(Xte.shape[0]),
+        "split": "stratified_random (test_size=0.2, stratify=y, random_state=42)",
         "regularization": {
             "l2_regularization": 1.0,
             "min_samples_leaf": 20,

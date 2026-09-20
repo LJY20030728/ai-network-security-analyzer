@@ -1,0 +1,5 @@
+﻿setting,features,train_data,test_data,f1
+A_UNSW_same_distribution,5_common,UNSW 80%,UNSW 20%,0.9635
+B_NSL_holdout,5_common,NSL KDDTrain,NSL KDDTest,0.7967
+C_cross_dataset_transfer,5_common,UNSW full,NSL KDDTest,0.1924
+D_NSL_full,31_full,NSL KDDTrain,NSL KDDTest,0.7785

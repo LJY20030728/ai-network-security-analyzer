@@ -1,0 +1,21 @@
+{
+  "grid_search_weights": {
+    "supervised": 0.9,
+    "rule_based": 0.0,
+    "baseline": 0.1,
+    "isolation_forest": 0.0
+  },
+  "stacking_coefficients": {
+    "supervised": 9.367,
+    "rule_based": 0.009,
+    "baseline": -0.033,
+    "isolation_forest": -0.372
+  },
+  "heldout_f1": {
+    "仅监督HGB": 0.9691,
+    "固定权重加权": 0.9577,
+    "GridSearch权重": 0.9692,
+    "Stacking元学习器": 0.9691,
+    "级联+Stacking": 0.9691
+  }
+}

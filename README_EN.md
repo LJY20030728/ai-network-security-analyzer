@@ -30,7 +30,7 @@
 
 ## Project Overview
 
-Traditional network forensics relies on security analysts manually inspecting PCAP files packet-by-packet with Wireshark — extremely inefficient and highly dependent on individual experience. While rule engines automate detection, they suffer from severe false negatives for unknown attacks and large-traffic variants (UNSW-NB15 large-flow class Recall = 0.002).
+Traditional network forensics relies on security analysts manually inspecting PCAP files packet-by-packet with Wireshark — extremely inefficient and highly dependent on individual experience. While rule engines automate detection, they suffer from severe false negatives for unknown attacks (rule-engine attack recall on UNSW-NB15 is only 0.0001).
 
 This project is an **AI-assisted offline network forensics analysis tool** that implements:
 - **Four-Engine Integrated Detection**: Supervised model (HistGradientBoosting) as primary engine + Rule engine + EWMA time-series baseline + Isolation Forest, with weighted voting to reduce false positives/negatives
@@ -139,7 +139,7 @@ This project is an **AI-assisted offline network forensics analysis tool** that 
 | **Desktop** | pywebview | 5.x | Native window, system WebView |
 | **Parsing** | Scapy | 2.5+ | PCAP stream parsing |
 | **Algorithm** | scikit-learn | 1.3+ | HistGradientBoosting / IsolationForest |
-| **AI** | Zhipu GLM LLM | glm-4.5-air | Default LLM; also supports DeepSeek / OpenAI / Ollama |
+| **AI** | Zhipu GLM LLM | glm-4-flash | Default LLM; also supports DeepSeek / OpenAI / Ollama |
 | **Vector** | ChromaDB | 0.5+ | Local vector database |
 | **Embedding** | BGE ONNX | bge-small-zh-v1.5 | Chinese-optimized, local inference, no API needed |
 | **Storage** | SQLite | 3.x | WAL mode, three tables + indexes |
@@ -298,7 +298,7 @@ A supervised model (HistGradientBoosting) acts as the **primary detector**, vali
 | Dataset | Flows | Precision | Recall | F1 | Accuracy |
 |---------|-------|-----------|--------|-----|----------|
 | **UNSW-NB15** (in-distribution split) | 175,341 | 0.9637 | **0.9772** | **0.9704** | 0.9594 |
-| **CIC-UNSW cross-dataset** (train UNSW → test CICIDS) | 447,915 | 0.9351 | 0.9628 | **0.9487** | 0.9792 |
+| **CIC-IDS** (CIC 76 features, in-distribution stratified) | 447,915 | 0.9351 | 0.9628 | **0.9487** | 0.9792 |
 
 **vs unsupervised/rule engines** (same UNSW-NB15 test set):
 
@@ -309,7 +309,7 @@ A supervised model (HistGradientBoosting) acts as the **primary detector**, vali
 | Time-series baseline (best σ=2) | 0.5045 |
 | **Supervised model** | **0.9772** |
 
-The supervised model lifts large-flow attack recall from 0.0001 to 0.9772 (~**9,700x**) versus the rule engine — which is why it is the primary detector.
+The supervised model lifts attack recall from 0.0001 (rule engine) to 0.9772 — which is why it is the primary detector.
 
 ### Overfitting Check & Model Stability
 
@@ -321,7 +321,7 @@ The supervised model lifts large-flow attack recall from 0.0001 to 0.9772 (~**9,
 | **5-fold CV F1** | **0.9394 ± 0.0429** | Overall stable |
 | L2 / early stopping | l2=1.0 / enabled | Double safeguard |
 
-The train/test F1 gap is only 0.0088, and cross-dataset (CICIDS) F1 stays at 0.9487 — the model learns general flow-behavior patterns rather than dataset-specific quirks.
+The train/test F1 gap is only 0.0088, so in-distribution overfitting risk is low. Note, however, that genuine cross-dataset transfer degrades sharply when feature systems do not align (see Generalization below; UNSW→NSL is only 0.192) — a new environment therefore needs baseline learning / local retraining rather than reusing a model as-is.
 
 ### UNSW-NB15 Per-Class Recall
 
@@ -344,7 +344,7 @@ A 16-question golden set (MITRE techniques, routing/transport protocols, inciden
 | Recall@3 | 0.9375 |
 | **Recall@5** | **1.0000** |
 | **MRR@5** | **0.9500** |
-| Vector chunks / source docs | 933 / 22 |
+| Vector chunks / source docs | 933 / 20 |
 | Average retrieval time | ~0.3s |
 
 Per-category Recall@5: MITRE 1.0, handbooks 1.0, protocols 1.0. Raw output: `data/eval_rag/rag_result.json`.
@@ -374,76 +374,67 @@ Streaming cuts memory peak by **162.8x** with identical alerts (`data/eval_perf/
 
 ### 1. Feature Importance (Permutation Importance)
 
-Features are validated rather than guessed:
+Features are not guessed — permutation importance is measured on a genuinely unseen test set (a stratified, representative 4,000-flow subset; `n_repeats=3`, scored by F1):
 
 ![Feature Importance](docs/feature_importance.png)
 
 | Rank | Feature | Importance | Meaning |
 |------|---------|------------|---------|
-| 1 | `sinpkt` | 0.0194 | Std-dev of inter-packet arrival timing (jitter) |
-| 2 | `service_dns` | 0.0058 | DNS service flag |
-| 3 | `tcprtt` | 0.0040 | TCP round-trip time |
-| 4 | `proto_sctp` | 0.0038 | SCTP protocol one-hot |
-| 5 | `ct_state_ttl` | 0.0036 | Flow-state TTL correlation count |
+| 1 | `sttl` | **0.2229** | Source-to-destination TTL (attack TTL distribution is highly anomalous; the decisive feature, far ahead of all others) |
+| 2 | `ct_state_ttl` | 0.0089 | Flow-state TTL correlation count |
+| 3 | `sbytes` | 0.0072 | Source-to-destination byte count |
+| 4 | `ct_srv_src` | 0.0061 | Same-service connection count from source |
+| 5 | `ct_srv_dst` | 0.0057 | Same-service connection count to destination |
 
 A category-aggregated view is available at `docs/feature_category_importance.png`.
 
 ---
 
-### 2. Model Selection
+### 2. Generalization & Cross-Domain Transfer (including an honest "failure")
 
-Three gradient-boosted trees compared on NSL-KDD:
+We do not hide the model's weakness. We select five semantically corresponding features shared by UNSW and NSL-KDD (duration / source bytes / destination bytes / connection count / same-service count) and test four settings:
 
-![Model Comparison](docs/model_comparison.png)
+![Generalization Evaluation](docs/generalization_evaluation.png)
 
-| Model | Accuracy | F1 | Train Time | Note |
-|-------|----------|-----|------------|------|
-| **HistGradientBoosting** | 0.7937 | **0.7840** | 0.75s | ✅ Native sklearn, zero extra deps, packaging-friendly |
-| LightGBM | 0.7918 | 0.7815 | 0.24s | Close, but extra dependency |
-| XGBoost | 0.7883 | 0.7770 | 0.26s | Close, but extra dependency |
+| Setting | F1 | Note |
+|---------|-----|------|
+| A. UNSW same distribution | 0.9635 | Performance upper bound |
+| B. NSL independent test set | 0.7967 | Drops after switching datasets |
+| C. UNSW → NSL cross-domain transfer | **0.1924** | Applying the UNSW model to NSL nearly fails |
+| D. NSL full 31 features | 0.7785 | Trained on NSL's own features (control) |
 
-F1 differs by < 0.01; HistGradientBoosting adds no dependency and is the most stable under PyInstaller — the engineering-optimal choice.
+**Domain-shift gap Δ = 0.604.** This "ugly" result is the core justification for the design: **one model cannot be used directly across network environments** — protocol mix, service distribution and traffic baselines differ greatly. Instead of betting on one universal model, the product offers Baseline Management (learning each environment's own normal profile) and local retraining, while AI (RAG + LLM) handles cross-environment triage and explanation.
 
----
-
-### 3. Cross-Dataset Generalization
-
-Effect of scaling / augmentation on cross-dataset (→ NSL-KDD) generalization:
-
-![Cross-Dataset Optimization](docs/cross_dataset_optimization.png)
-
-| Scheme | Accuracy | F1 | Conclusion |
-|--------|----------|-----|------------|
-| Baseline | 0.7937 | 0.7840 | — |
-| StandardScaler | 0.7937 | 0.7840 | Trees are insensitive to monotonic scaling |
-| Scaling + Gaussian noise | 0.7644 | 0.7489 | Noise destroys real flow features |
-
-This "failed experiment" matters: the real cross-dataset bottleneck is feature-space alignment (protocol/service one-hot differences), not scale — so techniques were not stacked blindly.
+> Supervised-model choice: HistGradientBoosting vs XGBoost/LightGBM differs by < 0.01 in F1, but it is native sklearn with zero extra dependencies and the most stable under PyInstaller — the engineering-optimal choice, avoiding two heavy dependencies.
 
 ---
 
-### 4. Performance Stress Test (PCAPs of Various Sizes)
+### 3. Performance Stress Test (10 samples, real timing / memory)
 
-8 golden samples, from 1KB to 11.7MB:
+10 samples, from 10 packets to 11k packets, up to 11.4MB, measured with time + tracemalloc:
 
-![Performance Benchmark](docs/performance_benchmark.png)
+![Performance Bench](docs/performance_benchmark.png)
 
-| File | Size | Packets | Time | Memory |
-|------|------|---------|------|--------|
-| dnstunnel | 1.2KB | 10 | 1.25s | 48.1MB* |
-| portscan | 2.8KB | 50 | 0.80s | 0.16MB |
-| synflood | 11KB | 200 | 0.82s | 0.63MB |
-| normal | 126KB | 1480 | 1.00s | 5.06MB |
-| burst | 184KB | 2080 | 1.00s | 7.73MB |
-| baseline_demo_normal | 644KB | 2729 | 1.21s | 10.4MB |
-| baseline_demo_attack | 1.2MB | 11673 | 2.30s | 42.3MB |
-| **largeflow** | **11.7MB** | 8239 | **1.88s** | **52.1MB** |
+| File | Size | Packets / Flows | Time | Memory |
+|------|------|-----------------|------|--------|
+| dnstunnel | <1KB | 10 / 0 | 0.03s | 0.9MB |
+| portscan | <1KB | 50 / 50 | 0.09s | 0.9MB |
+| rststorm | <1KB | 80 / 80 | 0.12s | 0.9MB |
+| synflood | 0.01MB | 200 / 198 | 0.26s | 1.3MB |
+| lightscan | 0.12MB | 1495 / 235 | 1.49s | 5.7MB |
+| normal | 0.12MB | 1480 / 220 | 1.72s | 5.6MB |
+| burst | 0.18MB | 2080 / 820 | 2.73s | 8.2MB |
+| baseline_demo_normal | 0.63MB | 2729 / 2729 | 4.18s | 15.2MB |
+| largeflow | 11.44MB | 8239 / 1 | 9.51s | 67.0MB |
+| baseline_demo_attack | 1.2MB | 11673 / 11661 | **22.06s** | **124.5MB** |
 
-Average time **1.28s**, average memory peak **20.8MB**. (*dnstunnel includes one-time model-init cost; steady-state memory is far lower.)
+**Typical cases** (everyday files <3,000 packets): 0.03–2.7s, memory peak <8.2MB — second-level on an ordinary laptop; across the 10 samples average time is **4.22s**, average memory peak **23.0MB**.
+
+**Bottlenecks kept honestly**: `baseline_demo_attack` (11.6k high-cardinality short connections) takes 22s / 124MB; `largeflow` (a single 11MB giant flow) 9.5s / 67MB — marked in orange on the chart. The bottleneck is high-cardinality flow-table construction, a clear target for later optimization (hashing/bucketing, giant-flow truncation) rather than being hidden by averages.
 
 ---
 
-### 5. RAG Real Comparison (Direct Prompt vs RAG)
+### 4. RAG Real Comparison (Direct Prompt vs RAG)
 
 Five real security questions, comparing a bare LLM with RAG:
 
@@ -460,40 +451,27 @@ Five real security questions, comparing a bare LLM with RAG:
 
 ---
 
-### 6. Data-Split Rigor (Time Split vs Random Split)
+### 5. Fusion Architecture (Fixed Weights vs Data-Driven Weights)
 
-Security data must not be randomly split (it would train on the "future"). Three splits compared on a real sample:
-
-![Time Split](docs/time_split_comparison.png)
-
-| Split | F1 | Precision | Recall | Accuracy |
-|-------|-----|-----------|--------|----------|
-| Random (wrong) | 0.000 | 0.000 | 0.000 | **0.918** |
-| Time (correct) | 0.013 | 0.200 | 0.007 | 0.899 |
-| Time + class weight | **0.056** | 0.092 | 0.041 | 0.866 |
-
-**Key insight**: random split shows accuracy=0.918 yet attack F1=0 — an **accuracy illusion** caused by the 92% benign majority. The time split exposes it, and only with class weights can rare attacks be detected. We understand metric traps under class imbalance.
-
----
-
-### 7. Four-Engine Fusion (Cascade + Stacking)
-
-Addressing "are the four-engine weights guessed?", four fusion schemes were tested:
+Addressing "are the fusion weights guessed?", five schemes were tested on a leakage-free held-out set (base-engine predictions generated via 5-fold OOF on the dev set, the combiner trained, then evaluated on an independent 20%):
 
 ![Fusion Architecture](docs/fusion_architecture_comparison.png)
 
-| Scheme | F1 | Weight Source |
-|--------|-----|---------------|
-| Naive weighted sum | 0.8235 | ❌ Manual |
-| Grid search | 0.8352 | ⚠️ Grid |
-| Stacking meta-learner | 0.8387 | ✅ Learned |
-| **Cascade + Stacking** | **0.8736** | ✅ Learned |
+| Scheme | held-out F1 | Weight Source |
+|--------|-------------|---------------|
+| Supervised only | 0.9691 | — |
+| Fixed-weight sum (0.5/0.2/0.15/0.15) | **0.9577** | ❌ Manual; weak engines dilute the strong supervisor |
+| Grid-search weights | 0.9692 | ✅ Auto-finds supervised 0.9 / baseline 0.1 |
+| Stacking (LogisticRegression) | 0.9691 | ✅ Learned (supervised coefficient 9.37, others ≈0) |
+| Cascade + Stacking | 0.9691 | ✅ Rules decide first, rest goes to the meta-learner |
 
-**Final architecture**: rule engine fast-filters at stage 1 → supervised / time-series baseline / isolation forest run in parallel at stage 2 → a Stacking meta-learner (LogisticRegression) learns weights at stage 3. F1 improves by 5 points over naive weights; the meta-learner is injected via `set_meta_learner()` and falls back to weighted fusion when absent, so it works out of the box.
+**Honest conclusion**: when the supervised model is already strong (UNSW), guessed fixed weights also mix in noise from weak engines (rule/isolation) and lower F1 (0.958 < 0.969); GridSearch/Stacking both concentrate weight on the supervisor (~0.9) and return to the optimum — proving **fusion weights must be data-driven**.
+
+To be fair, fixed weights are not worthless: in a real-PCAP unknown-attack / unlabeled cold start, the supervised model may fail on out-of-distribution attacks, while the baseline and isolation forest provide signals the supervisor cannot; fixed weights are a conservative engineering trade-off for robustness. The engine injects a trained meta-learner via `set_meta_learner()` and falls back to weighted fusion when absent, so it works out of the box.
 
 ---
 
-### 8. Differentiation from Existing Tools
+### 6. Differentiation from Existing Tools
 
 | Dimension | Wireshark | Suricata/Snort | **This System** |
 |-----------|-----------|----------------|-----------------|
@@ -561,14 +539,20 @@ ai-network-security-analyzer/
 │   ├── eval_perf/             # Evaluation results
 │   └── ...                    # (db/history/chroma_db generated at runtime)
 ├── tests/                     # Tests (148)
-├── tools/                     # Tool scripts
+├── tools/                     # Reproducible experiment scripts
 │   ├── init_resources.py      # Resource initialization (download BGE + MITRE)
-│   ├── train_unsw_supervised.py  # UNSW model training
-│   ├── benchmark.py           # Performance benchmark
-│   └── eval_rag_recall.py     # RAG Recall@5 evaluation
-├── docs/                      # Documentation
-│   ├── 简历项目描述.md (Resume project description)
-│   └── 面试准备_STAR+20问.md (Interview prep STAR + 20 questions)
+│   ├── train_unsw_supervised.py  # UNSW model training (stratified random)
+│   ├── eval_supervised_baseline.py  # CIC supervised baseline
+│   ├── generalization_eval.py # Generalization / cross-domain transfer
+│   ├── fusion_comparison.py   # Fusion architecture comparison
+│   ├── benchmark.py           # Performance benchmark (time + tracemalloc)
+│   └── eval_rag_recall.py     # RAG Recall@k evaluation
+├── feature_importance.py      # Permutation importance (real data)
+├── benchmark_performance.py   # Reads benchmark results and plots
+├── rag_real_comparison.py     # Direct prompt vs RAG real comparison
+├── docs/                      # Documentation and charts
+│   ├── 项目自述_REACT完整版.md (Project narrative, REACT)
+│   └── DOCKER_DEPLOYMENT.md
 ├── config/                    # Configuration
 │   └── settings.py            # Global config (pydantic-settings)
 ├── desktop_app.py             # Desktop entry (pywebview)
@@ -683,8 +667,8 @@ Project positioning is "offline forensics tool" — core detection functionality
 
 ### Q3: Which LLMs are supported?
 
-**A**: The default LLM is **Zhipu GLM (`glm-4.5-air`, Base URL `https://open.bigmodel.cn/api/paas/v4`)**. Any OpenAI-compatible interface also works, including:
-- Zhipu AI (GLM-4.5-Air / GLM-4-Flash / GLM-4)
+**A**: The default LLM is **Zhipu GLM (`glm-4-flash`, Base URL `https://open.bigmodel.cn/api/paas/v4`)**. Any OpenAI-compatible interface also works, including:
+- Zhipu AI (GLM-4-Flash / GLM-4 / GLM-4.5)
 - DeepSeek (deepseek-chat)
 - OpenAI (GPT-4 / GPT-4o)
 - Locally deployed Ollama / vLLM (OpenAI-compatible interface)
@@ -694,8 +678,9 @@ The local embedding model is fixed to `BAAI/bge-small-zh-v1.5` (ONNX, offline). 
 ### Q4: Is memory usage high?
 
 **A**: Very lightweight. Performance benchmark shows:
-- Average memory peak: **22.97 MB**
-- Average analysis time: **5.911 seconds/file** (10 golden samples, 28,036 total packets)
+- Average memory peak: **23.0 MB**
+- Average analysis time: **4.22 seconds/file** (10 samples, 28,036 total packets)
+- Typical <3,000-packet files: 0.03–2.7s / <8.2MB (extreme high-cardinality files can reach 22s / 124MB — a known bottleneck)
 
 BGE ONNX model uses ~100-200MB after loading, but can be loaded on demand. Regular computers can run smoothly.
 

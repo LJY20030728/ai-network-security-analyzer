@@ -256,10 +256,11 @@ python -m uvicorn src.api.main:app --host 127.0.0.1 --port 8080
 
 ### 方式二：Windows 安装包（推荐普通用户）
 
-1. 前往 [Releases 页面](https://github.com/LJY20030728/ai-network-security-analyzer/releases) 下载 `AI网络安全智能分析系统_Setup_3.0.0.exe`
+1. 前往 [Releases 页面](https://github.com/LJY20030728/ai-network-security-analyzer/releases) 下载 `AI网络安全智能分析系统_Setup_3.0.1.exe`
 2. 双击运行安装程序，选择安装目录（安装包已内置全部运行依赖与模型，无需另装 Python）
-3. 安装完成后，通过桌面 / 开始菜单快捷方式启动
-4. 核心检测开箱即用；如需 AI 威胁研判与安全问答，在应用内「⚙️ 设置」中配置大模型 Key（DPAPI 加密存储，不写死）
+3. **安装程序会自动检测 WebView2 Runtime**：若系统缺失，会先弹窗说明，点击「安装」后自动联网下载并静默安装（内置微软官方在线安装器），无需手动处理
+4. 安装完成后，通过桌面 / 开始菜单快捷方式启动
+5. 核心检测开箱即用；如需 AI 威胁研判与安全问答，在应用内「⚙️ 设置」中配置大模型 Key（DPAPI 加密存储，不写死）
 
 ### 方式三：Docker 部署（服务器/跨平台推荐）
 

@@ -194,10 +194,11 @@ python -m uvicorn src.api.main:app --host 127.0.0.1 --port 8080
 
 ### Method 2: Windows Installer (Recommended for Users)
 
-1. Go to the [Releases page](https://github.com/LJY20030728/ai-network-security-analyzer/releases) and download `AI网络安全智能分析系统_Setup_3.0.0.exe`
+1. Go to the [Releases page](https://github.com/LJY20030728/ai-network-security-analyzer/releases) and download `AI网络安全智能分析系统_Setup_3.0.1.exe`
 2. Double-click the installer and choose a directory (it bundles all runtime dependencies and models; no Python needed)
-3. After installation, launch from the desktop / Start Menu shortcut
-4. Core detection works out of the box; for AI threat triage & Q&A, configure an LLM key in the in-app **Settings** (DPAPI encrypted, not hardcoded)
+3. **The installer auto-detects WebView2 Runtime**: if missing, it notifies you up front and, after you click Install, automatically downloads and silently installs it (a signed Microsoft online installer is bundled)
+4. After installation, launch from the desktop / Start Menu shortcut
+5. Core detection works out of the box; for AI threat triage & Q&A, configure an LLM key in the in-app **Settings** (DPAPI encrypted, not hardcoded)
 
 ---
 

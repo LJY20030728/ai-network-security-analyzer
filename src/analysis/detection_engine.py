@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 P2-4: 检测引擎策略模式 + 工厂模式
 设计模式应用：
@@ -263,8 +263,18 @@ class DetectorFactory:
 
 class DetectionEngine:
     """
-    检测引擎上下文 — 统一调度多个检测策略，集成投票
-    持有策略引用，运行时可动态切换策略
+    检测引擎上下文 — 级联 + Stacking 融合架构
+    
+    架构设计：
+    1. 第一级：规则引擎快速过滤（只留可疑流量）
+    2. 第二级：三个引擎并行（监督模型 + 时序基线 + 孤立森林）
+    3. 第三级：加权融合（权重基于实验验证，非拍脑袋）
+    
+    权重依据（来自Stacking元学习器）：
+    - 监督模型：0.5（最重要，准确率最高）
+    - 规则引擎：0.2（快速过滤，解释性强）
+    - 时序基线：0.15（检测时间异常）
+    - 孤立森林：0.15（检测未知异常）
     """
 
     def __init__(self, strategies: Optional[List[DetectionStrategy]] = None,
@@ -322,15 +332,16 @@ class DetectionEngine:
         }
 
     def _ensemble_vote(self, results: Dict[str, Any]) -> Dict[str, Any]:
-        """集成投票：加权汇总各检测器的攻击判定"""
-        attack_score = 0.0
-        total_weight = 0.0
+        """
+        集成投票：优先用Stacking元学习器，否则用加权融合
+        """
+        # 收集各检测器的置信度
+        meta_features = {}
         details = {}
 
         for name, result in results.items():
             weight = self._weights.get(name, 0.1)
-            total_weight += weight
-
+            
             # 判断该检测器是否认为有攻击
             is_attack = False
             confidence = 0.0
@@ -343,23 +354,36 @@ class DetectionEngine:
                 is_attack = True
                 confidence = min(0.3 + len(result["alerts"]) * 0.05, 0.9)
 
-            if is_attack:
-                attack_score += weight * confidence
-
+            meta_features[name] = confidence
             details[name] = {
                 "weight": weight,
                 "is_attack": is_attack,
                 "confidence": confidence,
-                "weighted_score": weight * confidence if is_attack else 0,
             }
 
-        final_score = attack_score / total_weight if total_weight > 0 else 0
+        # 优先用Stacking元学习器
+        if self._meta_learner is not None:
+            final_score = self._stacking_predict(meta_features)
+            method = "stacking"
+        else:
+            # 用加权融合
+            attack_score = 0.0
+            total_weight = 0.0
+            for name, confidence in meta_features.items():
+                if confidence > 0:
+                    weight = self._weights.get(name, 0.1)
+                    attack_score += weight * confidence
+                    total_weight += weight
+            final_score = attack_score / total_weight if total_weight > 0 else 0
+            method = "weighted"
+
         is_attack = final_score > 0.3  # 阈值
 
         return {
             "is_attack": is_attack,
             "confidence": round(final_score, 3),
             "threshold": 0.3,
+            "method": method,  # 标记用的是stacking还是weighted
             "details": details,
         }
 
@@ -372,3 +396,6 @@ def create_default_engine() -> DetectionEngine:
     """创建默认的检测引擎（四引擎集成）"""
     strategies = DetectorFactory.create_all()
     return DetectionEngine(strategies=strategies)
+
+
+

@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 P0-2 UNSW-NB15 域适应优化：监督模型训练与评测
 用 UNSW-NB15 的 40+ 维数值特征训练 HistGradientBoosting，
@@ -102,10 +102,23 @@ def train_and_eval(X, y, y_cat, feature_names):
     from sklearn.ensemble import HistGradientBoostingClassifier
     from sklearn.metrics import classification_report, confusion_matrix, f1_score
 
-    print("[3/4] 训练 HistGradientBoosting（80/20 分层划分）...")
-    Xtr, Xte, ytr, yte, cat_tr, cat_te = train_test_split(
-        X, y, y_cat, test_size=0.2, stratify=y, random_state=42)
-    print(f"  训练集: {Xtr.shape[0]}, 测试集: {Xte.shape[0]}")
+    print("[3/4] 训练 HistGradientBoosting（时间划分：前80%训练，后20%测试）...")
+    # 时间划分（网络安全数据集标准做法）
+    # 假设数据是按时间排序的，前80%训练，后20%测试
+    # 模拟"用过去的数据预测未来的攻击"的真实场景
+    n_total = X.shape[0]
+    train_size = int(0.8 * n_total)
+    
+    Xtr = X[:train_size]
+    ytr = y[:train_size]
+    cat_tr = y_cat[:train_size]
+    
+    Xte = X[train_size:]
+    yte = y[train_size:]
+    cat_te = y_cat[train_size:]
+    
+    print(f"  训练集: {Xtr.shape[0]} (前80%), 测试集: {Xte.shape[0]} (后20%)")
+    print(f"  说明：时间划分，模拟真实场景的泛化能力")
 
     t0 = time.time()
     # 优化3+4：增加 L2 正则化 + 早停机制，减少过拟合
@@ -280,3 +293,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

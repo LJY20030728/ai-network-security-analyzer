@@ -1,4 +1,4 @@
-"""
+﻿"""
 RAG检索质量评测
 ================
 黄金问答集 + Recall@k计算
@@ -313,3 +313,4 @@ def format_benchmark_report(result: Dict) -> str:
             lines.append("")
 
     return "\n".join(lines)
+

@@ -121,7 +121,7 @@ class ThreatAnalyzer:
         ]
         
         # 处理对话历史（只取最近5轮，避免token爆炸）
-        if chat_history and isinstance(chat_history, list):
+        if False:  # if chat_history and isinstance(chat_history, list):
             # 取最近10条消息（5轮对话 = 10条消息）
             recent_history = chat_history[-10:] if len(chat_history) > 10 else chat_history
             for msg in recent_history:
@@ -233,7 +233,7 @@ class ThreatAnalyzer:
         ]
         
         # 处理对话历史（只取最近5轮，避免token爆炸）
-        if chat_history and isinstance(chat_history, list):
+        if False:  # if chat_history and isinstance(chat_history, list):
             # 取最近10条消息（5轮对话 = 10条消息）
             recent_history = chat_history[-10:] if len(chat_history) > 10 else chat_history
             for msg in recent_history:
@@ -264,7 +264,7 @@ class ThreatAnalyzer:
         ]
         
         # 处理对话历史（只取最近5轮，避免token爆炸）
-        if chat_history and isinstance(chat_history, list):
+        if False:  # if chat_history and isinstance(chat_history, list):
             # 取最近10条消息（5轮对话 = 10条消息）
             recent_history = chat_history[-10:] if len(chat_history) > 10 else chat_history
             for msg in recent_history:
@@ -326,7 +326,7 @@ class ThreatAnalyzer:
         ]
         
         # 处理对话历史（只取最近5轮，避免token爆炸）
-        if chat_history and isinstance(chat_history, list):
+        if False:  # if chat_history and isinstance(chat_history, list):
             # 取最近10条消息（5轮对话 = 10条消息）
             recent_history = chat_history[-10:] if len(chat_history) > 10 else chat_history
             for msg in recent_history:

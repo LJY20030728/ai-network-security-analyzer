@@ -47,4 +47,5 @@ class TestBaselineService:
             mock_db_class.return_value = mock_db
             
             result = self.service.delete_baseline("test_baseline")
-            assert result is True
+            assert result["status"] == "success"
+            assert result["deleted"] == "test_baseline"

@@ -165,22 +165,28 @@ class BaselineService:
         return b.to_dict()
     
     def delete_baseline(self, name: str) -> Dict[str, Any]:
-        """删除基线"""
+        """删除基线（SQLite + JSON 双删，任一存在并删除即视为成功）"""
         from src.storage.database import Database
-        
+
+        deleted = False
+
         # 删除SQLite
         try:
-            Database().delete_baseline(name)
+            if Database().delete_baseline(name):
+                deleted = True
         except Exception as e:
             logger.warning(f"从SQLite删除基线失败: {e}")
-        
+
         # 删除JSON
         path = self._baseline_path(name)
         if os.path.exists(path):
             os.remove(path)
-            return {"status": "success", "deleted": name}
-        
-        raise BaselineNotFoundError(message=f"基线不存在: {name}")
+            deleted = True
+
+        if not deleted:
+            raise BaselineNotFoundError(message=f"基线不存在: {name}")
+
+        return {"status": "success", "deleted": name}
     
     def load_baseline_into(self, analyzer, baseline_name: str) -> bool:
         """

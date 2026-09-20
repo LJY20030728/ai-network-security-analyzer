@@ -192,29 +192,26 @@ def expand_terms(query: str) -> str:
 
 def rewrite_query(query: str) -> List[str]:
     """
-    1. 先做术语扩展：缩写→完整术语
-    2. 再做比较问句拆分
-    显式比较问句拆分子查询；其余原样返回。
+    仅做查询结构变换：显式比较问句拆分为多个子查询；其余原样返回（不做术语扩展）。
+    术语扩展 expand_terms 是独立的检索增强步骤，由检索层在召回前单独应用，
+    二者职责分离、可独立测试与组合。
+
     "DNS放大攻击和DNS投毒的区别，检测上关注什么？"
       -> ["DNS放大攻击，检测上关注什么？", "DNS投毒，检测上关注什么？"]
     """
-    # 第一步：术语扩展
-    expanded_query = expand_terms(query)
-
-    # 第二步：比较问句拆分
-    m = _COMPARE_RE.match(expanded_query.strip())
+    m = _COMPARE_RE.match(query.strip())
     if not m:
-        return [expanded_query]
+        return [query]
     head_a = m.group(1).strip()
     head_b = m.group(2).strip()
-    tail = expanded_query[m.end():].strip()
+    tail = query[m.end():].strip()
     # 子查询 = 实体 + 公共疑问尾（若无疑问尾则附加"是什么"保持完整问句）
     tail_q = tail if tail else "是什么"
     subs = []
     for h in (head_a, head_b):
         if h:
             subs.append(f"{h}{tail_q}")
-    return subs if len(subs) >= 2 else [expanded_query]
+    return subs if len(subs) >= 2 else [query]
 
 
 # ---------- RRF 融合 ----------

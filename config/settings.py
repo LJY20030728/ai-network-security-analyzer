@@ -129,7 +129,7 @@ class ProjectSettings(BaseSettings):
     project_name: str = "AI Network Security Analyzer"
     debug: bool = True
     log_level: str = "INFO"
-    version: str = "2.1.0"
+    version: str = "3.0.0"
 
 
 class Settings(BaseSettings):
@@ -151,7 +151,7 @@ class Settings(BaseSettings):
     project_name: str = "AI Network Security Analyzer"
     debug: bool = True
     log_level: str = "INFO"
-    version: str = "2.1.0"
+    version: str = "3.0.0"
 
     # ===== 大模型配置（平铺，向后兼容）=====
     llm_api_key: str = ""

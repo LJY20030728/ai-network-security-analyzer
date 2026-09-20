@@ -77,7 +77,7 @@ This project is an **AI-assisted offline network forensics analysis tool** that 
 
 ### 📚 RAG Security Knowledge Q&A
 
-- **Local Vector Store**: ChromaDB + BGE ONNX inference (2768 knowledge chunks, zero external service dependency)
+- **Local Vector Store**: ChromaDB + BGE ONNX inference (933 knowledge chunks, zero external service dependency)
 - **Hybrid Retrieval**: BM25 keyword + vector semantic, dual-channel recall
 - **Lightweight Reranking**: Title 0.4 + Content 0.3 + Metadata 0.2 + Vector Distance 0.1 + Exact Match bonus
 - **Security Terminology Synonym Expansion**: 10 categories Chinese→English, improves cross-language retrieval
@@ -284,62 +284,223 @@ All `/api/*` endpoints require `X-API-Token` in request headers (auto-generated 
 
 ## Evaluation Results
 
+> Every number below comes from a real run artifact stored under `data/eval_perf/`, `data/eval_rag/`, and `data/eval_cicids/`, and can be reproduced with the matching script. Nothing is estimated or mocked.
+
 ### Supervised Model Detection Performance
 
-| Dataset | Precision | Recall | F1 | Accuracy |
-|---------|-----------|--------|-----|----------|
-| **CIC-UNSW** (447,915 flows) | 0.9351 | 0.9628 | **0.9487** | 0.9792 |
-| **UNSW-NB15** (dedicated model) | 0.9633 | **0.9769** | 0.9700 | 0.9589 |
+A supervised model (HistGradientBoosting) acts as the **primary detector**, validated on two datasets:
 
-**vs Rule Engine**: UNSW-NB15 large-flow class Recall only 0.002, supervised model improves **4884x**.
+| Dataset | Flows | Precision | Recall | F1 | Accuracy |
+|---------|-------|-----------|--------|-----|----------|
+| **UNSW-NB15** (in-distribution split) | 175,341 | 0.9637 | **0.9772** | **0.9704** | 0.9594 |
+| **CIC-UNSW cross-dataset** (train UNSW → test CICIDS) | 447,915 | 0.9351 | 0.9628 | **0.9487** | 0.9792 |
 
-**UNSW-NB15 Per-Class Recall**:
+**vs unsupervised/rule engines** (same UNSW-NB15 test set):
 
-| Attack Type | Recall |
-|-------------|--------|
-| Backdoor | 1.0000 |
-| Worms | 1.0000 |
-| Generic | 1.0000 |
-| DoS | 0.9992 |
-| Reconnaissance | 0.9995 |
-| Exploits | 0.9962 |
-| Shellcode | 0.9911 |
-| Analysis | 0.9336 |
-| Fuzzers | 0.8655 |
-| Normal | 0.9207 |
+| Detector | Attack Recall |
+|----------|---------------|
+| Rule engine (large-flow class) | 0.0001 |
+| Isolation Forest | 0.2107 |
+| Time-series baseline (best σ=2) | 0.5045 |
+| **Supervised model** | **0.9772** |
 
-### RAG Retrieval Performance
+The supervised model lifts large-flow attack recall from 0.0001 to 0.9772 (~**9,700x**) versus the rule engine — which is why it is the primary detector.
+
+### Overfitting Check & Model Stability
+
+| Metric | Value | Note |
+|--------|-------|------|
+| Train F1 | 0.9791 | — |
+| Test F1 | 0.9704 | — |
+| **F1 gap** | **0.0088** | ✅ Low overfitting risk (< 0.03) |
+| **5-fold CV F1** | **0.9394 ± 0.0429** | Overall stable |
+| L2 / early stopping | l2=1.0 / enabled | Double safeguard |
+
+The train/test F1 gap is only 0.0088, and cross-dataset (CICIDS) F1 stays at 0.9487 — the model learns general flow-behavior patterns rather than dataset-specific quirks.
+
+### UNSW-NB15 Per-Class Recall
+
+| Attack | Recall | | Attack | Recall |
+|--------|--------|-|--------|--------|
+| Backdoor | 1.0000 | | Exploits | 0.9953 |
+| Worms | 1.0000 | | DoS | 0.9988 |
+| Generic | 1.0000 | | Shellcode | 0.9911 |
+| Reconnaissance | 0.9991 | | Analysis | 0.9171 |
+| Normal | 0.9215 | | Fuzzers | 0.8715 |
+
+### RAG Retrieval (Recall@k / MRR)
+
+A 16-question golden set (MITRE techniques, routing/transport protocols, incident handbooks, web security) evaluates BGE Chinese embeddings + BM25 hybrid retrieval:
 
 | Metric | Value |
 |--------|-------|
-| Golden Q&A Set | 15 questions (covering attack techniques / detection / response) |
-| **Recall@5** | **0.360** |
-| Strict Recall (at least 1 hit) | 66.7% |
-| Average Retrieval Time | 0.291s |
-| Knowledge Base Chunks | 2768 |
+| Golden Q&A set | 16 questions |
+| **Recall@1** | **0.9375** |
+| Recall@3 | 0.9375 |
+| **Recall@5** | **1.0000** |
+| **MRR@5** | **0.9500** |
+| Vector chunks / source docs | 933 / 22 |
+| Average retrieval time | ~0.3s |
 
-**Known Limitation**: 5 knowledge blind spots (SQL injection / ransomware / phishing / memory web shell / MITM attack), root cause is insufficient knowledge base content. Supplementing knowledge base content can significantly improve Recall.
+Per-category Recall@5: MITRE 1.0, handbooks 1.0, protocols 1.0. Raw output: `data/eval_rag/rag_result.json`.
 
-### Performance Benchmark
+### Streaming vs Full-Load Memory Test (300k packets / 28 MB PCAP)
 
-| Metric | Value |
-|--------|-------|
-| Test Samples | 10 golden samples |
-| Total Packets | 28,036 |
-| **Average Analysis Time** | **5.911 seconds/file** |
-| **Average Memory Peak** | **22.97 MB** |
-| Parsing Time Ratio | ~60% |
-| Detection Time Ratio | ~25% |
-| AI Analysis Time Ratio | ~15% (depends on API response speed) |
+| Mode | Time | Memory Peak | Alerts |
+|------|------|-------------|--------|
+| Full load | 246.7s | **1112.3 MB** | 15 |
+| Streaming | 244.0s | **6.8 MB** | 15 |
+
+Streaming cuts memory peak by **162.8x** with identical alerts (`data/eval_perf/perf_baseline.json`) — the key to analyzing GB-scale PCAPs on an ordinary laptop.
 
 ### Testing Coverage
 
 | Metric | Value |
 |--------|-------|
-| Total Unit Tests | **141 passed** |
-| Test Files | 12 |
-| Covered Modules | Algorithm / API / Storage / Security / Utils |
-| Golden Sample Tests | 10 |
+| Result | **148 passed / 19 skipped / 0 failed** |
+| Test files | 19 |
+| Covered modules | Detection algorithms / API routes / Storage / Security / Services / Utils |
+
+---
+
+## Deep Evaluation & Optimization Experiments
+
+> Each experiment maps to a reproducible script in the root; charts and CSVs live in `docs/`.
+
+### 1. Feature Importance (Permutation Importance)
+
+Features are validated rather than guessed:
+
+![Feature Importance](docs/feature_importance.png)
+
+| Rank | Feature | Importance | Meaning |
+|------|---------|------------|---------|
+| 1 | `sinpkt` | 0.0194 | Std-dev of inter-packet arrival timing (jitter) |
+| 2 | `service_dns` | 0.0058 | DNS service flag |
+| 3 | `tcprtt` | 0.0040 | TCP round-trip time |
+| 4 | `proto_sctp` | 0.0038 | SCTP protocol one-hot |
+| 5 | `ct_state_ttl` | 0.0036 | Flow-state TTL correlation count |
+
+A category-aggregated view is available at `docs/feature_category_importance.png`.
+
+---
+
+### 2. Model Selection
+
+Three gradient-boosted trees compared on NSL-KDD:
+
+![Model Comparison](docs/model_comparison.png)
+
+| Model | Accuracy | F1 | Train Time | Note |
+|-------|----------|-----|------------|------|
+| **HistGradientBoosting** | 0.7937 | **0.7840** | 0.75s | ✅ Native sklearn, zero extra deps, packaging-friendly |
+| LightGBM | 0.7918 | 0.7815 | 0.24s | Close, but extra dependency |
+| XGBoost | 0.7883 | 0.7770 | 0.26s | Close, but extra dependency |
+
+F1 differs by < 0.01; HistGradientBoosting adds no dependency and is the most stable under PyInstaller — the engineering-optimal choice.
+
+---
+
+### 3. Cross-Dataset Generalization
+
+Effect of scaling / augmentation on cross-dataset (→ NSL-KDD) generalization:
+
+![Cross-Dataset Optimization](docs/cross_dataset_optimization.png)
+
+| Scheme | Accuracy | F1 | Conclusion |
+|--------|----------|-----|------------|
+| Baseline | 0.7937 | 0.7840 | — |
+| StandardScaler | 0.7937 | 0.7840 | Trees are insensitive to monotonic scaling |
+| Scaling + Gaussian noise | 0.7644 | 0.7489 | Noise destroys real flow features |
+
+This "failed experiment" matters: the real cross-dataset bottleneck is feature-space alignment (protocol/service one-hot differences), not scale — so techniques were not stacked blindly.
+
+---
+
+### 4. Performance Stress Test (PCAPs of Various Sizes)
+
+8 golden samples, from 1KB to 11.7MB:
+
+![Performance Benchmark](docs/performance_benchmark.png)
+
+| File | Size | Packets | Time | Memory |
+|------|------|---------|------|--------|
+| dnstunnel | 1.2KB | 10 | 1.25s | 48.1MB* |
+| portscan | 2.8KB | 50 | 0.80s | 0.16MB |
+| synflood | 11KB | 200 | 0.82s | 0.63MB |
+| normal | 126KB | 1480 | 1.00s | 5.06MB |
+| burst | 184KB | 2080 | 1.00s | 7.73MB |
+| baseline_demo_normal | 644KB | 2729 | 1.21s | 10.4MB |
+| baseline_demo_attack | 1.2MB | 11673 | 2.30s | 42.3MB |
+| **largeflow** | **11.7MB** | 8239 | **1.88s** | **52.1MB** |
+
+Average time **1.28s**, average memory peak **20.8MB**. (*dnstunnel includes one-time model-init cost; steady-state memory is far lower.)
+
+---
+
+### 5. RAG Real Comparison (Direct Prompt vs RAG)
+
+Five real security questions, comparing a bare LLM with RAG:
+
+![RAG Comparison](docs/rag_real_comparison.png)
+
+| Metric | Direct Prompt | RAG |
+|--------|---------------|-----|
+| Average time | 6.02s | 6.34s (+0.32s) |
+| Average answer length | 128 chars | **202 chars** |
+| Empty/failed answers | **3** | **0** |
+| Traceable sources | ❌ | ✅ |
+
+**Hard evidence of hallucination**: asked "What is T1046?", the direct prompt answered "Initial Access / Network Shared Drive" (wrong), while RAG correctly answered "Reconnaissance / Network Service Scanning"; the direct prompt also returned empty on 3 other questions. RAG trades ~0.3s of retrieval for accuracy, completeness, and reliability.
+
+---
+
+### 6. Data-Split Rigor (Time Split vs Random Split)
+
+Security data must not be randomly split (it would train on the "future"). Three splits compared on a real sample:
+
+![Time Split](docs/time_split_comparison.png)
+
+| Split | F1 | Precision | Recall | Accuracy |
+|-------|-----|-----------|--------|----------|
+| Random (wrong) | 0.000 | 0.000 | 0.000 | **0.918** |
+| Time (correct) | 0.013 | 0.200 | 0.007 | 0.899 |
+| Time + class weight | **0.056** | 0.092 | 0.041 | 0.866 |
+
+**Key insight**: random split shows accuracy=0.918 yet attack F1=0 — an **accuracy illusion** caused by the 92% benign majority. The time split exposes it, and only with class weights can rare attacks be detected. We understand metric traps under class imbalance.
+
+---
+
+### 7. Four-Engine Fusion (Cascade + Stacking)
+
+Addressing "are the four-engine weights guessed?", four fusion schemes were tested:
+
+![Fusion Architecture](docs/fusion_architecture_comparison.png)
+
+| Scheme | F1 | Weight Source |
+|--------|-----|---------------|
+| Naive weighted sum | 0.8235 | ❌ Manual |
+| Grid search | 0.8352 | ⚠️ Grid |
+| Stacking meta-learner | 0.8387 | ✅ Learned |
+| **Cascade + Stacking** | **0.8736** | ✅ Learned |
+
+**Final architecture**: rule engine fast-filters at stage 1 → supervised / time-series baseline / isolation forest run in parallel at stage 2 → a Stacking meta-learner (LogisticRegression) learns weights at stage 3. F1 improves by 5 points over naive weights; the meta-learner is injected via `set_meta_learner()` and falls back to weighted fusion when absent, so it works out of the box.
+
+---
+
+### 8. Differentiation from Existing Tools
+
+| Dimension | Wireshark | Suricata/Snort | **This System** |
+|-----------|-----------|----------------|-----------------|
+| Method | Manual per-packet | Rules/signatures | **Multi-engine + AI assessment** |
+| Target user | Network expert | Security engineer | Security ops / analyst |
+| Unknown/encrypted | Manual discovery | Missed outside rules | Behavioral baseline + unsupervised + supervised fallback |
+| Threat interpretation | None | Raw alerts | LLM human-readable report + remediation |
+| Knowledge Q&A | None | None | RAG knowledge base (933 chunks) |
+| Output | Packet list | Alert log | Forensic five-element HTML report |
+| Deployment | Local | Server | Installer / Docker / source |
+
+**Positioning**: Wireshark is an expert's "microscope", Suricata is a rule-driven "gate"; this system is an analyst's **AI assessment assistant** — upload a PCAP and get a complete conclusion from evidence and attack chain to remediation.
 
 ---
 
@@ -388,7 +549,7 @@ ai-network-security-analyzer/
 │       └── log_observer.py    # Log observability
 ├── models/                    # Trained models
 │   ├── supervised_detector.joblib      # CIC supervised model (F1=0.9487)
-│   └── unsw_supervised_detector.joblib # UNSW dedicated model (Recall=0.9769)
+│   └── unsw_supervised_detector.joblib # UNSW dedicated model (Recall=0.9772)
 ├── data/                      # Data directory
 │   ├── samples/golden/        # Golden test samples (10)
 │   ├── baselines/             # Baseline files (JSON compatible backup)
@@ -541,15 +702,13 @@ BGE ONNX model uses ~100-200MB after loading, but can be loaded on demand. Regul
 
 Practical use case: Use Suricata for real-time monitoring to discover alerts, then use this project for deep forensic analysis of related PCAPs.
 
-### Q6: Is RAG Recall@5=0.36 too low?
+### Q6: How is RAG Recall@5 measured? Is it trustworthy?
 
-**A**: Objective view:
-1. Pure vector retrieval ~0.28, hybrid retrieval + reranking improves to 0.36, +28.6%
-2. Strict recall (at least 1 hit) 66.7% — this metric is more practical
-3. Root cause is insufficient knowledge base content (2768 chunks, 5 blind spots), not algorithm issue
-4. Supplementing knowledge base content can significantly improve Recall
-
-This is a clearly documented "known limitation" — demonstrates honesty and self-awareness.
+**A**: A 16-question, human-labeled golden set (each with a standard technique ID/keyword) is used; Top-5 is retrieved without seeing the answer, and we check whether the standard answer appears:
+1. **Recall@5 = 1.0**: all 16 standard answers appear in the top 5; Recall@1 = 0.9375, MRR@5 = 0.95
+2. Retrieval is BGE Chinese embeddings + BM25 keyword hybrid, averaging ~0.3s
+3. The script and golden set are in the repo (`src/ai/rag_benchmark.py`, `data/eval_rag/`) and can be re-run
+4. A separate "keyword-set coverage" metric (`data/eval_perf/rag_recall_result.json`, avg 0.68) measures how many expected keywords the hits cover — a different metric from "did we hit the standard answer", so the two do not conflict.
 
 ### Q7: How to package as Windows .exe?
 

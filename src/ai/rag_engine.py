@@ -10,7 +10,7 @@ from typing import List, Dict, Any, Optional
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from loguru import logger
 from config.settings import settings
-from src.ai.retrieval_hybrid import BM25Index, rewrite_query, rrf_fuse
+from src.ai.retrieval_hybrid import BM25Index, expand_terms, rewrite_query, rrf_fuse
 
 
 class RAGEngine:
@@ -233,8 +233,10 @@ class RAGEngine:
             fused_ids: List[str] = []
             seen: set = set()
             for subq in sub_queries:
-                vec_ids = self._vector_search(subq, 20, filter_dict)
-                bm_ids = self._bm25.score(subq, filter_dict, top_k=20)
+                # 术语扩展（缩写→完整术语）仅用于召回，不改变原始查询
+                recall_q = expand_terms(subq)
+                vec_ids = self._vector_search(recall_q, 20, filter_dict)
+                bm_ids = self._bm25.score(recall_q, filter_dict, top_k=20)
                 merged = rrf_fuse([vec_ids, bm_ids])
                 for doc_id in merged:
                     if doc_id not in seen:

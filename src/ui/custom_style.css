@@ -334,3 +334,25 @@ h1 {
     -webkit-text-fill-color: transparent;
     background-clip: text;
 }
+
+/* ============================================================
+   完整分析报告 JSON 框：高度强制控制
+   （Gradio 6.26 的 Code lines/max_lines 未转为CSS高度，
+     会被内容撑到数千px，这里用 elem_id + CSS 强制限制）
+   ============================================================ */
+#raw-code-collapsed .cm-editor {
+    height: 300px !important;
+    max-height: 300px !important;
+}
+#raw-code-full .cm-editor {
+    height: 680px !important;
+    max-height: 680px !important;
+}
+#raw-code-collapsed .cm-scroller,
+#raw-code-full .cm-scroller {
+    overflow: auto !important;
+}
+#raw-code-collapsed,
+#raw-code-full {
+    margin-bottom: 12px;
+}

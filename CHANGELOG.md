@@ -4,6 +4,34 @@
 
 ---
 
+## [3.0.0] - 2026-09-20
+
+### 架构修复 🔧
+
+#### 1. 统一 FastAPI 应用实例（关键）
+- **问题**：重构后存在两个并行 FastAPI app —— `src/api/main.py` 自建了一个残缺 app（无 Token 鉴权中间件、无审计路由），而 `src/ui/gradio_app.py` 中功能完整的 app（含鉴权/审计/全部端点）反而未被使用，导致实际运行的服务"裸奔"且审计接口 404。
+- **修复**：`main.py` 改为纯 re-export 唯一完整 app，`from src.api.main import app` 与直接导入得到同一实例，彻底消除行为不一致。
+
+#### 2. 检测引擎 Stacking 接口补全
+- 补全 `_meta_learner` 初始化、`set_meta_learner()` 与 `_stacking_predict()`，修复空输入即 `AttributeError` 的崩溃；未注入元学习器时自动回退加权融合，保证开箱可用。
+
+#### 3. 报告 case_id 改用文件内容哈希
+- **问题**：API 分析路径误用"文件路径字符串的 md5"作为报告标识，同一 PCAP 每次上传路径不同就重复生成报告。
+- **修复**：统一改用文件内容 SHA-256（与 Gradio 路径一致），实现"同一内容 PCAP ↔ 唯一报告"，重复分析覆盖旧版、不再产生一堆 HTML。
+
+#### 4. 基线服务缺陷修复
+- `utils/paths.py` 新增 `ensure_dir()`，修复基线服务导入即 ImportError；`delete_baseline` 改为 SQLite/JSON 双删容错。
+
+#### 5. RAG 检索职责分离
+- `rewrite_query` 回归单一职责（仅拆分"X 和 Y 的区别"类比较问句），术语缩写扩展移至检索循环按子查询独立进行，修复因职责混乱导致的测试失败。
+
+### 测试与交付 ✅
+- 完整测试：**148 passed / 19 skipped / 0 failed**（本轮开始时为 11 failed / 1 error，逐条原因级修复，未放宽断言）。
+- 清理过期产物：删除 `build/`、`dist/`、`installer_output/`（约 1 GB）、54 个已入库的过期 report JSON，清空重复 uploads/reports。
+- README 评测章节全面重写：全部数字对齐真实结果 JSON，并补齐 9 张实验图表。
+
+---
+
 ## [2.1.0] - 2026-09-14
 
 ### 新增功能 ✨

@@ -30,8 +30,15 @@ class TestSystemRoutes:
         assert response.status_code in (200, 307, 302)
     
     def test_nonexistent_route(self):
-        """测试：不存在的路由返回404"""
-        response = self.client.get("/api/nonexistent")
+        """测试：不存在的路由返回404（鉴权中间件先拦截未认证请求）"""
+        from config.settings import settings
+        # 未认证：先被鉴权中间件拦截得到 401（不暴露路由是否存在）
+        pre = self.client.get("/api/nonexistent")
+        assert pre.status_code == 401
+        # 已认证：路由不存在 → 404
+        response = self.client.get(
+            "/api/nonexistent",
+            headers={"X-API-Token": settings.api_auth_token})
         assert response.status_code == 404
 
 

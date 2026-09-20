@@ -62,7 +62,7 @@ seed_assets()
 app = FastAPI(
     title=settings.project_name,
     description="基于流行为检测与LLM辅助研判的网络异常分析系统",
-    version="1.2.0"
+    version="3.0.0"
 )
 
 # CORS配置（仅允许本机访问，收紧默认全开策略）
@@ -285,7 +285,7 @@ async def health_check():
     return {
         "status": "healthy",
         "project": settings.project_name,
-        "version": "2.0.0",
+        "version": settings.version,
         "llm_available": llm_available,
         "llm_model": settings.llm_model,
     }
@@ -794,10 +794,11 @@ def _analyze_pcap_task(filepath: str, enable_ai: bool, baseline_name: str = "") 
 
     # 取证型 HTML 报告（含证据溯源）
     try:
-        # 【P0修复】用PCAP文件的MD5哈希作为case_id，实现报告去重
-        # 同一个PCAP文件 → 同一个报告文件名（覆盖旧的，只保留最新版本）
-        pcap_md5 = hashlib.md5(filepath.encode('utf-8')).hexdigest()[:12]
-        case_id = f"pcap_{pcap_md5}"
+        # 用PCAP【内容】哈希作为case_id（与Gradio路径统一）：
+        # 同一内容的PCAP（无论文件名/上传路径）→ 唯一报告，覆盖旧版只留最新；
+        # 此前误用 filepath 路径字符串的md5，导致每次上传路径不同就重复生成。
+        _content_hash = (sha256 or "")[:16]
+        case_id = f"PCAP-{_content_hash}" if _content_hash else None
         
         html_path = save_html_report(
             analysis_report,
@@ -1273,10 +1274,23 @@ def create_gradio_interface():
                 analyze_btn = gr.Button("🔍 开始分析", variant="primary")
                 process_output = gr.Markdown(label="🧠 分析过程", value="🕐 等待上传 PCAP 开始分析")
                 with gr.Row():
-                    summary_output = gr.Textbox(label="📋 流量概览", lines=10)
-                    threat_output = gr.Textbox(label="⚠️ AI威胁分析", lines=10)
+                    summary_output = gr.Textbox(
+                                                label="📋 流量概览", lines=15, max_lines=25)
+                    threat_output = gr.Textbox(
+                                                label="⚠️ AI威胁分析", lines=15, max_lines=25)
                 with gr.Row():
-                    raw_output = gr.JSON(label="📊 完整分析报告（JSON）")
+                    toggle_raw_btn = gr.Button(
+                        "📖 展开完整报告", size="sm")
+                raw_output = gr.Code(
+                    label="📊 完整分析报告（JSON）",
+                    language="json", lines=12, max_lines=15,
+                    elem_id="raw-code-collapsed")
+                raw_output_full = gr.Code(
+                    label="📊 完整分析报告（JSON）· 展开视图",
+                    language="json", lines=30, max_lines=40, visible=False,
+                    elem_id="raw-code-full")
+                raw_content_state = gr.State("")
+                raw_expanded_state = gr.State(False)
                 # 下载报告区域：按钮在上，进度条和操作按钮在下
                 report_download = gr.DownloadButton(
                     label="📄 下载取证型HTML报告", value=None, visible=True)
@@ -1363,14 +1377,14 @@ def create_gradio_interface():
                 def analyze_pcap_gradio(file, ai_enabled, baseline_name):
                     """生成器版：分阶段输出分析过程 + AI 流式研判 + 写入历史记录"""
                     if not file:
-                        yield ("❌ 请先上传PCAP文件", "请先上传PCAP文件", "", {}, None,
+                        yield ("❌ 请先上传PCAP文件", "请先上传PCAP文件", "", "", None,
                                gr.update(value=_history_table_value()), gr.update(value=None),
                                False)
                         return
                     try:
                         # 阶段 1：解析 + 特征提取 + 规则/基线/ML 检测
                         yield ("🔍 阶段 1/4：正在解析 PCAP 并提取网络流特征（规则→基线→ML 检测）...",
-                               "⏳ 分析中...", "", {}, None, gr.update(value=_history_table_value()), gr.update(value=None), False)
+                               "⏳ 分析中...", "", "", None, gr.update(value=_history_table_value()), gr.update(value=None), False)
                         parser = PcapParser()
                         traffic_analyzer = TrafficAnalyzer()
                         if baseline_name:
@@ -1378,10 +1392,11 @@ def create_gradio_interface():
                         report = traffic_analyzer.analyze_stream(
                             parser.iter_packets(file.name), sample_count=50)
                         if not report.get("summary", {}).get("total_packets"):
-                            yield ("❌ PCAP文件解析失败", "PCAP文件解析失败", "", {}, None,
+                            yield ("❌ PCAP文件解析失败", "PCAP文件解析失败", "", "", None,
                                    gr.update(value=_history_table_value()), gr.update(value=None), False)
                             return
 
+                        report_json = json.dumps(report, ensure_ascii=False, indent=2, default=str)
                         summary = f"""📊 流量分析概览
 ━━━━━━━━━━━━━━━━━━━━
 📦 总数据包数: {report['summary']['total_packets']}
@@ -1424,7 +1439,7 @@ def create_gradio_interface():
                             if llm.is_available():
                                 threat_analyzer = get_threat_analyzer()
                                 yield ("📚 阶段 2/4：RAG 知识检索（MITRE ATT&CK + 处置手册）...",
-                                       summary, "🔎 检索中...", report, None,
+                                       summary, "🔎 检索中...", report_json, None,
                                        gr.update(value=_history_table_value()), gr.update(value=None), False)
                                 # 流式输出研判过程
                                 ai_threat = ""
@@ -1433,7 +1448,7 @@ def create_gradio_interface():
                                         packet_samples=parser.to_dict_list()[:50]):
                                     ai_threat += chunk
                                     yield ("🧠 阶段 3/4：AI 威胁研判中（流式输出）...",
-                                           summary, ai_threat, report, None,
+                                           summary, ai_threat, report_json, None,
                                            gr.update(value=_history_table_value()), gr.update(value=None), False)
                             else:
                                 ai_threat = "⚠️ 未配置大模型API Key，无法进行AI分析\n请在⚙️设置中配置LLM_API_KEY"
@@ -1468,7 +1483,7 @@ def create_gradio_interface():
 
                         # 阶段 4：生成 HTML 报告 + 写入历史
                         yield ("📄 阶段 4/4：生成取证型 HTML 报告...",
-                               summary, ai_threat, report, None,
+                               summary, ai_threat, report_json, None,
                                gr.update(value=_history_table_value()), gr.update(value=None), False)
                         html_path = None
                         try:
@@ -1529,7 +1544,7 @@ def create_gradio_interface():
                             logger.warning(f"写入分析历史失败: {e}")
 
                         yield (f"✅ 分析完成（{get_timestamp_str()}）",
-                               summary, ai_threat, report, html_path,
+                               summary, ai_threat, report_json, html_path,
                                gr.update(value=_history_table_value()),
                                _build_baseline_compare_svg(report.get("window_series"),
                                                            report.get("baseline_profile")),
@@ -1537,7 +1552,7 @@ def create_gradio_interface():
 
                     except Exception as e:
                         logger.error(f"分析失败: {e}")
-                        yield (f"❌ 分析失败: {str(e)}", "分析失败", "", {}, None,
+                        yield (f"❌ 分析失败: {str(e)}", "分析失败", "", "", None,
                                gr.update(value=_history_table_value()), gr.update(value=None),
                                False)  # 分析失败保持 analysis_done=False
 
@@ -1746,7 +1761,7 @@ def create_gradio_interface():
                         return
                     
                     # 隐藏确认区域，显示进度
-                    yield f"🔄 正在后台重新分析 `{fname}`，请稍候...（阶段1/3：解析PCAP+特征提取+规则检测）", gr.update(visible=False), gr.update(value=f"🔄 正在后台重新分析 `{fname}`，请稍候...（阶段1/3：解析PCAP+特征提取+规则检测）", visible=True)
+                    yield "", gr.update(visible=False), gr.update(value=f"🔄 正在后台重新分析 `{fname}`，请稍候...（阶段1/3：解析PCAP+特征提取+规则检测）", visible=True)
                     
                     try:
                         # 后台执行完整分析（复用底层同步函数）
@@ -1755,7 +1770,7 @@ def create_gradio_interface():
                         result = _analyze_pcap_task(file_path, enable_ai=True, baseline_name="")
                         elapsed = _t.time() - t0
                         
-                        yield f"🔄 分析完成（耗时 {elapsed:.1f}秒），正在生成报告...（阶段2/3）", gr.update(visible=False), gr.update(value=f"🔄 分析完成（耗时 {elapsed:.1f}秒），正在生成报告...（阶段2/3）", visible=True)
+                        yield "", gr.update(visible=False), gr.update(value=f"🔄 分析完成（耗时 {elapsed:.1f}秒），正在生成报告...（阶段2/3）", visible=True)
                         
                         html_path = result.get("report_html", "")
                         if not html_path:
@@ -1768,7 +1783,7 @@ def create_gradio_interface():
                         except Exception:
                             pass
                         
-                        yield f"✅ 报告已生成，正在打开...（阶段3/3）", gr.update(visible=False), gr.update(value=f"✅ 报告已生成，正在打开...（阶段3/3）", visible=True)
+                        yield "", gr.update(visible=False), gr.update(value=f"✅ 报告已生成，正在打开...（阶段3/3）", visible=True)
                         
                         # 打开报告
                         try:
@@ -1782,14 +1797,14 @@ def create_gradio_interface():
                                f"⏱ 耗时：{elapsed:.1f}秒\n"
                                f"📂 报告：`{os.path.basename(html_path)}`\n\n"
                                f"💡 重新分析在后台执行，Tab1的PCAP分析页面不受影响")
-                        yield final_msg, gr.update(visible=False), gr.update(value=final_msg, visible=True)
+                        yield "", gr.update(visible=False), gr.update(value=final_msg, visible=True)
                         
                     except Exception as e:
                         import traceback
                         logger.error(f"重新分析失败: {e}\n{traceback.format_exc()}")
                         err_msg = (f"❌ 重新分析失败：{type(e).__name__}: {e}\n\n"
                                f"💡 建议：切换到Tab1重新上传该PCAP文件进行分析")
-                        yield err_msg, gr.update(visible=False), gr.update(value=err_msg, visible=True)
+                        yield "", gr.update(visible=False), gr.update(value=err_msg, visible=True)
                 
                 def cancel_regen_ui():
                     """取消重新分析"""
@@ -1804,7 +1819,7 @@ def create_gradio_interface():
                     except Exception:
                         hs = []
                     if row is None or not hs or row >= len(hs):
-                        return ("⚠️ 记录已不存在或已被清空", "", "", {}, None)
+                        return ("⚠️ 记录已不存在或已被清空", "", "", "", None)
                     h = hs[row]
                     
                     # 【P1优化】用更友好的Markdown格式展示详情
@@ -1836,22 +1851,23 @@ def create_gradio_interface():
 **💡 提示：** 点击下方「📂 加载到分析结果」按钮，可在Tab1查看完整的可视化分析结果。
 """
                     
+                    raw_json = json.dumps(h.get("raw", {}), ensure_ascii=False, indent=2, default=str)
                     return (detail_md, h.get("summary_text", ""), h.get("ai_summary", ""),
-                            h.get("raw", {}), h)
+                            raw_json, h)
 
                 def load_history_ui(sel):
                     """将当前选中的历史记录回填到 Tab1 结果区（并在本 Tab 显示明确反馈）"""
                     h = sel
                     if not h:
                         return ("⚠️ 请先在表格中点击选择一条记录", {"info": "请先选择记录"},
-                                "", "", {}, None)
+                                "", "", "", None)
                     detail = {k: v for k, v in h.items() if k not in ('summary_text', 'ai_summary', 'raw')}
                     detail["_回填提示"] = "已加载到「PCAP流量分析」结果区"
                     brief = (h.get("summary_text") or "").replace("\n", " ")[:60]
                     return (f"✅ **已回填到「🔍 PCAP流量分析」结果区**（请切换到第一个 Tab 查看）\n"
                             f"文件：`{h.get('file', '?')}` | 告警 {h.get('alerts', 0)} 条\n摘要：{brief}…",
                             detail, h.get("summary_text", ""), h.get("ai_summary", ""),
-                            h.get("raw", {}), h)
+                            json.dumps(h.get("raw", {}), ensure_ascii=False, indent=2, default=str), h)
 
                 def open_selected_report_ui(dropdown_val, sel):
                     """打开选中记录的报告；若报告文件不存在，显示确认区域询问用户是否重新分析"""
@@ -1949,7 +1965,7 @@ def create_gradio_interface():
 
                 history_table.select(on_history_row_click,
                                      outputs=[history_detail, summary_output, threat_output,
-                                              raw_output, selected_history])
+                                              raw_content_state, selected_history])
                 refresh_history_btn.click(refresh_history_ui,
                                           outputs=[history_table, history_count, history_feedback,
                                                    history_select_dropdown])
@@ -1959,7 +1975,7 @@ def create_gradio_interface():
                                         outputs=[history_feedback, regen_confirm_row, regen_progress, pending_regen_id])
                 load_history_btn.click(load_history_ui, inputs=[selected_history],
                                        outputs=[history_feedback, history_detail, summary_output,
-                                                threat_output, raw_output, selected_history])
+                                                threat_output, raw_content_state, selected_history])
                 open_report_btn.click(open_selected_report_ui, inputs=[history_select_dropdown, selected_history],
                                       outputs=[history_feedback, regen_confirm_row, regen_progress, pending_regen_id])
                 clear_history_btn.click(clear_history_ui,
@@ -1993,6 +2009,32 @@ def create_gradio_interface():
 
                 tab1_open_report_dir_btn.click(open_report_dir_ui, outputs=process_output)
                 tab1_open_report_btn.click(open_report_file_ui, outputs=process_output)
+                
+                def sync_raw_content(raw):
+                    """内容State变化 → 同步到收起/展开两个Code组件（保持各自visible）"""
+                    return gr.update(value=raw), gr.update(value=raw)
+
+                raw_content_state.change(
+                    sync_raw_content, inputs=[raw_content_state],
+                    outputs=[raw_output, raw_output_full])
+
+                def toggle_raw_output(expanded):
+                    """切换完整报告框的展开/收起（只改visible，内容保留）"""
+                    if expanded:
+                        # 当前展开 → 收起
+                        return (gr.update(visible=True), gr.update(visible=False),
+                                "📖 展开完整报告", False)
+                    else:
+                        # 当前收起 → 展开
+                        return (gr.update(visible=False), gr.update(visible=True),
+                                "📕 收起报告", True)
+
+                toggle_raw_btn.click(
+                    toggle_raw_output,
+                    inputs=[raw_expanded_state],
+                    outputs=[raw_output, raw_output_full, toggle_raw_btn,
+                             raw_expanded_state])
+
                 report_download.click(on_report_download_click, inputs=[analysis_done],
                                       outputs=[report_download, report_feedback, download_progress,
                                                tab1_open_report_btn, tab1_open_report_dir_btn])
@@ -2001,7 +2043,7 @@ def create_gradio_interface():
                 analyze_btn.click(
                     analyze_pcap_gradio,
                     inputs=[pcap_file, enable_ai, baseline_dropdown],
-                    outputs=[process_output, summary_output, threat_output, raw_output,
+                    outputs=[process_output, summary_output, threat_output, raw_content_state,
                              report_download, history_table, baseline_chart_output,
                              analysis_done]
                 )

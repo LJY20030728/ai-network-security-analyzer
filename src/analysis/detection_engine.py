@@ -14,7 +14,11 @@ P2-4: 检测引擎策略模式 + 工厂模式
 import abc
 from typing import Any, Dict, List, Optional
 
+import numpy as np
 from loguru import logger
+
+# Stacking 元学习器输入的固定引擎顺序
+_META_ENGINE_ORDER = ["supervised", "rule_based", "baseline", "isolation_forest"]
 
 
 # ============================================================
@@ -290,6 +294,8 @@ class DetectionEngine:
             "baseline": 0.15,
             "isolation_forest": 0.15,
         }
+        # Stacking 元学习器（None=默认加权融合；注入训练好的模型后启用Stacking）
+        self._meta_learner = None
 
     def add_strategy(self, strategy: DetectionStrategy, weight: float = 0.2):
         """动态添加检测策略"""
@@ -330,6 +336,22 @@ class DetectionEngine:
             "total_alerts": len(all_alerts),
             "detectors_used": [s.name for s in self._strategies],
         }
+
+    def set_meta_learner(self, learner) -> None:
+        """
+        注入训练好的 Stacking 元学习器（如 LogisticRegression）。
+        注入后 _ensemble_vote 优先用元学习器自动学习的权重做融合。
+        """
+        self._meta_learner = learner
+        logger.info("检测引擎已启用 Stacking 元学习器")
+
+    def _stacking_predict(self, meta_features: Dict[str, float]) -> float:
+        """用元学习器对各引擎置信度做 Stacking 融合，返回攻击概率（0~1）"""
+        if self._meta_learner is None:
+            return 0.0
+        x = np.array([[float(meta_features.get(n, 0.0)) for n in _META_ENGINE_ORDER]])
+        proba = self._meta_learner.predict_proba(x)[0]
+        return float(np.asarray(proba)[-1])
 
     def _ensemble_vote(self, results: Dict[str, Any]) -> Dict[str, Any]:
         """

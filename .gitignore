@@ -108,3 +108,5 @@ data/samples/regression_result.json
 
 # Persisted analyzed PCAP files (copied at runtime)
 data/samples/analyzed/
+
+build_log*.txt

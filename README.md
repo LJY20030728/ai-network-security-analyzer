@@ -1,4 +1,4 @@
-# AI Network Security Analyzer | AI 网络安全分析系统
+﻿# AI Network Security Analyzer | AI 网络安全分析系统
 
 > **中文**：AI 辅助的网络取证分析系统 — PCAP 离线分析 + 四引擎集成检测 + LLM 威胁研判 + RAG 安全知识问答
 >
@@ -755,3 +755,4 @@ SOFTWARE.
 ---
 
 **如果这个项目对你有帮助，欢迎给个 Star ⭐**
+

@@ -88,8 +88,8 @@ logger.info("API路由注册完成")
 try:
     import gradio as gr
     
-    # 导入Gradio UI创建函数（从原备份文件）
-    from src.api.main_v1_backup import create_gradio_interface, GRADIO_AVAILABLE
+    # 导入Gradio UI创建函数（从最新备份文件）
+    from src.api.main_old_backup import create_gradio_interface, GRADIO_AVAILABLE
     
     if GRADIO_AVAILABLE:
         gradio_app = create_gradio_interface()
@@ -102,7 +102,7 @@ try:
         from src.utils.paths import data_dir as _data_dir
         
         # 导入Gradio UI相关的挂载参数（theme + css）
-        from src.api.main_v1_backup import _UI_KWARGS, _GRADIO_MAJOR
+        from src.api.main_old_backup import _UI_KWARGS, _GRADIO_MAJOR
         
         # Gradio 6.x 需要在mount时传递theme和css
         _mount_kwargs = {}

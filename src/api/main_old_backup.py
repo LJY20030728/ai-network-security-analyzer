@@ -1,4 +1,4 @@
-"""
+﻿"""
 FastAPI 主服务
 提供REST API接口，供前端或其他系统调用
 同时集成Gradio Web UI（无需单独前端，降低使用门槛）
@@ -40,7 +40,7 @@ from src.analysis.baseline import TrafficBaseline
 from src.ai.llm_client import get_llm_client
 from src.ai.rag_engine import get_rag_engine
 from src.ai.threat_analyzer import get_threat_analyzer
-from src.knowledge.mitre_attck import get_all_knowledge
+from src.knowledge import get_all_knowledge
 from src.report.html_report import save_html_report
 from src.utils.helpers import setup_logging, ensure_dir, format_bytes, get_timestamp_str
 from src.utils.paths import data_dir, seed_assets
@@ -345,12 +345,14 @@ async def add_knowledge(file: UploadFile = File(...)):
         if not content:
             raise HTTPException(status_code=400, detail="上传文件为空")
 
-        # 仅允许文本类型
+        # 【P2优化】支持多种文档格式：TXT/MD/PDF/Word/JSON
         filename = file.filename or "doc.txt"
         ext = os.path.splitext(filename)[1].lower()
-        if ext not in (".txt", ".md", ".markdown", ".json"):
-            raise HTTPException(status_code=400, detail=f"不支持的文件类型 {ext}，仅支持 .txt/.md/.json")
+        supported_exts = (".txt", ".md", ".markdown", ".json", ".pdf", ".docx", ".doc")
+        if ext not in supported_exts:
+            raise HTTPException(status_code=400, detail=f"不支持的文件类型 {ext}，支持格式：.txt/.md/.json/.pdf/.docx")
 
+        # 保存临时文件
         tmp_path = os.path.join(data_dir("knowledge"), f"import_{get_timestamp_str()}_{os.path.basename(filename)}")
         ensure_dir(os.path.dirname(tmp_path))
         with open(tmp_path, "wb") as f:
@@ -358,7 +360,42 @@ async def add_knowledge(file: UploadFile = File(...)):
 
         def _add_task():
             rag = get_rag_engine()
-            chunks = rag.add_file(tmp_path, source=f"user_import:{filename}")
+            
+            # 根据文件类型提取文本
+            text_content = ""
+            if ext == ".pdf":
+                # PDF文件：用PyPDF2提取文本
+                try:
+                    import PyPDF2
+                    with open(tmp_path, "rb") as f:
+                        reader = PyPDF2.PdfReader(f)
+                        for page in reader.pages:
+                            text_content += page.extract_text() + "\n"
+                except ImportError:
+                    raise Exception("PDF支持需要安装PyPDF2，请运行: pip install PyPDF2")
+                # 把提取的文本写入临时txt文件
+                txt_path = tmp_path.replace(".pdf", ".txt")
+                with open(txt_path, "w", encoding="utf-8") as f:
+                    f.write(text_content)
+                chunks = rag.add_file(txt_path, source=f"user_import:{filename}")
+            elif ext in (".docx", ".doc"):
+                # Word文件：用python-docx提取文本
+                try:
+                    from docx import Document
+                    doc = Document(tmp_path)
+                    for para in doc.paragraphs:
+                        text_content += para.text + "\n"
+                except ImportError:
+                    raise Exception("Word支持需要安装python-docx，请运行: pip install python-docx")
+                # 把提取的文本写入临时txt文件
+                txt_path = tmp_path.replace(".docx", ".txt").replace(".doc", ".txt")
+                with open(txt_path, "w", encoding="utf-8") as f:
+                    f.write(text_content)
+                chunks = rag.add_file(txt_path, source=f"user_import:{filename}")
+            else:
+                # 纯文本文件：直接添加
+                chunks = rag.add_file(tmp_path, source=f"user_import:{filename}")
+            
             return chunks
 
         chunks = await run_in_threadpool(_add_task)
@@ -757,6 +794,11 @@ def _analyze_pcap_task(filepath: str, enable_ai: bool, baseline_name: str = "") 
 
     # 取证型 HTML 报告（含证据溯源）
     try:
+        # 【P0修复】用PCAP文件的MD5哈希作为case_id，实现报告去重
+        # 同一个PCAP文件 → 同一个报告文件名（覆盖旧的，只保留最新版本）
+        pcap_md5 = hashlib.md5(filepath.encode('utf-8')).hexdigest()[:12]
+        case_id = f"pcap_{pcap_md5}"
+        
         html_path = save_html_report(
             analysis_report,
             result["evidence"],
@@ -764,6 +806,7 @@ def _analyze_pcap_task(filepath: str, enable_ai: bool, baseline_name: str = "") 
             ai_traffic_summary=result.get("ai_traffic_summary"),
             structured_report=result.get("ai_threat_structured"),
             report_dir=data_dir("reports"),
+            case_id=case_id,  # 【新增】传case_id实现去重
         )
         result["report_html"] = html_path
     except Exception as e:
@@ -1270,17 +1313,42 @@ def create_gradio_interface():
                                     gr.update(visible=False), gr.update(visible=False))
                         newest = max(fs, key=os.path.getmtime)
                         sz = os.path.getsize(newest) / 1024
-                        # 进度条 + 下载完成提示（包含是否打开报告的选项）
+                        # 【P1优化】更真实的分阶段进度反馈
                         progress_html = f"""
-                        <div style="margin:10px 0;padding:14px;background:linear-gradient(135deg,#e8f4fd,#f0f8ff);border-radius:12px;border:1px solid #b3d9f2;">
-                            <div style="font-size:13px;color:#1a5276;margin-bottom:8px;font-weight:600;">📥 下载进度</div>
-                            <div style="width:100%;height:22px;background:#e0e0e0;border-radius:11px;overflow:hidden;">
-                                <div style="width:100%;height:100%;background:linear-gradient(90deg,#3498db,#2980b9);border-radius:11px;animation:downloadProgress 1.2s ease-out forwards;"></div>
+                        <div style="margin:10px 0;padding:16px;background:linear-gradient(135deg,#e8f4fd,#f0f8ff);border-radius:12px;border:1px solid #b3d9f2;">
+                            <div style="font-size:14px;color:#1a5276;margin-bottom:10px;font-weight:600;">📥 报告下载</div>
+                            
+                            <!-- 阶段1：文件准备 -->
+                            <div style="margin-bottom:8px;display:flex;align-items:center;gap:8px;">
+                                <div style="width:20px;height:20px;border-radius:50%;background:#27ae60;color:white;display:flex;align-items:center;justify-content:center;font-size:12px;">✓</div>
+                                <div style="font-size:13px;color:#2c3e50;">定位报告文件</div>
                             </div>
-                            <div style="margin-top:8px;font-size:13px;color:#1e8449;font-weight:600;">✅ 下载完成！报告：{os.path.basename(newest)}（{sz:.1f} KB）</div>
-                            <div style="margin-top:4px;font-size:12px;color:#2980b9;">💡 浏览器已保存到下载栏，也可点击下方按钮直接打开报告或所在文件夹</div>
+                            
+                            <!-- 阶段2：文件读取 -->
+                            <div style="margin-bottom:8px;display:flex;align-items:center;gap:8px;">
+                                <div style="width:20px;height:20px;border-radius:50%;background:#27ae60;color:white;display:flex;align-items:center;justify-content:center;font-size:12px;">✓</div>
+                                <div style="font-size:13px;color:#2c3e50;">读取文件内容（{sz:.1f} KB）</div>
+                            </div>
+                            
+                            <!-- 阶段3：下载完成 -->
+                            <div style="margin-bottom:12px;display:flex;align-items:center;gap:8px;">
+                                <div style="width:20px;height:20px;border-radius:50%;background:#27ae60;color:white;display:flex;align-items:center;justify-content:center;font-size:12px;">✓</div>
+                                <div style="font-size:13px;color:#2c3e50;">生成下载链接</div>
+                            </div>
+                            
+                            <!-- 进度条 -->
+                            <div style="width:100%;height:24px;background:#e0e0e0;border-radius:12px;overflow:hidden;margin-bottom:10px;">
+                                <div style="width:100%;height:100%;background:linear-gradient(90deg,#3498db,#2980b9);border-radius:12px;display:flex;align-items:center;justify-content:center;color:white;font-size:12px;font-weight:600;">100%</div>
+                            </div>
+                            
+                            <!-- 完成提示 -->
+                            <div style="padding:10px;background:#d5f5e3;border-radius:8px;border-left:4px solid #27ae60;">
+                                <div style="font-size:13px;color:#1e8449;font-weight:600;margin-bottom:4px;">✅ 下载完成！</div>
+                                <div style="font-size:12px;color:#27ae60;">📄 报告文件：{os.path.basename(newest)}</div>
+                                <div style="font-size:12px;color:#27ae60;margin-top:2px;">📦 文件大小：{sz:.1f} KB</div>
+                                <div style="font-size:12px;color:#2980b9;margin-top:6px;">💡 点击下方按钮可直接打开报告或所在文件夹</div>
+                            </div>
                         </div>
-                        <style>@keyframes downloadProgress {{0%{{width:0%;}}40%{{width:60%;}}70%{{width:85%;}}100%{{width:100%;}}}}</style>
                         """
                         return (gr.update(value=newest),
                                 f"✅ 报告已下载：{os.path.basename(newest)}（{sz:.1f} KB）\n"
@@ -1302,7 +1370,7 @@ def create_gradio_interface():
                     try:
                         # 阶段 1：解析 + 特征提取 + 规则/基线/ML 检测
                         yield ("🔍 阶段 1/4：正在解析 PCAP 并提取网络流特征（规则→基线→ML 检测）...",
-                               "⏳ 分析中...", "", {}, None, gr.update(value=_history_table_value()), gr.update(value=None))
+                               "⏳ 分析中...", "", {}, None, gr.update(value=_history_table_value()), gr.update(value=None), False)
                         parser = PcapParser()
                         traffic_analyzer = TrafficAnalyzer()
                         if baseline_name:
@@ -1311,7 +1379,7 @@ def create_gradio_interface():
                             parser.iter_packets(file.name), sample_count=50)
                         if not report.get("summary", {}).get("total_packets"):
                             yield ("❌ PCAP文件解析失败", "PCAP文件解析失败", "", {}, None,
-                                   gr.update(value=_history_table_value()), gr.update(value=None))
+                                   gr.update(value=_history_table_value()), gr.update(value=None), False)
                             return
 
                         summary = f"""📊 流量分析概览
@@ -1357,7 +1425,7 @@ def create_gradio_interface():
                                 threat_analyzer = get_threat_analyzer()
                                 yield ("📚 阶段 2/4：RAG 知识检索（MITRE ATT&CK + 处置手册）...",
                                        summary, "🔎 检索中...", report, None,
-                                       gr.update(value=_history_table_value()), gr.update(value=None))
+                                       gr.update(value=_history_table_value()), gr.update(value=None), False)
                                 # 流式输出研判过程
                                 ai_threat = ""
                                 for chunk in threat_analyzer.analyze_threats_stream(
@@ -1366,7 +1434,7 @@ def create_gradio_interface():
                                     ai_threat += chunk
                                     yield ("🧠 阶段 3/4：AI 威胁研判中（流式输出）...",
                                            summary, ai_threat, report, None,
-                                           gr.update(value=_history_table_value()), gr.update(value=None))
+                                           gr.update(value=_history_table_value()), gr.update(value=None), False)
                             else:
                                 ai_threat = "⚠️ 未配置大模型API Key，无法进行AI分析\n请在⚙️设置中配置LLM_API_KEY"
 
@@ -1401,7 +1469,7 @@ def create_gradio_interface():
                         # 阶段 4：生成 HTML 报告 + 写入历史
                         yield ("📄 阶段 4/4：生成取证型 HTML 报告...",
                                summary, ai_threat, report, None,
-                               gr.update(value=_history_table_value()), gr.update(value=None))
+                               gr.update(value=_history_table_value()), gr.update(value=None), False)
                         html_path = None
                         try:
                             file_sha256 = _quick_sha256(file.name)
@@ -1615,7 +1683,7 @@ def create_gradio_interface():
                 # 重新分析进度显示（默认隐藏，确认区域下方）
                 regen_progress = gr.Markdown("", visible=False)
                 
-                history_detail = gr.JSON(label="记录详情（点击行后展示）")
+                history_detail = gr.Markdown(value="点击表格任意一行查看记录详情", label="记录详情（点击行后展示）")
                 history_feedback = gr.Markdown(
                     "💡 **用法**：点击表格任意行 → 下方查看详情；\n"
                     "「加载到分析结果」= 把该次分析回填到上方 Tab1 结果区；\n"
@@ -1736,11 +1804,39 @@ def create_gradio_interface():
                     except Exception:
                         hs = []
                     if row is None or not hs or row >= len(hs):
-                        return ({"info": "记录已不存在或已被清空"}, "", "", {}, None)
+                        return ("⚠️ 记录已不存在或已被清空", "", "", {}, None)
                     h = hs[row]
-                    detail = {k: v for k, v in h.items() if k not in ('summary_text', 'ai_summary', 'raw')}
-                    detail["_回填提示"] = "已加载到「PCAP流量分析」结果区"
-                    return (detail, h.get("summary_text", ""), h.get("ai_summary", ""),
+                    
+                    # 【P1优化】用更友好的Markdown格式展示详情
+                    file_name = h.get("file", "未知文件")
+                    ts = h.get("ts", "未知时间")
+                    alerts = h.get("alerts", 0)
+                    status = h.get("status", "未知")
+                    
+                    # 格式化时间
+                    from datetime import datetime
+                    try:
+                        if isinstance(ts, (int, float)):
+                            ts_str = datetime.fromtimestamp(ts).strftime("%Y/%m/%d %H:%M")
+                        else:
+                            ts_str = str(ts)
+                    except:
+                        ts_str = str(ts)
+                    
+                    detail_md = f"""
+### 📋 分析记录详情
+
+| 字段 | 内容 |
+|------|------|
+| **文件名** | `{file_name}` |
+| **分析时间** | {ts_str} |
+| **告警数量** | {alerts} 条 |
+| **分析状态** | {status} |
+
+**💡 提示：** 点击下方「📂 加载到分析结果」按钮，可在Tab1查看完整的可视化分析结果。
+"""
+                    
+                    return (detail_md, h.get("summary_text", ""), h.get("ai_summary", ""),
                             h.get("raw", {}), h)
 
                 def load_history_ui(sel):
@@ -1761,14 +1857,20 @@ def create_gradio_interface():
                     """打开选中记录的报告；若报告文件不存在，显示确认区域询问用户是否重新分析"""
                     import traceback
                     
-                    # 优先使用下拉框选择的记录ID（更可靠），其次使用表格点击的状态
+                    # 【P0修复】优先使用表格选中的记录（用户点击表格行的意图更明确）
+                    # 只有当表格没有选中记录时，才回退到下拉框
                     record_id = None
-                    if dropdown_val:
+                    h = None
+                    
+                    # 优先级1：表格点击选中的记录
+                    if sel and isinstance(sel, dict) and len(sel) > 0 and sel.get("id"):
+                        record_id = sel.get("id")
+                        h = sel  # 直接用已有的记录对象，避免再次查询
+                        logger.info(f"使用表格选中的记录ID: {record_id} (文件: {sel.get('file', '?')})")
+                    # 优先级2：下拉框选择的记录
+                    elif dropdown_val:
                         record_id = str(dropdown_val)
                         logger.info(f"使用下拉框选择的记录ID: {record_id}")
-                    elif sel and isinstance(sel, dict) and len(sel) > 0:
-                        record_id = sel.get("id")
-                        logger.info(f"使用表格点击状态的记录ID: {record_id}")
                     
                     # 严格的空值检查
                     if not record_id:
@@ -1777,25 +1879,25 @@ def create_gradio_interface():
                                 "或：点击表格中任意一行（行高亮）→ 再点「打开报告」",
                                 gr.update(visible=False), gr.update(value="", visible=False), None)
                     
-                    # 根据记录ID从数据库获取完整记录（确保数据准确）
-                    h = None
-                    try:
-                        all_records = get_history_store().list_analysis()
-                        for r in all_records:
-                            if str(r.get("id", "")) == str(record_id):
-                                h = r
-                                break
-                    except Exception as db_err:
-                        logger.warning(f"从数据库获取记录失败: {db_err}")
-                    
-                    # 如果数据库中找不到，使用传入的sel作为后备
+                    # 根据记录ID从数据库获取完整记录（如果h还没设置的话）
                     if h is None:
-                        if sel and isinstance(sel, dict):
-                            h = sel
-                        else:
-                            return (f"⚠️ 未找到ID为 {record_id} 的记录，请刷新列表后重试",
-                                    gr.update(visible=False), gr.update(value="", visible=False), None)
-                        logger.info(f"数据库中未找到记录ID={record_id}，使用传入状态数据")
+                        try:
+                            all_records = get_history_store().list_analysis()
+                            for r in all_records:
+                                if str(r.get("id", "")) == str(record_id):
+                                    h = r
+                                    break
+                        except Exception as db_err:
+                            logger.warning(f"从数据库获取记录失败: {db_err}")
+                        
+                        # 如果数据库中找不到，使用传入的sel作为后备
+                        if h is None:
+                            if sel and isinstance(sel, dict):
+                                h = sel
+                            else:
+                                return (f"⚠️ 未找到ID为 {record_id} 的记录，请刷新列表后重试",
+                                        gr.update(visible=False), gr.update(value="", visible=False), None)
+                            logger.info(f"数据库中未找到记录ID={record_id}，使用传入状态数据")
                     
                     rp = h.get("html_report")
                     raw = h.get("raw") or {}
@@ -1951,7 +2053,7 @@ def create_gradio_interface():
                     threat_analyzer = get_threat_analyzer()
                     answer = ""
                     try:
-                        for evt in threat_analyzer.chat_about_security_stream(message):
+                        for evt in threat_analyzer.chat_about_security_stream(message, chat_history=msgs[:-2]):
                             if evt["stage"] == "retrieval":
                                 ev = evt.get("evidence") or []
                                 if ev:
@@ -2009,50 +2111,91 @@ def create_gradio_interface():
                     init_btn = gr.Button("🔄 初始化/重建知识库", variant="primary", size="lg")
                     import_btn = gr.Button("📥 导入到知识库", variant="secondary", size="lg")
                 # 第二行：文件上传（全宽）
-                kb_file = gr.File(label="导入知识文档（.txt/.md/.json）", file_types=[".txt", ".md", ".json"])
+                kb_file = gr.File(label="导入知识文档（.txt/.md/.json/.pdf/.docx）", file_types=[".txt", ".md", ".json", ".pdf", ".docx"])
                 # 第三行：两个结果内容框同高
                 with gr.Row(equal_height=True):
-                    stats_output = gr.JSON(label="📊 知识库统计")
-                    import_output = gr.JSON(label="📥 导入结果")
+                    stats_output = gr.Markdown(label="📊 知识库统计", value="尚未初始化，请点击「初始化知识库」")
+                    import_output = gr.Markdown(label="📥 导入结果", value="请选择文件后点击「导入到知识库」")
                 # 第四行：搜索
                 with gr.Row():
                     search_input = gr.Textbox(label="搜索知识库", placeholder="输入关键词搜索...", scale=4)
                     search_btn = gr.Button("🔍 搜索", scale=1)
-                search_output = gr.JSON(label="搜索结果")
+                search_output = gr.Markdown(label="搜索结果", value="输入关键词后点击搜索")
+
+                def _format_kb_stats(stats):
+                    """将知识库统计字典格式化为友好的Markdown"""
+                    if not stats or not isinstance(stats, dict):
+                        return "暂无数据"
+                    if "error" in stats:
+                        return f"❌ **错误**: {stats['error']}"
+                    
+                    lines = []
+                    lines.append("### 📊 知识库状态")
+                    lines.append("")
+                    
+                    if "status" in stats:
+                        lines.append(f"**状态**: {stats['status']}")
+                    if "progress" in stats:
+                        lines.append(f"**进度**: {stats['progress']}")
+                    if "chunks" in stats:
+                        lines.append(f"**文档块数**: {stats['chunks']}")
+                    if "documents" in stats:
+                        lines.append(f"**文档数**: {stats['documents']}")
+                    if "items_count" in stats:
+                        lines.append(f"**知识条目数**: {stats['items_count']}")
+                    if "chunks_added" in stats:
+                        lines.append(f"**新增块数**: {stats['chunks_added']}")
+                    
+                    return "\n".join(lines)
 
                 def init_kb():
                     """生成器版：分阶段输出初始化进度，避免长时间无响应"""
                     try:
-                        yield {"status": "正在清除旧知识库...", "progress": "10%"}
+                        yield _format_kb_stats({"status": "正在清除旧知识库...", "progress": "10%"})
                         rag = get_rag_engine()
                         rag.clear()
-                        yield {"status": "正在加载知识条目（MITRE ATT&CK + 处置手册 + 协议知识 + 文件文档）...", "progress": "30%"}
+                        yield _format_kb_stats({"status": "正在加载知识条目...", "progress": "30%"})
                         items = get_all_knowledge()
-                        yield {"status": f"已加载 {len(items)} 条知识，正在向量化嵌入（BGE模型，分批处理）...", "progress": "50%", "items_count": len(items)}
+                        yield _format_kb_stats({"status": f"已加载 {len(items)} 条知识，正在向量化嵌入...", "progress": "50%", "items_count": len(items)})
                         count = rag.add_knowledge_base(items)
-                        yield {"status": f"嵌入完成，共 {count} 个文档块，正在统计...", "progress": "90%", "chunks_added": count}
+                        yield _format_kb_stats({"status": f"嵌入完成，共 {count} 个文档块，正在统计...", "progress": "90%", "chunks_added": count})
                         stats = rag.get_stats()
                         stats["status"] = "✅ 知识库初始化完成"
                         stats["progress"] = "100%"
-                        yield stats
+                        yield _format_kb_stats(stats)
                     except Exception as e:
-                        yield {"error": str(e), "status": "❌ 初始化失败"}
+                        yield _format_kb_stats({"error": str(e), "status": "❌ 初始化失败"})
 
                 def search_kb(query):
                     if not query:
-                        return {}
+                        return "请输入搜索关键词"
                     rag = get_rag_engine()
-                    return rag.search(query, top_k=5)
+                    results = rag.search(query, top_k=5)
+                    if not results:
+                        return "暂无结果"
+                    lines = [f"### 🔍 搜索结果（{len(results)}条）", ""]
+                    for i, r in enumerate(results[:5], 1):
+                        if isinstance(r, dict):
+                            content = r.get("content", r.get("text", str(r)))[:200]
+                            source = r.get("source", "未知来源")
+                            lines.append(f"**{i}. {source}**")
+                            lines.append(f"  > {content}...")
+                            lines.append("")
+                    return "\n".join(lines)
 
                 def import_kb(file):
                     if not file:
-                        return {"error": "请先选择文档"}
+                        return "请先选择文档"
                     try:
                         rag = get_rag_engine()
                         chunks = rag.add_file(file.name, source=f"user_import:{os.path.basename(file.name)}")
-                        return {"status": "success", "chunks_added": chunks, "stats": rag.get_stats()}
+                        stats = rag.get_stats()
+                        lines = ["### ✅ 导入成功", ""]
+                        lines.append(f"**新增文档块**: {chunks}")
+                        lines.append(f"**总文档块**: {stats.get('total_documents', 'N/A')}")
+                        return "\n".join(lines)
                     except Exception as e:
-                        return {"error": str(e)}
+                        return f"❌ **导入失败**: {str(e)}"
 
                 init_btn.click(init_kb, outputs=stats_output)
                 import_btn.click(import_kb, inputs=kb_file, outputs=import_output)
@@ -2125,14 +2268,14 @@ def create_gradio_interface():
 
                 def learn_baseline_ui(file, name):
                     if not file:
-                        return "❌ 请先上传正常流量PCAP", None, gr.update(value=_baseline_table_value()), gr.update(choices=_baseline_names())
+                        return "❌ 请先上传正常流量PCAP", None, gr.update(value=_baseline_table_value(), interactive=False), gr.update(choices=_baseline_names())
                     try:
                         import time as _t
                         t0 = _t.time()
                         parser = PcapParser()
                         packets = parser.parse_file(file.name)
                         if not packets:
-                            return "❌ PCAP解析失败或为空，无法学习基线", None, gr.update(value=_baseline_table_value()), gr.update(choices=_baseline_names())
+                            return "❌ PCAP解析失败或为空，无法学习基线", None, gr.update(value=_baseline_table_value(), interactive=False), gr.update(choices=_baseline_names())
                         name = (name or "default").strip()
                         baseline = TrafficBaseline()
                         baseline.name = name
@@ -2141,7 +2284,7 @@ def create_gradio_interface():
                         ensure_dir(BASELINE_DIR)
                         ok = baseline.save(save_path)
                         if not ok:
-                            return f"❌ 基线保存失败：{name}（名称含非法字符？）", None, gr.update(value=_baseline_table_value()), gr.update(choices=_baseline_names())
+                            return f"❌ 基线保存失败：{name}（名称含非法字符？）", None, gr.update(value=_baseline_table_value(), interactive=False), gr.update(choices=_baseline_names())
                         # 关键修复：同步保存到SQLite数据库（_list_baselines从数据库读取）
                         try:
                             from src.storage.database import Database
@@ -2157,9 +2300,9 @@ def create_gradio_interface():
                         secs = _t.time() - t0
                         msg = (f"✅ 基线「{name}」学习完成：{len(packets)} 包 / 窗口 {baseline.window_sec}s / σ={baseline.sigma} / 耗时 {secs:.1f}s\n"
                                f"📌 已保存到数据库和JSON文件，列表已自动刷新，点击上方表格行查看画像图表")
-                        return msg, baseline.to_dict(), gr.update(value=_baseline_table_value()), gr.update(choices=_baseline_names())
+                        return msg, baseline.to_dict(), gr.update(value=_baseline_table_value(), interactive=False), gr.update(choices=_baseline_names())
                     except Exception as e:
-                        return f"❌ 学习失败：{e}", None, gr.update(value=_baseline_table_value()), gr.update(choices=_baseline_names())
+                        return f"❌ 学习失败：{e}", None, gr.update(value=_baseline_table_value(), interactive=False), gr.update(choices=_baseline_names())
 
                 def on_baseline_row_click(evt: gr.SelectData):
                     rows = _baseline_table_value()
@@ -2176,7 +2319,7 @@ def create_gradio_interface():
                 def delete_baseline_ui(sel):
                     name = (sel or {}).get("name") if isinstance(sel, dict) else None
                     if not name:
-                        return "⚠️ 请先在表格中点击选择一条基线（行高亮后再点删除）", gr.update(value=_baseline_table_value()), gr.update(choices=_baseline_names()), {}, ""
+                        return "⚠️ 请先在表格中点击选择一条基线（行高亮后再点删除）", gr.update(value=_baseline_table_value(), interactive=False), gr.update(choices=_baseline_names()), {}, ""
                     # 同时删除JSON文件和SQLite数据库记录
                     path = _baseline_path(name)
                     deleted_file = False
@@ -2193,9 +2336,14 @@ def create_gradio_interface():
                     if name == "default":
                         tip = "\n⚠️ 已删除内置基线 default——Tab1 分析若仍选 default 将跳过基线对照，建议重新学习一份。"
                     file_msg = "JSON文件" if deleted_file else "（JSON文件不存在，仅删除数据库记录）"
+                    # 【P0修复】强制刷新表格和下拉框
+                    rows = _baseline_table_value()
+                    choices = _baseline_names()
                     return (f"🗑 已删除基线「{name}」{file_msg}，Tab1 下拉框同步移除。{tip}\n"
-                            f"💡 画像图表和详情已清空",
-                            gr.update(value=_baseline_table_value()), gr.update(choices=_baseline_names()),
+                            f"💡 画像图表和详情已清空\n"
+                            f"📊 当前剩余 {len(rows)} 条基线",
+                            gr.update(value=rows, interactive=False),  # 强制刷新表格
+                            gr.update(choices=choices),  # 强制刷新下拉框
                             {}, "")  # 清空baseline_profile_output和baseline_chart
 
                 def refresh_baselines_ui():
@@ -2362,3 +2510,8 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
+
+

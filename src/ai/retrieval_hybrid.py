@@ -135,26 +135,86 @@ _COMPARE_RE = re.compile(
     r"^(.+?)(?:和|与|及|、)(.+?)(?:的)?(?:区别|对比|差异|不同|有什么关系|有什么不同)"
 )
 
+# 术语映射表：缩写/简称 → 完整术语
+# 用于把用户查询中的缩写扩展为完整术语，提升召回率
+TERM_SYNONYMS = {
+    # 路由协议
+    "BGP": "边界网关协议 BGP",
+    "OSPF": "开放最短路径优先 OSPF",
+    "RIP": "路由信息协议 RIP",
+    # MITRE ATT&CK T编号
+    "T1046": "T1046 网络服务扫描",
+    "T1110": "T1110 暴力破解",
+    "T1498": "T1498 网络拒绝服务",
+    "T1572": "T1572 协议隧道",
+    "T1071": "T1071 应用层协议",
+    "T1048": "T1048 数据渗出",
+    "T1090": "T1090 代理",
+    "T1021": "T1021 远程服务",
+    "T1005": "T1005 本地数据窃取",
+    "T1082": "T1082 系统信息发现",
+    # Web攻击
+    "XSS": "跨站脚本 XSS",
+    "CSRF": "跨站请求伪造 CSRF",
+    "SQLi": "SQL注入 SQLi",
+    # 网络协议
+    "SSH": "SSH 安全外壳",
+    "RDP": "RDP 远程桌面",
+    "FTP": "FTP 文件传输",
+    "HTTP": "HTTP 超文本传输",
+    "HTTPS": "HTTPS 超文本传输安全",
+    "DNS": "DNS 域名系统",
+    "DHCP": "DHCP 动态主机配置",
+    "NTP": "NTP 网络时间协议",
+    "SNMP": "SNMP 简单网络管理",
+    # 安全工具
+    "Wireshark": "Wireshark 网络封包分析",
+    "Nmap": "Nmap 网络扫描",
+    "Tcpdump": "Tcpdump 命令行抓包",
+    "Snort": "Snort 入侵检测",
+    # 加密协议
+    "SSL": "SSL 安全套接层",
+    "TLS": "TLS 传输层安全",
+    "IPsec": "IPsec 互联网协议安全",
+    "VPN": "VPN 虚拟专用网络",
+}
+
+
+def expand_terms(query: str) -> str:
+    """扩展查询中的缩写/简称为完整术语"""
+    expanded = query
+    for abbr, full in TERM_SYNONYMS.items():
+        # 只在缩写独立出现时替换（避免误匹配）
+        if abbr in expanded:
+            expanded = expanded.replace(abbr, full)
+    return expanded
+
 
 def rewrite_query(query: str) -> List[str]:
     """
+    1. 先做术语扩展：缩写→完整术语
+    2. 再做比较问句拆分
     显式比较问句拆分子查询；其余原样返回。
     "DNS放大攻击和DNS投毒的区别，检测上关注什么？"
       -> ["DNS放大攻击，检测上关注什么？", "DNS投毒，检测上关注什么？"]
     """
-    m = _COMPARE_RE.match(query.strip())
+    # 第一步：术语扩展
+    expanded_query = expand_terms(query)
+
+    # 第二步：比较问句拆分
+    m = _COMPARE_RE.match(expanded_query.strip())
     if not m:
-        return [query]
+        return [expanded_query]
     head_a = m.group(1).strip()
     head_b = m.group(2).strip()
-    tail = query[m.end():].strip()
+    tail = expanded_query[m.end():].strip()
     # 子查询 = 实体 + 公共疑问尾（若无疑问尾则附加"是什么"保持完整问句）
     tail_q = tail if tail else "是什么"
     subs = []
     for h in (head_a, head_b):
         if h:
             subs.append(f"{h}{tail_q}")
-    return subs if len(subs) >= 2 else [query]
+    return subs if len(subs) >= 2 else [expanded_query]
 
 
 # ---------- RRF 融合 ----------

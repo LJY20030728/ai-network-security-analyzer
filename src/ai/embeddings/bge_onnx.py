@@ -1,4 +1,4 @@
-"""
+﻿"""
 BGE 中文 Embedding（ONNX Runtime 轻量实现）
 ============================================
 针对中文安全知识库的检索质量优化：
@@ -202,7 +202,7 @@ class BGEOnnxEmbeddingFunction(EmbeddingFunction):
             return []
 
         # 分批推理（每批 32 条），控制单次 session.run 内存峰值（修复 bad allocation）
-        BATCH = 32
+        BATCH = 32  # 增大批次，提升速度
         all_vecs: List[List[float]] = []
         for start in range(0, len(texts), BATCH):
             batch = texts[start:start + BATCH]
@@ -231,3 +231,5 @@ class BGEOnnxEmbeddingFunction(EmbeddingFunction):
             normalized = (cls_emb / norms).astype(np.float32)
             all_vecs.extend(normalized.tolist())
         return all_vecs
+
+

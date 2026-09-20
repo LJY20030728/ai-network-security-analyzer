@@ -1,4 +1,4 @@
-"""
+﻿"""
 RAG知识库引擎
 基于 ChromaDB 原生API实现安全知识的检索增强生成
 不依赖langchain_community，更轻量更稳定
@@ -41,8 +41,8 @@ class RAGEngine:
         self._seeding = False         # 防并发重复初始化
         self._bm25 = BM25Index()      # 混合检索：惰性构建的 BM25 倒排索引
         self.text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=500,
-            chunk_overlap=100,
+            chunk_size=1000,
+            chunk_overlap=50,
             separators=["\n\n", "\n", "。", "！", "？", ".", "!", "?", " ", ""]
         )
         logger.info(f"RAG引擎初始化 | 持久化目录: {self.persist_dir}")
@@ -117,7 +117,8 @@ class RAGEngine:
 
         # 添加到向量库（分批嵌入，避免大批量一次性嵌入导致内存峰值爆掉）
         if all_chunks:
-            BATCH = 5
+            BATCH = 10  # 增大批次，提升速度
+            import gc
             for i in range(0, len(all_chunks), BATCH):
                 chunk_batch = all_chunks[i:i + BATCH]
                 meta_batch = all_metadatas[i:i + BATCH]
@@ -127,6 +128,8 @@ class RAGEngine:
                     metadatas=meta_batch,
                     ids=ids_batch
                 )
+                # 每批后主动触发垃圾回收，释放内存
+                gc.collect()
             logger.info(f"已添加 {len(all_chunks)} 个文档块到知识库（分批 {BATCH} 条/批）")
 
         return len(all_chunks)
@@ -334,11 +337,11 @@ class RAGEngine:
             vec_score = max(0, 1 - distance)
 
             # 加权融合
-            final_score = (title_score * 0.4 + content_score * 0.3
-                           + meta_score * 0.2 + vec_score * 0.1)
+            final_score = (title_score * 0.5 + content_score * 0.25
+                           + meta_score * 0.15 + vec_score * 0.1)
 
             # 安全术语精确匹配加分
-            exact_match_bonus = 0.1 if any(t in title for t in query_terms_lower if len(t) > 3) else 0
+            exact_match_bonus = 0.15 if any(t in title for t in query_terms_lower if len(t) > 3) else 0
             final_score += exact_match_bonus
 
             r["rerank_score"] = round(final_score, 4)
@@ -412,3 +415,7 @@ def get_rag_engine() -> RAGEngine:
     if _rag_engine is None:
         _rag_engine = RAGEngine()
     return _rag_engine
+
+
+
+

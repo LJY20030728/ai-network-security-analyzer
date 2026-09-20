@@ -115,10 +115,29 @@ class ThreatAnalyzer:
         if rag_context:
             user_prompt += f"\n\n## 参考安全知识库（MITRE ATT&CK及处置手册）\n{rag_context}"
 
+        # 【P1优化】加入对话历史（最近5轮，节省token）
         messages = [
             {"role": "system", "content": prompts.SYSTEM_PROMPT_SECURITY_ANALYST},
-            {"role": "user", "content": user_prompt}
         ]
+        
+        # 处理对话历史（只取最近5轮，避免token爆炸）
+        if chat_history and isinstance(chat_history, list):
+            # 取最近10条消息（5轮对话 = 10条消息）
+            recent_history = chat_history[-10:] if len(chat_history) > 10 else chat_history
+            for msg in recent_history:
+                if isinstance(msg, dict) and "role" in msg and "content" in msg:
+                    role = msg.get("role", "user")
+                    # 跳过系统消息，避免重复
+                    if role == "system":
+                        continue
+                    content_text = msg.get("content", "")
+                    # 跳过空内容和加载中状态
+                    if not content_text or "正在检索" in content_text or "正在生成" in content_text:
+                        continue
+                    messages.append({"role": role, "content": content_text})
+        
+        # 最后加上当前用户问题
+        messages.append({"role": "user", "content": user_prompt})
 
         logger.info(f"开始威胁分析 | 异常类型: {threat_types}")
         result = self.llm.chat(messages, temperature=0.2)
@@ -208,10 +227,29 @@ class ThreatAnalyzer:
         if rag_context:
             user_prompt += f"\n\n## 参考安全知识库\n{rag_context}"
 
+        # 【P1优化】加入对话历史（最近5轮，节省token）
         messages = [
             {"role": "system", "content": prompts.SYSTEM_PROMPT_SECURITY_ANALYST},
-            {"role": "user", "content": user_prompt}
         ]
+        
+        # 处理对话历史（只取最近5轮，避免token爆炸）
+        if chat_history and isinstance(chat_history, list):
+            # 取最近10条消息（5轮对话 = 10条消息）
+            recent_history = chat_history[-10:] if len(chat_history) > 10 else chat_history
+            for msg in recent_history:
+                if isinstance(msg, dict) and "role" in msg and "content" in msg:
+                    role = msg.get("role", "user")
+                    # 跳过系统消息，避免重复
+                    if role == "system":
+                        continue
+                    content_text = msg.get("content", "")
+                    # 跳过空内容和加载中状态
+                    if not content_text or "正在检索" in content_text or "正在生成" in content_text:
+                        continue
+                    messages.append({"role": role, "content": content_text})
+        
+        # 最后加上当前用户问题
+        messages.append({"role": "user", "content": user_prompt})
 
         yield from self.llm.chat_stream(messages, temperature=0.2)
 
@@ -220,10 +258,29 @@ class ThreatAnalyzer:
         packet_str = json.dumps(sanitize_struct(packet_info), ensure_ascii=False, indent=2)
         user_prompt = prompts.prompt_explain_packet(packet_str)
 
+        # 【P1优化】加入对话历史（最近5轮，节省token）
         messages = [
             {"role": "system", "content": prompts.SYSTEM_PROMPT_SECURITY_ANALYST},
-            {"role": "user", "content": user_prompt}
         ]
+        
+        # 处理对话历史（只取最近5轮，避免token爆炸）
+        if chat_history and isinstance(chat_history, list):
+            # 取最近10条消息（5轮对话 = 10条消息）
+            recent_history = chat_history[-10:] if len(chat_history) > 10 else chat_history
+            for msg in recent_history:
+                if isinstance(msg, dict) and "role" in msg and "content" in msg:
+                    role = msg.get("role", "user")
+                    # 跳过系统消息，避免重复
+                    if role == "system":
+                        continue
+                    content_text = msg.get("content", "")
+                    # 跳过空内容和加载中状态
+                    if not content_text or "正在检索" in content_text or "正在生成" in content_text:
+                        continue
+                    messages.append({"role": role, "content": content_text})
+        
+        # 最后加上当前用户问题
+        messages.append({"role": "user", "content": user_prompt})
         return self.llm.chat(messages, temperature=0.3)
 
     def generate_incident_report(self, incident_data: Dict) -> str:
@@ -263,14 +320,33 @@ class ThreatAnalyzer:
         if rag_context:
             user_prompt += f"\n\n## 参考知识库（请基于以下知识回答，如知识库无相关内容请明确说明）\n{rag_context}"
 
+        # 【P1优化】加入对话历史（最近5轮，节省token）
         messages = [
             {"role": "system", "content": prompts.SYSTEM_PROMPT_SECURITY_ANALYST},
-            {"role": "user", "content": user_prompt}
         ]
+        
+        # 处理对话历史（只取最近5轮，避免token爆炸）
+        if chat_history and isinstance(chat_history, list):
+            # 取最近10条消息（5轮对话 = 10条消息）
+            recent_history = chat_history[-10:] if len(chat_history) > 10 else chat_history
+            for msg in recent_history:
+                if isinstance(msg, dict) and "role" in msg and "content" in msg:
+                    role = msg.get("role", "user")
+                    # 跳过系统消息，避免重复
+                    if role == "system":
+                        continue
+                    content_text = msg.get("content", "")
+                    # 跳过空内容和加载中状态
+                    if not content_text or "正在检索" in content_text or "正在生成" in content_text:
+                        continue
+                    messages.append({"role": role, "content": content_text})
+        
+        # 最后加上当前用户问题
+        messages.append({"role": "user", "content": user_prompt})
         # v1.4.0：问答 max_tokens 降到 1024 提速（原默认 2048 在弱网/免费档模型下可慢到 30s+）
         return self.llm.chat(messages, temperature=0.3, max_tokens=1024)
 
-    def chat_about_security_stream(self, question: str, context: Optional[str] = None):
+    def chat_about_security_stream(self, question: str, context: Optional[str] = None, chat_history: Optional[list] = None):
         """
         流式安全问答（v1.4.0）
         生成器分两段 yield：
@@ -307,10 +383,29 @@ class ThreatAnalyzer:
         if rag_context:
             user_prompt += f"\n\n## 参考知识库（请基于以下知识回答，如知识库无相关内容请明确说明）\n{rag_context}"
 
+        # 【P1优化】加入对话历史（最近5轮，节省token）
         messages = [
             {"role": "system", "content": prompts.SYSTEM_PROMPT_SECURITY_ANALYST},
-            {"role": "user", "content": user_prompt}
         ]
+        
+        # 处理对话历史（只取最近5轮，避免token爆炸）
+        if chat_history and isinstance(chat_history, list):
+            # 取最近10条消息（5轮对话 = 10条消息）
+            recent_history = chat_history[-10:] if len(chat_history) > 10 else chat_history
+            for msg in recent_history:
+                if isinstance(msg, dict) and "role" in msg and "content" in msg:
+                    role = msg.get("role", "user")
+                    # 跳过系统消息，避免重复
+                    if role == "system":
+                        continue
+                    content_text = msg.get("content", "")
+                    # 跳过空内容和加载中状态
+                    if not content_text or "正在检索" in content_text or "正在生成" in content_text:
+                        continue
+                    messages.append({"role": role, "content": content_text})
+        
+        # 最后加上当前用户问题
+        messages.append({"role": "user", "content": user_prompt})
         for chunk in self.llm.chat_stream(messages, temperature=0.3, max_tokens=1024):
             yield {"stage": "answer", "chunk": chunk}
 

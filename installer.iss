@@ -11,21 +11,21 @@
 [Setup]
 AppId={{8A2B9C31-4E7D-4F3A-9C21-5D6E7F8A9B0C}
 AppName=AI网络安全智能分析系统
-AppVersion=3.0.1
-AppVerName=AI网络安全智能分析系统 3.0.1
+AppVersion=3.1.0
+AppVerName=AI网络安全智能分析系统 3.1.0
 AppPublisher=AI Network Security Analyzer
 DefaultDirName={autopf}\AI网络安全分析系统
 DefaultGroupName=AI网络安全智能分析系统
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 OutputDir=installer_output
-OutputBaseFilename=AI网络安全智能分析系统_Setup_3.0.1
+OutputBaseFilename=AI网络安全智能分析系统_Setup_3.1.0
 Compression=lzma2/ultra
 SolidCompression=yes
 WizardStyle=modern
 SetupIconFile=assets\app_icon.ico
 UninstallDisplayIcon={app}\AI网络安全分析系统.exe
-VersionInfoVersion=3.0.1
+VersionInfoVersion=3.1.0
 VersionInfoDescription=AI网络安全智能分析系统 安装程序
 ArchitecturesInstallIn64BitMode=x64compatible
 
@@ -135,7 +135,7 @@ begin
     '该配置将保存到安装目录下的 .env 文件，不会写入程序本体，可随时修改。' + #13#10 +
     '留空可跳过，核心检测（规则/监督模型/时序基线/孤立森林）无需 Key 即可运行。' + #13#10 + #13#10 +
     '常用服务商：' + #13#10 +
-    '  智谱AI          https://open.bigmodel.cn/api/paas/v4   glm-4.5-air' + #13#10 +
+    '  智谱AI          https://open.bigmodel.cn/api/paas/v4   glm-4-flash' + #13#10 +
     '  DeepSeek        https://api.deepseek.com              deepseek-chat' + #13#10 +
     '  通义千问        https://dashscope.aliyuncs.com/compatible-mode/v1   qwen-turbo' + #13#10 +
     '  Ollama 本地模型 http://localhost:11434/v1             qwen2.5:7b（Key 填任意值）');
@@ -146,7 +146,7 @@ begin
 
   ApiKeyPage.Values[0] := '';
   ApiKeyPage.Values[1] := 'https://open.bigmodel.cn/api/paas/v4';
-  ApiKeyPage.Values[2] := 'glm-4.5-air';
+  ApiKeyPage.Values[2] := 'glm-4-flash';
 end;
 
 { 安装完成后写入 .env }
@@ -163,7 +163,7 @@ begin
     if BaseUrl = '' then
       BaseUrl := 'https://open.bigmodel.cn/api/paas/v4';
     if Model = '' then
-      Model := 'glm-4.5-air';
+      Model := 'glm-4-flash';
 
     EnvPath := ExpandConstant('{app}\.env');
 

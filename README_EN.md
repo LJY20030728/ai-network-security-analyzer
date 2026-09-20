@@ -1,4 +1,4 @@
-# AI Network Security Analyzer
+﻿# AI Network Security Analyzer
 
 > AI-Assisted Network Forensics System — PCAP Offline Analysis + Four-Engine Integrated Detection + LLM Threat Assessment + RAG Security Knowledge Q&A
 
@@ -590,3 +590,4 @@ Copyright (c) 2026 AI Network Security Analyzer
 ---
 
 **If this project helps you, please give a Star ⭐**
+

@@ -67,7 +67,7 @@ class LLMSettings(BaseSettings):
     """大模型配置"""
     llm_api_key: str = ""
     llm_base_url: str = "https://open.bigmodel.cn/api/paas/v4"
-    llm_model: str = "glm-4-flash"
+    llm_model: str = "glm-4.5-air"
     embedding_model: str = "BAAI/bge-small-zh-v1.5"
     llm_vote_samples: int = 3
     llm_vote_temperatures: str = "0.1,0.4,0.7"
@@ -129,7 +129,7 @@ class ProjectSettings(BaseSettings):
     project_name: str = "AI Network Security Analyzer"
     debug: bool = True
     log_level: str = "INFO"
-    version: str = "3.0.1"
+    version: str = "3.1.1"
 
 
 class Settings(BaseSettings):
@@ -151,12 +151,12 @@ class Settings(BaseSettings):
     project_name: str = "AI Network Security Analyzer"
     debug: bool = True
     log_level: str = "INFO"
-    version: str = "3.0.1"
+    version: str = "3.1.1"
 
     # ===== 大模型配置（平铺，向后兼容）=====
     llm_api_key: str = ""
     llm_base_url: str = "https://open.bigmodel.cn/api/paas/v4"
-    llm_model: str = "glm-4-flash"
+    llm_model: str = "glm-4.5-air"
     embedding_model: str = "BAAI/bge-small-zh-v1.5"
 
     # ===== API 安全（平铺，向后兼容）=====

@@ -1,0 +1,36 @@
+{
+  "method": "时间外推 OOT：官方 training-set 训练 + 官方 testing-set（另一时间窗）测试",
+  "train_window_rows": 175341,
+  "test_window_rows": 82332,
+  "n_features": 194,
+  "unseen_category_values": {
+    "proto": 0,
+    "service": 0,
+    "state": 5
+  },
+  "train_self_f1": 0.9783,
+  "oot": {
+    "precision": 0.8187,
+    "recall": 0.9808,
+    "f1": 0.8924,
+    "accuracy": 0.8698,
+    "tp": 44460,
+    "fp": 9846,
+    "fn": 872,
+    "tn": 27154
+  },
+  "oot_f1_decay_vs_train_self": 0.0859,
+  "per_category_recall_oot": {
+    "Backdoor": 1.0,
+    "Analysis": 0.9424,
+    "Fuzzers": 0.8746,
+    "Shellcode": 0.9921,
+    "Reconnaissance": 0.9989,
+    "Exploits": 0.9945,
+    "DoS": 0.999,
+    "Worms": 1.0,
+    "Generic": 0.9999,
+    "Normal": 0.7339
+  },
+  "runtime_sec": 6.4
+}

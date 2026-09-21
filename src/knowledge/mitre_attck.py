@@ -332,26 +332,26 @@ PROTOCOL_KNOWLEDGE = [
 ]
 
 
-def _load_knowledge_docs() -> List[Dict[str, str]]:
-    """扫描 data/knowledge/docs/ 下的外部知识文档（P0-1 扩容：MITRE 全量战术库等）
-    返回 [{title, content, category}]，供 RAG 索引；文件系统缺失时静默跳过。
+def _load_docs_dir(subdir: str, category: str) -> List[Dict[str, str]]:
+    """扫描 data/knowledge/<subdir>/ 下的知识文档（.md/.txt/.json）
+    返回 [{title, content, category}]，供 RAG 索引；目录缺失时静默跳过。
     """
     items = []
-    docs_dir = None
+    target_dir = None
     for cand in (
-        os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data", "knowledge", "docs"),
-        os.path.join(os.getcwd(), "data", "knowledge", "docs"),
+        os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data", "knowledge", subdir),
+        os.path.join(os.getcwd(), "data", "knowledge", subdir),
     ):
         if os.path.isdir(cand):
-            docs_dir = cand
+            target_dir = cand
             break
-    if not docs_dir:
+    if not target_dir:
         return items
     try:
-        for fn in sorted(os.listdir(docs_dir)):
+        for fn in sorted(os.listdir(target_dir)):
             if not fn.lower().endswith((".md", ".txt", ".json")):
                 continue
-            fp = os.path.join(docs_dir, fn)
+            fp = os.path.join(target_dir, fn)
             try:
                 with open(fp, "r", encoding="utf-8") as f:
                     content = f.read()
@@ -360,7 +360,7 @@ def _load_knowledge_docs() -> List[Dict[str, str]]:
                 items.append({
                     "title": os.path.splitext(fn)[0],
                     "content": content,
-                    "category": "external_doc",
+                    "category": category,
                 })
             except Exception:
                 continue
@@ -369,8 +369,16 @@ def _load_knowledge_docs() -> List[Dict[str, str]]:
     return items
 
 
+def _load_knowledge_docs() -> List[Dict[str, str]]:
+    """扫描 data/knowledge/docs/ 下的外部知识文档（向后兼容包装）"""
+    return _load_docs_dir("docs", "external_doc")
+
+
 def get_all_knowledge() -> List[Dict[str, str]]:
-    """获取所有知识库条目（用于初始化RAG）"""
+    """获取所有知识库条目（用于初始化 RAG）。
+    聚合：内置 MITRE 精选技术 / 处置手册 / 协议知识 / docs 全量战术库 /
+    网络基础知识 / Web 安全知识 / attack_types 攻击类型专题文档。
+    """
     all_items = []
 
     # MITRE ATT&CK（精选内置）
@@ -387,8 +395,22 @@ def get_all_knowledge() -> List[Dict[str, str]]:
     # 协议知识
     all_items.extend(PROTOCOL_KNOWLEDGE)
 
-    # P0-1：文件系统知识文档（MITRE 全量 709 技术战术库等）
-    all_items.extend(_load_knowledge_docs())
+    # docs：MITRE 全量战术库
+    all_items.extend(_load_docs_dir("docs", "external_doc"))
+
+    # 网络基础知识（OSPF/BGP/RIP、网络设备、TCP/UDP、ICMP/ARP、端口、VLAN 等）
+    # Web 安全知识（SQL注入/XSS/CSRF、安全工具、SSL/IPsec、恶意软件等）
+    try:
+        from src.knowledge.network_fundamentals import get_network_knowledge
+        from src.knowledge.web_security import get_web_security_knowledge
+    except ImportError:  # 直接以脚本方式运行本模块时
+        from network_fundamentals import get_network_knowledge
+        from web_security import get_web_security_knowledge
+    all_items.extend(get_network_knowledge())
+    all_items.extend(get_web_security_knowledge())
+
+    # attack_types：SQL注入/勒索/钓鱼/内存马/中间人 攻击类型专题文档
+    all_items.extend(_load_docs_dir("attack_types", "attack_type"))
 
     return all_items
 

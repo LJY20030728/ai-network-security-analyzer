@@ -310,46 +310,52 @@ class RAGEngine:
                 expanded.extend(synonyms)
         return list(set(expanded))
 
+    # 领域核心词：term-aware 重排序（中文术语 + 协议/技术英文词）
+    CORE_TERMS = [
+        "dns", "http", "https", "tcp", "udp", "icmp", "arp", "ospf", "bgp", "rip",
+        "ip", "ssl", "tls", "ipsec", "ftp", "ssh", "rdp", "smb", "dhcp", "vlan",
+        "sql", "xss", "csrf", "syn", "ack", "端口", "登录", "登陆", "数据包", "流量",
+        "带宽", "密码", "暴力", "注入", "钓鱼", "勒索", "木马", "病毒", "恶意", "隧道",
+        "代理", "横向", "持久化", "侦察", "扫描", "渗出", "泄露", "防火墙", "路由", "交换",
+        "连接", "会话", "证书", "加密", "认证", "权限", "命令", "脚本", "进程",
+    ]
+
+    def _extract_core_terms(self, query: str) -> List[str]:
+        """提取查询中出现的领域核心词（无命中时退化为整句）"""
+        q = query.lower()
+        hits = [t for t in self.CORE_TERMS if t in q]
+        return hits or [q]
+
     def _rerank(self, query: str, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        P1-1: 轻量级重排序（基于查询词匹配度+安全术语权重，不引入Cross-Encoder）
-        重排序分数 = 标题匹配(0.4) + 内容匹配(0.3) + 元数据匹配(0.2) + 向量距离(0.1)
+        term-aware 语义重排序（不引入 Cross-Encoder）：
+        BGE 语义相似度 + 查询核心词精确命中（标题优先），兼顾语义泛化与关键词精确性。
         """
         if not results:
             return results
-
-        # 扩展查询术语
-        query_terms = self._expand_query_terms(query)
-        query_terms_lower = [t.lower() for t in query_terms]
+        cores = self._extract_core_terms(query)
+        n_core = max(1, len(cores))
 
         scored = []
         for r in results:
-            title = (r.get("title") or "").lower()
+            title = ((r.get("metadata") or {}).get("title") or "").lower()
             content = (r.get("content") or "").lower()
             metadata = str(r.get("metadata") or "").lower()
-            distance = r.get("distance", 0.5)
+            sim = float(r.get("similarity") or 0.0)
 
-            # 标题匹配（高权重）
-            title_score = sum(1 for t in query_terms_lower if t in title) / max(1, len(query_terms_lower))
-            # 内容匹配
-            content_score = sum(1 for t in query_terms_lower if t in content) / max(1, len(query_terms_lower))
-            # 元数据匹配
-            meta_score = sum(1 for t in query_terms_lower if t in metadata) / max(1, len(query_terms_lower))
-            # 向量距离（距离越小越好，转换为相似度）
-            vec_score = max(0, 1 - distance)
-
-            # 加权融合
-            final_score = (title_score * 0.5 + content_score * 0.25
-                           + meta_score * 0.15 + vec_score * 0.1)
-
-            # 安全术语精确匹配加分
-            exact_match_bonus = 0.15 if any(t in title for t in query_terms_lower if len(t) > 3) else 0
-            final_score += exact_match_bonus
+            t_hit = sum(1 for c in cores if c in title)
+            c_hit = sum(1 for c in cores if c in content)
+            m_hit = sum(1 for c in cores if c in metadata)
+            final_score = (sim * 0.45
+                           + (t_hit / n_core) * 0.25
+                           + (c_hit / n_core) * 0.15
+                           + (m_hit / n_core) * 0.05)
+            if t_hit >= 2 or (t_hit >= 1 and len(title) <= 20):
+                final_score += 0.10  # 标题精确命中核心词的强奖励
 
             r["rerank_score"] = round(final_score, 4)
             scored.append(r)
 
-        # 按重排序分数降序
         scored.sort(key=lambda x: x.get("rerank_score", 0), reverse=True)
         return scored
 

@@ -4,6 +4,32 @@
 
 ---
 
+## [3.1.1] - 2026-09-21
+
+### 科学验证口径补强
+- **新增时间外推 OOT 评测**（`tools/eval_unsw_oot.py`）：用 UNSW-NB15 官方两个不同时间窗，整个官方 training-set（175,341）训练、官方 testing-set（82,332）独立测试，F1=0.8924（P 0.8187 / R 0.9808 / Acc 0.8698），较训练自身 F1 0.9783 衰减 0.0859。
+- **新增三层验证口径对比图**（`tools/plot_validation_comparison.py` → `docs/validation_split_comparison.png/.csv`）：同分布 0.970 / 时间外推 0.892 / 跨数据集 0.192。
+- OOT 下 Normal 类召回 0.734（误报偏多）为真实短板，指向部署需结合基线学习与本地校准。
+
+### 知识库可复现修复（P0）
+- 知识库构建完全脱离运行时二进制：STIX 源（`data/knowledge/mitre_attck/enterprise-attack.json`，gitignore 不入库）→ `tools/build_knowledge_base.py` 生成 15 篇 docs → `KnowledgeService.initialize()` 一键入库；干净 clone 可一键复现。
+- 修复 STIX 解析：正确解析 course-of-action（268）与 relationship(mitigates, 21262)、建立技术→缓解映射；旧代码用了不存在的 `obj.get("mitigations")`。
+- 补 stealth / defense-impairment 两个新战术的中文映射。
+- `KnowledgeService.initialize()` 幂等化（先 clear 再全量重建），重复点击不翻倍。
+- 全量重建为 **1687 片段 / 63 条目 / 709 ATT&CK 技术**（旧库 933）。
+
+### RAG 评测与排序
+- RAG 评测升级为**双口径**（`tools/evaluate_rag.py`）：Strict（唯一权威条目）@1=0.6875 / @5=1.0 / MRR=0.8333；Relevant（相关文档集合）@1=0.875 / @5=1.0 / MRR=0.9375。
+- 修复 `_rerank` 标题信号失效 bug（标题在 metadata、旧代码读顶层空值），并升级为 term-aware 语义重排（BGE 语义 + 核心词精确命中），纠正"问 DNS 隧道却把 SQL 注入排第一"。
+- 保留两个首位瑕疵（横向移动、系统信息发现），不硬调权重过拟合评测。
+
+### 配置 / 文档 / 清理
+- **模型事实更正**：应用实际 LLM 为 **glm-4.5-air**（`.env` 经 Settings 的 env_file 覆盖代码默认；本条目纠正 3.1.0 误写的 glm-4-flash）；代码默认值同步改为 glm-4.5-air。
+- 补 MIT LICENSE（版权 Jingyu Liao / LJY20030728）。
+- 删除过期残留：`data/knowledge/` 下两个 import README、rebuild_log、build_report。
+
+---
+
 ## [3.1.0] - 2026-09-21
 
 ### 实验诚信重做（方案 A，最彻底）

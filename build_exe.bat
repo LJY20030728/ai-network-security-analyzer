@@ -32,7 +32,8 @@ echo.
     --add-data "src;src" ^
     --add-data "data\baselines;data\baselines" ^
     --add-data "data\chroma_db;data\chroma_db" ^
-    --add-data "data\knowledge;data\knowledge" ^
+    --add-data "data\knowledge\docs;data\knowledge\docs" ^
+    --add-data "data\knowledge\attack_types;data\knowledge\attack_types" ^
     --add-data "models\bge-small-zh-v1.5;models\bge-small-zh-v1.5" ^
     --add-data "models\supervised_detector.joblib;models" ^
     --add-data "models\unsw_supervised_detector.joblib;models" ^

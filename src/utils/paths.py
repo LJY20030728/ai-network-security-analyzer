@@ -51,7 +51,7 @@ def ensure_dir(path: str) -> str:
 # 需要首启迁移到数据目录的种子资源（源相对 asset_dir，目标相对 data_dir）
 SEED_COPIES = [
     ("data/baselines", "baselines"),    # 预置时序基线 default.json
-    ("data/chroma_db", "chroma_db"),    # 预构建向量库（933 文档，开箱即用）
+    ("data/chroma_db", "chroma_db"),    # 预构建向量库（1687 文档块，开箱即用）
     ("data/knowledge", "knowledge"),    # 知识库源文档（供重新初始化）
 ]
 

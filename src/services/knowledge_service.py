@@ -56,10 +56,14 @@ class KnowledgeService:
         try:
             rag = self._get_rag_engine()
             from src.knowledge.mitre_attck import get_all_knowledge
-            
+
+            # 幂等：先清空旧集合再全量重建，避免重复点击导致片段翻倍
+            rag.clear()
+            rag._seeded = False
             knowledge_items = get_all_knowledge()
             count = rag.add_knowledge_base(knowledge_items)
-            
+            rag._seeded = True
+
             self._initialized = True
             
             return {

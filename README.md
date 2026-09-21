@@ -80,13 +80,13 @@
 
 ### 📚 RAG 安全知识问答
 
-- **本地向量库**：ChromaDB + BGE ONNX 推理（933 条知识片段，零外部服务依赖）
+- **本地向量库**：ChromaDB + BGE ONNX 推理（1687 条知识片段，零外部服务依赖）
 - **混合检索**：BM25 关键词 + 向量语义，双通道召回
 - **轻量级重排序**：标题 0.4 + 内容 0.3 + 元数据 0.2 + 向量距离 0.1 + 精确匹配加分
 - **安全术语同义词扩展**：10 类中文→英文，提升跨语言检索效果
 - **攻击类型知识库**：5 篇专业文档（SQL注入/勒索软件/钓鱼/内存马/中间人攻击），已导入向量库
 - **对话历史持久化**：SQLite 存储，刷新不丢失
-- **RAG 评测**：16 题黄金问答集，Recall@5=1.0、MRR@5=0.95
+- **RAG 评测**：16 题黄金问答集双口径评测，Relevant Recall@5=1.0、MRR=0.9375（Strict 口径见评测章节）
 
 ### 📋 取证报告五要素
 
@@ -201,7 +201,7 @@ Scapy     四引擎     LLM       SQLite    DPAPI
 | **桌面** | pywebview | 5.x | 原生窗口，系统 WebView |
 | **解析** | Scapy | 2.5+ | PCAP 流式解析 |
 | **算法** | scikit-learn | 1.3+ | HistGradientBoosting / IsolationForest |
-| **AI** | 智谱 GLM 大模型 | glm-4-flash | 默认大模型；兼容 DeepSeek / OpenAI 接口 / Ollama |
+| **AI** | 智谱 GLM 大模型 | glm-4.5-air | 默认大模型；兼容 DeepSeek / OpenAI 接口 / Ollama |
 | **向量** | ChromaDB | 0.5+ | 本地向量库 |
 | **嵌入** | BGE ONNX | bge-small-zh-v1.5 | 中文优化，本地推理，无需 API |
 | **存储** | SQLite | 3.x | WAL 模式，三表+索引 |
@@ -256,7 +256,7 @@ python -m uvicorn src.api.main:app --host 127.0.0.1 --port 8080
 
 ### 方式二：Windows 安装包（推荐普通用户）
 
-1. 前往 [Releases 页面](https://github.com/LJY20030728/ai-network-security-analyzer/releases) 下载 `AI网络安全智能分析系统_Setup_3.0.1.exe`
+1. 前往 [Releases 页面](https://github.com/LJY20030728/ai-network-security-analyzer/releases) 下载 `AI网络安全智能分析系统_Setup_3.1.1.exe`
 2. 双击运行安装程序，选择安装目录（安装包已内置全部运行依赖与模型，无需另装 Python）
 3. **安装程序会自动检测 WebView2 Runtime**：若系统缺失，会先弹窗说明，点击「安装」后自动联网下载并静默安装（内置微软官方在线安装器），无需手动处理
 4. 安装完成后，通过桌面 / 开始菜单快捷方式启动
@@ -331,7 +331,7 @@ docker compose up -d --build
 
 1. 进入「⚙️ 设置」Tab
 2. 配置 API Key（密码输入框，保存后用 DPAPI 加密存储）
-3. 配置 Base URL 和模型名称（**默认：智谱 GLM，Base URL `https://open.bigmodel.cn/api/paas/v4`，模型 `glm-4-flash`**；本地嵌入固定为 `BAAI/bge-small-zh-v1.5`）
+3. 配置 Base URL 和模型名称（**默认：智谱 GLM，Base URL `https://open.bigmodel.cn/api/paas/v4`，模型 `glm-4.5-air`**；本地嵌入固定为 `BAAI/bge-small-zh-v1.5`）
 4. 点击「测试连接」验证 API Key 有效性
 5. 保存后立即生效，无需重启；也可切换为 DeepSeek / OpenAI 兼容接口或 Ollama 本地模型
 
@@ -405,6 +405,22 @@ docker compose up -d --build
 
 **结论**：训练/测试 F1 差距仅 0.0088，同分布下过拟合风险低。但需注意——真正的跨数据集迁移会因特征体系不对齐而显著下降（见下文「泛化能力评估」，UNSW→NSL 仅 0.192），因此系统在新环境必须靠基线学习 / 本地重训，而不能直接套用现成模型。
 
+### 时间外推验证（Out-of-Time，最贴近真实部署）
+
+分层随机划分衡量的是"同一时间窗内"的泛化，但真实部署中模型总是被用在**未来**采集的流量上。为检验时间外推能力，使用 UNSW-NB15 **官方两个不同时间窗**的划分：整个官方 training-set（175,341 条）训练、官方 testing-set（82,332 条，另一时间窗）独立测试（`tools/eval_unsw_oot.py`）：
+
+![三层验证口径对比](docs/validation_split_comparison.png)
+
+| 验证口径 | F1 | 说明 |
+|----------|-----|------|
+| 同分布（分层随机） | 0.9704 | 同一时间窗，性能上界 |
+| **时间外推 OOT** | **0.8924** | 另一时间窗，P 0.8187 / R 0.9808 / Acc 0.8698 |
+| 跨数据集 UNSW→NSL | 0.1924 | 换特征体系 / 数据集，泛化下界 |
+
+- 训练自身 F1=0.9783，时间外推后 F1 衰减 **0.0859**、仍保持 0.89——说明模型并非只记住同分布样本，对未来时间窗有合理外推能力。
+- OOT 下 **Normal 类召回 0.734（误报偏多，P 降到 0.82）是真实短板**：模型倾向于把新时间窗里未见模式的正常流判为攻击。这指向"部署时应结合基线学习 + 本地少量校准"，而非零样本直接上线。
+- 测试期出现 5 个训练时未见的 `state` 取值，按全 0 处理（类别值未知的保守兜底）。
+
 ### UNSW-NB15 每类别召回率
 
 | 攻击类型 | 召回率 | | 攻击类型 | 召回率 |
@@ -415,21 +431,21 @@ docker compose up -d --build
 | Reconnaissance | 0.9991 | | Analysis | 0.9171 |
 | Normal | 0.9215 | | Fuzzers | 0.8715 |
 
-### RAG 检索效果（Recall@k / MRR）
+### RAG 检索效果（双口径 Recall@k / MRR）
 
-用 16 题黄金问答集（覆盖 MITRE 技术、路由/传输协议、处置手册、Web 安全）评测 BGE 中文向量 + BM25 混合检索：
+用 16 题黄金问答集（覆盖 MITRE 技术、协议、处置手册、Web 安全）评测生产检索路径
+（BGE 中文向量 + BM25 + RRF 融合 + term-aware 重排），采用两种口径同时报告：
 
-| 指标 | 数值 |
-|------|------|
-| 黄金问答集 | 16 题 |
-| **Recall@1** | **0.9375** |
-| Recall@3 | 0.9375 |
-| **Recall@5** | **1.0000** |
-| **MRR@5** | **0.9500** |
-| 向量库片段数 / 源文档 | 933 条 / 20 篇 |
-| 平均检索耗时 | ~0.3s |
+| 口径 | Recall@1 | Recall@3 | Recall@5 | MRR@5 |
+|------|----------|----------|----------|-------|
+| **Strict（唯一权威条目）** | 0.6875 | 1.0000 | 1.0000 | 0.8333 |
+| **Relevant（相关文档集合）** | **0.8750** | 1.0000 | 1.0000 | **0.9375** |
 
-分品类 Recall@5：MITRE 1.0、处置手册 1.0、协议 1.0。原始结果见 `data/eval_rag/rag_result.json`。
+- **Strict**：gold = 标题含技术ID / 手册全名的唯一权威文档，衡量特定权威条目的排序。
+- **Relevant**：gold = 客观上能回答该问题的文档集合（信息检索标准做法，一个问题的相关文档本就不止一个），衡量首位 / top-k 相关性；每个 gold 集合依据见 `tools/evaluate_rag.py` 注释。
+- 向量库规模：**1687 片段 / 63 条目**（含 **709 个 ATT&CK 技术**、15 篇全量技术展开），平均检索耗时 ~0.3s。
+- 分品类 Relevant Recall@5：MITRE 1.0、处置手册 1.0、协议 1.0。
+- **诚实标注的两个首位瑕疵**：横向移动问题 top1 为"端口对照表"、系统信息发现 top1 为同属侦察的 T1046（正确条目均在 top3 内；不硬调权重以免过拟合评测）。原始结果见 `data/eval_rag/rag_result.json`。
 
 ### 流式 vs 全量：内存压测（30 万包 / 28 MB PCAP）
 
@@ -563,7 +579,7 @@ docker compose up -d --build
 | 目标用户 | 网络专家 | 安全工程师 | 安全运维 / 分析师 |
 | 未知/加密流量 | 人工发现 | 规则外漏报 | 行为基线 + 无监督 + 监督兜底 |
 | 威胁解读 | 无 | 原始告警 | LLM 翻译为人类可读报告 + 处置建议 |
-| 知识问答 | 无 | 无 | RAG 安全知识库（933 片段） |
+| 知识问答 | 无 | 无 | RAG 安全知识库（1687 片段） |
 | 输出物 | 数据包列表 | 告警日志 | 取证五要素 HTML 报告 |
 | 部署 | 本地 | 服务器 | 一键安装 / Docker / 源码 |
 
@@ -773,7 +789,7 @@ python tools/train_unsw_supervised.py
 ### Q3：支持哪些大模型？
 
 **A**：任何 OpenAI 兼容接口的大模型都支持，包括：
-- 智谱 AI（GLM-4-Flash / GLM-4）
+- 智谱 AI（GLM-4.5-Air / GLM-4）
 - DeepSeek（deepseek-chat / deepseek-coder）
 - OpenAI（GPT-3.5 / GPT-4）
 - 本地部署的 vLLM / Ollama（OpenAI 兼容接口）
@@ -799,11 +815,11 @@ BGE ONNX 模型加载后约占用 100-200MB，但可以按需加载。普通电�
 
 ### Q6：RAG 的 Recall@5 是怎么测的？可信吗？
 
-**A**：用 16 题人工标注的黄金问答集（每题给出应命中的标准技术 ID/关键词），在不看答案的情况下检索 Top-5，统计标准答案是否出现在结果中：
-1. **Recall@5 = 1.0**：16 题的标准答案都能在前 5 条命中；Recall@1 = 0.9375、MRR@5 = 0.95
-2. 检索为 BGE 中文向量 + BM25 关键词混合，平均约 0.3s
-3. 评测脚本与黄金集都在仓库中（`src/ai/rag_benchmark.py`、`data/eval_rag/`），可一键复算
-4. 另有一套"关键词集合覆盖率"口径的评测（`data/eval_perf/rag_recall_result.json`，平均 0.68），衡量命中片段覆盖了多少期望关键词，与"是否命中标准答案"的 Recall 是两个不同指标，并不矛盾。
+**A**：用 16 题人工标注的黄金问答集，在不看答案的情况下检索 Top-5，并以两种口径统计：
+1. **Strict 口径**（gold = 唯一权威条目）：Recall@1=0.6875、@5=1.0、MRR=0.8333
+2. **Relevant 口径**（gold = 客观相关文档集合）：Recall@1=0.875、@5=1.0、MRR=0.9375
+3. 生产检索为 BGE 中文向量 + BM25 + RRF + term-aware 重排，平均约 0.3s
+4. 评测脚本与黄金集都在仓库中（`tools/evaluate_rag.py`、`data/eval_rag/`），gold 集合依据写在脚本注释里，可一键复算；两个首位瑕疵（横向移动、系统信息发现）如实保留。
 
 ### Q7：如何打包成 Windows .exe？
 
@@ -825,6 +841,18 @@ pyinstaller --noconfirm --windowed --name "AI-Network-Security-Analyzer" ^
 ## 更新日志
 
 详细更新记录请查看 [CHANGELOG.md](CHANGELOG.md)。
+
+### [3.1.1] - 2026-09-21
+
+**科学验证口径补强 + 知识库可复现修复**：
+- 新增时间外推 OOT 评测：官方 training 训练 / 官方 testing（另一时间窗）测试，F1=0.8924，较训练自身衰减 0.0859（`tools/eval_unsw_oot.py`）
+- 新增三层验证口径对比图（同分布 0.970 / 时间外推 0.892 / 跨数据集 0.192，`docs/validation_split_comparison.png`）
+- 知识库构建完全脱离运行时二进制：STIX 源 → `tools/build_knowledge_base.py` 生成 docs → 一键入库，干净 clone 可复现
+- 修复 STIX 解析：正确解析 course-of-action 与 mitigates 关系、建立技术→缓解映射（旧代码用了不存在的字段）
+- 知识库初始化幂等化（先清空再重建），全量重建为 **1687 片段 / 63 条目 / 709 ATT&CK 技术**
+- RAG 评测升级为双口径（Strict / Relevant），修复 rerank 标题信号失效 bug、升级 term-aware 重排
+- 模型默认名更正为 **glm-4.5-air**（与实际配置一致）
+- 补 MIT LICENSE；清理过期残留文件
 
 ### [3.1.0] - 2026-09-21
 
@@ -874,7 +902,7 @@ pyinstaller --noconfirm --windowed --name "AI-Network-Security-Analyzer" ^
 
 MIT License
 
-Copyright (c) 2026 AI Network Security Analyzer
+Copyright (c) 2026 Jingyu Liao (LJY20030728)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

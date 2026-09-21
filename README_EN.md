@@ -77,7 +77,7 @@ This project is an **AI-assisted offline network forensics analysis tool** that 
 
 ### 📚 RAG Security Knowledge Q&A
 
-- **Local Vector Store**: ChromaDB + BGE ONNX inference (933 knowledge chunks, zero external service dependency)
+- **Local Vector Store**: ChromaDB + BGE ONNX inference (1687 knowledge chunks, zero external service dependency)
 - **Hybrid Retrieval**: BM25 keyword + vector semantic, dual-channel recall
 - **Lightweight Reranking**: Title 0.4 + Content 0.3 + Metadata 0.2 + Vector Distance 0.1 + Exact Match bonus
 - **Security Terminology Synonym Expansion**: 10 categories Chinese→English, improves cross-language retrieval
@@ -139,7 +139,7 @@ This project is an **AI-assisted offline network forensics analysis tool** that 
 | **Desktop** | pywebview | 5.x | Native window, system WebView |
 | **Parsing** | Scapy | 2.5+ | PCAP stream parsing |
 | **Algorithm** | scikit-learn | 1.3+ | HistGradientBoosting / IsolationForest |
-| **AI** | Zhipu GLM LLM | glm-4-flash | Default LLM; also supports DeepSeek / OpenAI / Ollama |
+| **AI** | Zhipu GLM LLM | glm-4.5-air | Default LLM; also supports DeepSeek / OpenAI / Ollama |
 | **Vector** | ChromaDB | 0.5+ | Local vector database |
 | **Embedding** | BGE ONNX | bge-small-zh-v1.5 | Chinese-optimized, local inference, no API needed |
 | **Storage** | SQLite | 3.x | WAL mode, three tables + indexes |
@@ -194,7 +194,7 @@ python -m uvicorn src.api.main:app --host 127.0.0.1 --port 8080
 
 ### Method 2: Windows Installer (Recommended for Users)
 
-1. Go to the [Releases page](https://github.com/LJY20030728/ai-network-security-analyzer/releases) and download `AI网络安全智能分析系统_Setup_3.0.1.exe`
+1. Go to the [Releases page](https://github.com/LJY20030728/ai-network-security-analyzer/releases) and download `AI网络安全智能分析系统_Setup_3.1.1.exe`
 2. Double-click the installer and choose a directory (it bundles all runtime dependencies and models; no Python needed)
 3. **The installer auto-detects WebView2 Runtime**: if missing, it notifies you up front and, after you click Install, automatically downloads and silently installs it (a signed Microsoft online installer is bundled)
 4. After installation, launch from the desktop / Start Menu shortcut
@@ -323,6 +323,22 @@ The supervised model lifts attack recall from 0.0001 (rule engine) to 0.9772 —
 
 The train/test F1 gap is only 0.0088, so in-distribution overfitting risk is low. Note, however, that genuine cross-dataset transfer degrades sharply when feature systems do not align (see Generalization below; UNSW→NSL is only 0.192) — a new environment therefore needs baseline learning / local retraining rather than reusing a model as-is.
 
+### Out-of-Time Validation (closest to real deployment)
+
+Stratified-random splitting measures generalization within the same time window, but in production a model is always applied to traffic captured in the **future**. To test out-of-time (OOT) generalization, we use UNSW-NB15's **two official time windows**: the entire official training-set (175,341) for training and the official testing-set (82,332, a different window) as an independent test (`tools/eval_unsw_oot.py`):
+
+![Three-Caliber Validation Comparison](docs/validation_split_comparison.png)
+
+| Validation caliber | F1 | Note |
+|--------------------|-----|------|
+| In-distribution (stratified random) | 0.9704 | Same window, upper bound |
+| **Out-of-Time (OOT)** | **0.8924** | Different window; P 0.8187 / R 0.9808 / Acc 0.8698 |
+| Cross-dataset UNSW→NSL | 0.1924 | Different feature system, lower bound |
+
+- Train self F1 is 0.9783; after OOT the F1 decays by **0.0859** yet stays at 0.89 — the model does not merely memorize in-distribution samples and generalizes reasonably to a future window.
+- Under OOT, **Normal-class recall is 0.734 (more false positives, P down to 0.82) — a real weakness**: the model tends to flag normal flows with unseen patterns in the new window as attacks. This points to combining baseline learning + a small local calibration at deployment rather than launching zero-shot.
+- Five `state` values unseen at test time are handled conservatively as all-zero.
+
 ### UNSW-NB15 Per-Class Recall
 
 | Attack | Recall | | Attack | Recall |
@@ -333,21 +349,20 @@ The train/test F1 gap is only 0.0088, so in-distribution overfitting risk is low
 | Reconnaissance | 0.9991 | | Analysis | 0.9171 |
 | Normal | 0.9215 | | Fuzzers | 0.8715 |
 
-### RAG Retrieval (Recall@k / MRR)
+### RAG Retrieval (Dual-Caliber Recall@k / MRR)
 
-A 16-question golden set (MITRE techniques, routing/transport protocols, incident handbooks, web security) evaluates BGE Chinese embeddings + BM25 hybrid retrieval:
+A 16-question golden set (MITRE techniques, protocols, incident handbooks, web security) evaluates the production retrieval path (BGE Chinese embeddings + BM25 + RRF fusion + term-aware reranking) under two calibers:
 
-| Metric | Value |
-|--------|-------|
-| Golden Q&A set | 16 questions |
-| **Recall@1** | **0.9375** |
-| Recall@3 | 0.9375 |
-| **Recall@5** | **1.0000** |
-| **MRR@5** | **0.9500** |
-| Vector chunks / source docs | 933 / 20 |
-| Average retrieval time | ~0.3s |
+| Caliber | Recall@1 | Recall@3 | Recall@5 | MRR@5 |
+|---------|----------|----------|----------|-------|
+| **Strict (single authoritative doc)** | 0.6875 | 1.0000 | 1.0000 | 0.8333 |
+| **Relevant (relevant-doc set)** | **0.8750** | 1.0000 | 1.0000 | **0.9375** |
 
-Per-category Recall@5: MITRE 1.0, handbooks 1.0, protocols 1.0. Raw output: `data/eval_rag/rag_result.json`.
+- **Strict**: gold = the single authoritative doc whose title contains the technique ID / full handbook name.
+- **Relevant**: gold = the set of docs that objectively answer the question (standard IR practice; a question usually has more than one relevant doc). The rationale for each gold set is annotated in `tools/evaluate_rag.py`.
+- Store size: **1687 chunks / 63 entries** (including **709 ATT&CK techniques** and 15 full technique-expansion docs); ~0.3s average retrieval.
+- Per-category Relevant Recall@5: MITRE 1.0, handbooks 1.0, protocols 1.0.
+- **Two honestly-reported top-1 flaws** (lateral movement; system-information discovery) — the correct docs are within top-3; weights are not force-tuned to overfit the golden set. Raw output: `data/eval_rag/rag_result.json`.
 
 ### Streaming vs Full-Load Memory Test (300k packets / 28 MB PCAP)
 
@@ -479,7 +494,7 @@ To be fair, fixed weights are not worthless: in a real-PCAP unknown-attack / unl
 | Target user | Network expert | Security engineer | Security ops / analyst |
 | Unknown/encrypted | Manual discovery | Missed outside rules | Behavioral baseline + unsupervised + supervised fallback |
 | Threat interpretation | None | Raw alerts | LLM human-readable report + remediation |
-| Knowledge Q&A | None | None | RAG knowledge base (933 chunks) |
+| Knowledge Q&A | None | None | RAG knowledge base (1687 chunks) |
 | Output | Packet list | Alert log | Forensic five-element HTML report |
 | Deployment | Local | Server | Installer / Docker / source |
 
@@ -667,8 +682,8 @@ Project positioning is "offline forensics tool" — core detection functionality
 
 ### Q3: Which LLMs are supported?
 
-**A**: The default LLM is **Zhipu GLM (`glm-4-flash`, Base URL `https://open.bigmodel.cn/api/paas/v4`)**. Any OpenAI-compatible interface also works, including:
-- Zhipu AI (GLM-4-Flash / GLM-4 / GLM-4.5)
+**A**: The default LLM is **Zhipu GLM (`glm-4.5-air`, Base URL `https://open.bigmodel.cn/api/paas/v4`)**. Any OpenAI-compatible interface also works, including:
+- Zhipu AI (GLM-4.5-Air / GLM-4 / GLM-4.5)
 - DeepSeek (deepseek-chat)
 - OpenAI (GPT-4 / GPT-4o)
 - Locally deployed Ollama / vLLM (OpenAI-compatible interface)
@@ -694,11 +709,11 @@ Practical use case: Use Suricata for real-time monitoring to discover alerts, th
 
 ### Q6: How is RAG Recall@5 measured? Is it trustworthy?
 
-**A**: A 16-question, human-labeled golden set (each with a standard technique ID/keyword) is used; Top-5 is retrieved without seeing the answer, and we check whether the standard answer appears:
-1. **Recall@5 = 1.0**: all 16 standard answers appear in the top 5; Recall@1 = 0.9375, MRR@5 = 0.95
-2. Retrieval is BGE Chinese embeddings + BM25 keyword hybrid, averaging ~0.3s
-3. The script and golden set are in the repo (`src/ai/rag_benchmark.py`, `data/eval_rag/`) and can be re-run
-4. A separate "keyword-set coverage" metric (`data/eval_perf/rag_recall_result.json`, avg 0.68) measures how many expected keywords the hits cover — a different metric from "did we hit the standard answer", so the two do not conflict.
+**A**: A 16-question, human-labeled golden set is used; Top-5 is retrieved without seeing the answer and scored under two calibers:
+1. **Strict** (gold = single authoritative doc): Recall@1=0.6875, @5=1.0, MRR=0.8333
+2. **Relevant** (gold = relevant-doc set): Recall@1=0.875, @5=1.0, MRR=0.9375
+3. Production retrieval is BGE Chinese embeddings + BM25 + RRF + term-aware reranking, averaging ~0.3s
+4. The script and golden set are in the repo (`tools/evaluate_rag.py`, `data/eval_rag/`); gold-set rationale is annotated in the script and it can be re-run. Two top-1 flaws are reported honestly.
 
 ### Q7: How to package as Windows .exe?
 
@@ -721,7 +736,7 @@ Packaged files in `dist/` directory. Recommended to use Inno Setup to create ins
 
 MIT License
 
-Copyright (c) 2026 AI Network Security Analyzer
+Copyright (c) 2026 Jingyu Liao (LJY20030728)
 
 ---
 

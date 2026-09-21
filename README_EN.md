@@ -56,7 +56,7 @@ This project is an **AI-assisted offline network forensics analysis tool** that 
 
 | Engine | Type | Weight | Description |
 |--------|------|--------|-------------|
-| **Supervised Model** | HistGradientBoosting | 0.5 | 76-dim CICFlowMeter features, flow-level prediction + PCAP-level aggregation, F1=0.9487 |
+| **Supervised Model** | HistGradientBoosting | 0.5 | Flow-level prediction + PCAP-level aggregation; UNSW-NB15 (194-dim) F1=0.9704, UNSW-CIC Re-extracted (76-dim) F1=0.9487 |
 | **Rule Engine** | Threshold rules | 0.2 | 10+ configurable rules (SYN flood / port scan / DNS tunnel / RST storm, etc.) |
 | **Time-Series Baseline** | EWMA + Median/MAD | 0.15 | 4-dimension joint detection, multi-dimension simultaneous deviation triggers CRITICAL |
 | **Isolation Forest** | Unsupervised anomaly | 0.15 | Suitable for low-dimensional tabular data, detects unknown anomalies |
@@ -298,7 +298,9 @@ A supervised model (HistGradientBoosting) acts as the **primary detector**, vali
 | Dataset | Flows | Precision | Recall | F1 | Accuracy |
 |---------|-------|-----------|--------|-----|----------|
 | **UNSW-NB15** (in-distribution split) | 175,341 | 0.9637 | **0.9772** | **0.9704** | 0.9594 |
-| **CIC-IDS** (CIC 76 features, in-distribution stratified) | 447,915 | 0.9351 | 0.9628 | **0.9487** | 0.9792 |
+| **UNSW-CIC Re-extracted** (76-dim CICFlowMeter, in-distribution stratified, **not the public CIC-IDS2017**) | 447,915 | 0.9351 | 0.9628 | **0.9487** | 0.9792 |
+
+> **Honest note (UNSW-CIC Re-extracted)**: the 0.9487 above is the binary **aggregate** F1; per-class, minority-attack recall is low (DoS 0.168, Analysis 0.260, Shellcode 0.241, Worms 0.306) and attack **macro recall is only 0.4683**. This data is UNSW-NB15's underlying traffic re-extracted with CICFlowMeter (the time axis is synthetic, row-order × 0.5s, no real timestamps) — not the public CIC-IDS2017; it is used only to validate the 76-dim CICFlowMeter feature system.
 
 **vs unsupervised/rule engines** (same UNSW-NB15 test set):
 
@@ -360,7 +362,7 @@ A 16-question golden set (MITRE techniques, protocols, incident handbooks, web s
 
 - **Strict**: gold = the single authoritative doc whose title contains the technique ID / full handbook name.
 - **Relevant**: gold = the set of docs that objectively answer the question (standard IR practice; a question usually has more than one relevant doc). The rationale for each gold set is annotated in `tools/evaluate_rag.py`.
-- Store size: **1687 chunks / 63 entries** (including **709 ATT&CK techniques** and 15 full technique-expansion docs); ~0.3s average retrieval.
+- Store size: **1687 chunks / 63 entries** (including **697 valid ATT&CK techniques**, excluding 149 revoked + 12 deprecated; 15 full technique-expansion docs); ~0.3s average retrieval.
 - Per-category Relevant Recall@5: MITRE 1.0, handbooks 1.0, protocols 1.0.
 - **Two honestly-reported top-1 flaws** (lateral movement; system-information discovery) — the correct docs are within top-3; weights are not force-tuned to overfit the golden set. Raw output: `data/eval_rag/rag_result.json`.
 
@@ -378,7 +380,7 @@ Streaming cuts memory peak by **162.8x** with identical alerts (`data/eval_perf/
 | Metric | Value |
 |--------|-------|
 | Result | **148 passed / 19 skipped / 0 failed** |
-| Test files | 19 |
+| Test files | 17 |
 | Covered modules | Detection algorithms / API routes / Storage / Security / Services / Utils |
 
 ---
@@ -546,7 +548,7 @@ ai-network-security-analyzer/
 │       ├── error_handler.py   # Three-layer error handling
 │       └── log_observer.py    # Log observability
 ├── models/                    # Trained models
-│   ├── supervised_detector.joblib      # CIC supervised model (F1=0.9487)
+│   ├── supervised_detector.joblib      # UNSW-CIC Re-extracted supervised model (76-dim, F1=0.9487)
 │   └── unsw_supervised_detector.joblib # UNSW dedicated model (Recall=0.9772)
 ├── data/                      # Data directory
 │   ├── samples/golden/        # Golden test samples (10)

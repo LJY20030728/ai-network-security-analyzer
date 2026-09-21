@@ -16,7 +16,7 @@
 - 修复 STIX 解析：正确解析 course-of-action（268）与 relationship(mitigates, 21262)、建立技术→缓解映射；旧代码用了不存在的 `obj.get("mitigations")`。
 - 补 stealth / defense-impairment 两个新战术的中文映射。
 - `KnowledgeService.initialize()` 幂等化（先 clear 再全量重建），重复点击不翻倍。
-- 全量重建为 **1687 片段 / 63 条目 / 709 ATT&CK 技术**（旧库 933）。
+- 全量重建为 **1687 片段 / 63 条目 / 697 个有效 ATT&CK 技术**（已排除 149 撤销 + 12 弃用；旧库 933）。
 
 ### RAG 评测与排序
 - RAG 评测升级为**双口径**（`tools/evaluate_rag.py`）：Strict（唯一权威条目）@1=0.6875 / @5=1.0 / MRR=0.8333；Relevant（相关文档集合）@1=0.875 / @5=1.0 / MRR=0.9375。
@@ -27,6 +27,14 @@
 - **模型事实更正**：应用实际 LLM 为 **glm-4.5-air**（`.env` 经 Settings 的 env_file 覆盖代码默认；本条目纠正 3.1.0 误写的 glm-4-flash）；代码默认值同步改为 glm-4.5-air。
 - 补 MIT LICENSE（版权 Jingyu Liao / LJY20030728）。
 - 删除过期残留：`data/knowledge/` 下两个 import README、rebuild_log、build_report。
+
+### 文档口径诚信修正（代码 ↔ README ↔ 综述 一致性审计）
+- **ATT&CK 口径**：有效技术数由 709 改报 **697**（858 个攻击模式中同时排除 149 撤销 + 12 弃用；旧 709 仅排除撤销）。
+- **CIC 数据集身份更正**：原"CIC-IDS"实为 **UNSW-NB15 底层流量经 CICFlowMeter 重提取版（非公开 CIC-IDS2017）**，时间轴为行序×0.5s 合成；0.9487 为二分类聚合 F1，补披露攻击类 **macro recall 0.4683**（DoS 0.168 / Analysis 0.260 / Shellcode 0.241 / Worms 0.306）。
+- 监督模型 F1 区分两套特征体系：UNSW-NB15（194 维）0.9704、UNSW-CIC 重提取版（76 维）0.9487。
+- 测试规模口径更正：**148 用例 / 17 个测试文件**（原误写 19 个文件、160+ 用例）。
+- 同步修正 README（中/英）与 `docs/项目自述_REACT完整版.md`：模型名统一 glm-4.5-air、RAG 双口径数字、补 OOT 成果与版本号。
+- 修正 `.env`：头部过时"GLM-4-Flash 永久免费"注释更正，并修复中文注释的错误编码（重写为 UTF-8、Key/Token 无损保留）。
 
 ---
 

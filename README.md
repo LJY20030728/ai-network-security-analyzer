@@ -59,7 +59,7 @@
 
 | 引擎 | 类型 | 权重 | 说明 |
 |------|------|------|------|
-| **监督模型** | HistGradientBoosting | 0.5 | 76 维 CICFlowMeter 特征，流级预测+PCAP 级聚合，F1=0.9487 |
+| **监督模型** | HistGradientBoosting | 0.5 | 流级预测+PCAP 级聚合；UNSW-NB15（194 维）F1=0.9704、UNSW-CIC 重提取版（76 维）F1=0.9487 |
 | **规则引擎** | 阈值规则 | 0.2 | 10+ 可配置规则（SYN 洪水/端口扫描/DNS 隧道/RST 风暴等） |
 | **时序基线** | EWMA + 中位数/MAD | 0.15 | 4 维度联合检测，多维度同时偏差触发 CRITICAL |
 | **孤立森林** | 无监督异常检测 | 0.15 | 低维表格数据适合，检测未知异常 |
@@ -380,7 +380,9 @@ docker compose up -d --build
 | 数据集 | 流数量 | 精确率 | 召回率 | F1 | 准确率 |
 |--------|--------|--------|--------|-----|--------|
 | **UNSW-NB15**（同分布划分） | 175,341 | 0.9637 | **0.9772** | **0.9704** | 0.9594 |
-| **CIC-IDS（CIC 76 维特征，同分布分层）** | 447,915 | 0.9351 | 0.9628 | **0.9487** | 0.9792 |
+| **UNSW-CIC 重提取版**（76 维 CICFlowMeter，同分布分层，**非公开 CIC-IDS2017**） | 447,915 | 0.9351 | 0.9628 | **0.9487** | 0.9792 |
+
+> **诚实说明（UNSW-CIC 重提取版）**：上表 0.9487 是二分类**聚合** F1；分攻击类别看少数类召回偏低（DoS 0.168、Analysis 0.260、Shellcode 0.241、Worms 0.306），攻击类 **macro recall 仅 0.4683**。该数据为 UNSW-NB15 底层流量经 CICFlowMeter 重提取（时间轴为行序×0.5s 合成、无真实时间戳），并非公开 CIC-IDS2017，仅用于验证 76 维 CICFlowMeter 特征体系。
 
 **对比无监督/规则引擎**（同一 UNSW-NB15 测试集）：
 
@@ -443,7 +445,7 @@ docker compose up -d --build
 
 - **Strict**：gold = 标题含技术ID / 手册全名的唯一权威文档，衡量特定权威条目的排序。
 - **Relevant**：gold = 客观上能回答该问题的文档集合（信息检索标准做法，一个问题的相关文档本就不止一个），衡量首位 / top-k 相关性；每个 gold 集合依据见 `tools/evaluate_rag.py` 注释。
-- 向量库规模：**1687 片段 / 63 条目**（含 **709 个 ATT&CK 技术**、15 篇全量技术展开），平均检索耗时 ~0.3s。
+- 向量库规模：**1687 片段 / 63 条目**（含 **697 个有效 ATT&CK 技术**，已排除 149 撤销 + 12 弃用；15 篇全量技术展开），平均检索耗时 ~0.3s。
 - 分品类 Relevant Recall@5：MITRE 1.0、处置手册 1.0、协议 1.0。
 - **诚实标注的两个首位瑕疵**：横向移动问题 top1 为"端口对照表"、系统信息发现 top1 为同属侦察的 T1046（正确条目均在 top3 内；不硬调权重以免过拟合评测）。原始结果见 `data/eval_rag/rag_result.json`。
 
@@ -461,7 +463,7 @@ docker compose up -d --build
 | 指标 | 数值 |
 |------|------|
 | 测试结果 | **148 passed / 19 skipped / 0 failed** |
-| 测试文件数 | 19 个 |
+| 测试文件数 | 17 个 |
 | 覆盖模块 | 算法检测 / API 路由 / 存储 / 安全 / 服务层 / 工具 |
 
 ---
@@ -650,7 +652,7 @@ ai-network-security-analyzer/
 │       ├── error_handler.py   # 错误处理三层
 │       └── log_observer.py    # 日志可观测性
 ├── models/                    # 训练好的模型
-│   ├── supervised_detector.joblib      # CIC 监督模型（F1=0.9487）
+│   ├── supervised_detector.joblib      # UNSW-CIC 重提取版监督模型（76 维，F1=0.9487）
 │   └── unsw_supervised_detector.joblib # UNSW 专用模型（Recall=0.9772）
 ├── data/                      # 数据目录
 │   ├── samples/golden/        # 黄金测试样本（10 个）
@@ -659,7 +661,7 @@ ai-network-security-analyzer/
 │   ├── chroma_db/             # ChromaDB 向量库
 │   ├── eval_cicids/csv/       # 训练数据（CIC/UNSW）
 │   └── eval_perf/             # 评测结果
-├── tests/                     # 测试（160+ 个）
+├── tests/                     # 测试（148 个用例 / 17 个文件）
 │   ├── test_services/         # 服务层单元测试（v3.0.0 新增）
 │   ├── test_routes/           # 路由层单元测试（v3.0.0 新增）
 │   ├── test_new_features.py   # 新功能综合测试（34 个）
@@ -849,7 +851,7 @@ pyinstaller --noconfirm --windowed --name "AI-Network-Security-Analyzer" ^
 - 新增三层验证口径对比图（同分布 0.970 / 时间外推 0.892 / 跨数据集 0.192，`docs/validation_split_comparison.png`）
 - 知识库构建完全脱离运行时二进制：STIX 源 → `tools/build_knowledge_base.py` 生成 docs → 一键入库，干净 clone 可复现
 - 修复 STIX 解析：正确解析 course-of-action 与 mitigates 关系、建立技术→缓解映射（旧代码用了不存在的字段）
-- 知识库初始化幂等化（先清空再重建），全量重建为 **1687 片段 / 63 条目 / 709 ATT&CK 技术**
+- 知识库初始化幂等化（先清空再重建），全量重建为 **1687 片段 / 63 条目 / 697 个有效 ATT&CK 技术**（已排除 149 撤销 + 12 弃用）
 - RAG 评测升级为双口径（Strict / Relevant），修复 rerank 标题信号失效 bug、升级 term-aware 重排
 - 模型默认名更正为 **glm-4.5-air**（与实际配置一致）
 - 补 MIT LICENSE；清理过期残留文件

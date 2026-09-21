@@ -48,7 +48,7 @@ if errorlevel 1 (
 echo.
 echo ============================================================
 echo   安装包生成完成！
-echo   位置: installer_output\AI网络安全智能分析系统_Setup_1.3.1.exe
+echo   位置: installer_output\AI网络安全智能分析系统_Setup_3.1.1.exe
 echo   将该文件拷贝到其他电脑即可安装使用
 echo ============================================================
 pause

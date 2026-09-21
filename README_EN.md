@@ -249,9 +249,9 @@ python -m uvicorn src.api.main:app --host 127.0.0.1 --port 8080
 
 1. Go to "⚙️ Settings" tab
 2. Configure API Key (password input field, saved with DPAPI encrypted storage)
-3. Configure Base URL and model name
-4. Click "Test Connection" to verify API Key validity
-5. Saved and effective immediately, no restart required
+3. Configure Base URL and model name (**default: Zhipu GLM, Base URL `https://open.bigmodel.cn/api/paas/v4`, model `glm-4.5-air`**; local embedding is fixed to `BAAI/bge-small-zh-v1.5`)
+4. Click "Save Config" — takes effect immediately, no restart required; also switchable to DeepSeek / OpenAI-compatible endpoints or local Ollama
+5. The **RAG knowledge base path** is displayed below (vector store dir / knowledge source docs dir / chunk count / readiness), so you can verify whether the knowledge base has been initialized
 
 ---
 

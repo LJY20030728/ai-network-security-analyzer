@@ -2427,6 +2427,7 @@ def create_gradio_interface():
                                                  placeholder="glm-4-flash")
                 save_btn = gr.Button("💾 保存配置", variant="primary")
                 api_status = gr.Markdown("点击保存后立即生效，无需重启")
+                kb_paths_md = gr.Markdown("")
 
                 def load_api_config_ui():
                     """读取 .env 当前配置，用于预填"""
@@ -2500,8 +2501,38 @@ def create_gradio_interface():
                     except Exception as e:
                         return f"❌ 保存失败: {e}"
 
-                demo.load(load_api_config_ui,
-                          outputs=[api_key_input, api_url_input, api_model_input])
+                def load_kb_paths_ui():
+                    """显示 RAG 知识库存储路径（ChromaDB 向量库 + 知识源文档）"""
+                    try:
+                        from src.utils.paths import data_dir
+                        chroma = data_dir("chroma_db")
+                        kb_docs = data_dir("knowledge", "docs")
+                        exists = os.path.isdir(chroma) and os.listdir(chroma)
+                        state = "✅ 已就绪" if exists else "⚠️ 尚未初始化（可到「📚 知识库管理」初始化/重建）"
+                        try:
+                            from src.ai.rag_engine import get_rag_engine
+                            stats = get_rag_engine().get_stats()
+                            chunks = stats.get("chunks") or stats.get("total_documents") or stats.get("documents") or "?"
+                            lines = [f"### 📚 RAG 知识库路径", "",
+                                     f"- **向量库目录（ChromaDB）**: `{chroma}`",
+                                     f"- **知识源文档目录**: `{kb_docs}`",
+                                     f"- **文档块数**: {chunks}",
+                                     f"- **状态**: {state}"]
+                        except Exception:
+                            lines = [f"### 📚 RAG 知识库路径", "",
+                                     f"- **向量库目录（ChromaDB）**: `{chroma}`",
+                                     f"- **知识源文档目录**: `{kb_docs}`",
+                                     f"- **状态**: {state}（引擎未加载）"]
+                        return "\n".join(lines)
+                    except Exception as e:
+                        return f"### 📚 RAG 知识库路径\n- ❌ 读取失败: {e}"
+
+                def load_all_settings_ui():
+                    k, u, m = load_api_config_ui()
+                    return k, u, m, load_kb_paths_ui()
+
+                demo.load(load_all_settings_ui,
+                          outputs=[api_key_input, api_url_input, api_model_input, kb_paths_md])
                 save_btn.click(save_api_config_ui,
                                inputs=[api_key_input, api_url_input, api_model_input],
                                outputs=api_status)

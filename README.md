@@ -332,8 +332,8 @@ docker compose up -d --build
 1. 进入「⚙️ 设置」Tab
 2. 配置 API Key（密码输入框，保存后用 DPAPI 加密存储）
 3. 配置 Base URL 和模型名称（**默认：智谱 GLM，Base URL `https://open.bigmodel.cn/api/paas/v4`，模型 `glm-4.5-air`**；本地嵌入固定为 `BAAI/bge-small-zh-v1.5`）
-4. 点击「测试连接」验证 API Key 有效性
-5. 保存后立即生效，无需重启；也可切换为 DeepSeek / OpenAI 兼容接口或 Ollama 本地模型
+4. 点击「保存配置」后立即生效，无需重启；也可切换为 DeepSeek / OpenAI 兼容接口或 Ollama 本地模型
+5. 页面下方实时显示 **RAG 知识库路径**（向量库目录 / 知识源文档目录 / 文档块数 / 就绪状态），便于确认知识库是否已初始化
 
 ---
 

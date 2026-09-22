@@ -2495,6 +2495,11 @@ def create_gradio_interface():
                         try:
                             from src.ai.llm_client import reset_llm_client
                             reset_llm_client()
+                            # 关键：同步更新 settings 内存值（否则重建 LLMClient 仍读启动时的旧占位符）
+                            from config.settings import settings
+                            settings.llm_api_key = key.strip()
+                            settings.llm_base_url = url.strip()
+                            settings.llm_model = model.strip()
                         except Exception:
                             pass
                         return f"✅ 已保存并生效\n{secure_msg}📄 .env: {env}\n\n服务商: {url.strip()}\n模型: {model.strip()}"

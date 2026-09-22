@@ -1,3 +1,8 @@
+## [3.1.2] - 2026-09-22
+
+### Fixed
+- **API Key 保存后不生效（关键 bug）**：设置页保存 Key 后只重置 LLM 单例，未同步更新 `settings.llm_api_key` 内存值（启动时一次性加载），导致重建单例仍读旧占位符，问答/AI 研判持续报"未配置 Key"。现保存时同步刷新 settings + 重置单例，真正做到"保存即生效，无需重启"。
+
 # 更新日志 | Changelog
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/) 规范。

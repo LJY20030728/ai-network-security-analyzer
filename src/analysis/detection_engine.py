@@ -393,16 +393,12 @@ class DetectionEngine:
 
     def _ensemble_vote(self, results: Dict[str, Any]) -> Dict[str, Any]:
         """
-        集成投票：优先用Stacking元学习器，否则用加权融合
+        Stacking 融合：用元学习器对各引擎置信度做最终判定（无固定权重 fallback）
         """
-        # 收集各检测器的置信度
         meta_features = {}
         details = {}
 
         for name, result in results.items():
-            weight = self._weights.get(name, 0.1)
-            
-            # 判断该检测器是否认为有攻击
             is_attack = False
             confidence = 0.0
             summary = result.get("summary", {})
@@ -410,40 +406,33 @@ class DetectionEngine:
                 is_attack = True
                 confidence = summary.get("confidence", 0.5)
             elif result.get("alerts"):
-                # 有告警也视为检测到异常
                 is_attack = True
                 confidence = min(0.3 + len(result["alerts"]) * 0.05, 0.9)
-
             meta_features[name] = confidence
-            details[name] = {
-                "weight": weight,
-                "is_attack": is_attack,
-                "confidence": confidence,
+            details[name] = {"is_attack": is_attack, "confidence": confidence}
+
+        # 无检测器结果时直接返回空（空引擎/空输入）
+        if not meta_features:
+            return {
+                "is_attack": False,
+                "confidence": 0.0,
+                "threshold": 0.5,
+                "method": "stacking",
+                "details": {},
             }
 
-        # 优先用Stacking元学习器
-        if self._meta_learner is not None:
-            final_score = self._stacking_predict(meta_features)
-            method = "stacking"
-        else:
-            # 用加权融合
-            attack_score = 0.0
-            total_weight = 0.0
-            for name, confidence in meta_features.items():
-                if confidence > 0:
-                    weight = self._weights.get(name, 0.1)
-                    attack_score += weight * confidence
-                    total_weight += weight
-            final_score = attack_score / total_weight if total_weight > 0 else 0
-            method = "weighted"
-
-        is_attack = final_score > 0.3  # 阈值
+        if self._meta_learner is None:
+            raise RuntimeError(
+                "Stacking 元学习器未加载。请运行 tools/fusion_comparison.py 生成 models/meta_learner.joblib"
+            )
+        final_score = self._stacking_predict(meta_features)
+        is_attack = final_score > 0.5
 
         return {
             "is_attack": is_attack,
             "confidence": round(final_score, 3),
-            "threshold": 0.3,
-            "method": method,  # 标记用的是stacking还是weighted
+            "threshold": 0.5,
+            "method": "stacking",
             "details": details,
         }
 

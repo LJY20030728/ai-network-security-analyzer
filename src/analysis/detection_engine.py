@@ -296,6 +296,8 @@ class DetectionEngine:
         }
         # Stacking 元学习器（None=默认加权融合；注入训练好的模型后启用Stacking）
         self._meta_learner = None
+        # 级联短路阈值：规则引擎置信度 ≥ 此值则跳过其他检测器
+        self._cascade_threshold = 0.85
 
     def add_strategy(self, strategy: DetectionStrategy, weight: float = 0.2):
         """动态添加检测策略"""
@@ -310,31 +312,67 @@ class DetectionEngine:
     def detect_all(self, packets: List[Any], flows: Optional[List[Any]] = None,
                    context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
-        执行所有检测策略，集成投票
-        :return: {results_by_detector, ensemble_vote, total_alerts}
+        级联 + Stacking 融合检测：
+        1. 先跑 rule_based（最快）；若置信度 ≥ cascade_threshold，直接短路返回
+        2. 否则跑全部检测器，走 Stacking/加权融合
         """
         results = {}
         all_alerts = []
+        detectors_used = []
 
+        # ---- 第一级：规则引擎快速过滤（级联短路）----
+        rule_strategy = next((s for s in self._strategies if s.name == "rule_based"), None)
+        if rule_strategy is not None:
+            try:
+                rule_result = rule_strategy.detect(packets, flows, context)
+                results["rule_based"] = rule_result
+                detectors_used.append("rule_based")
+                all_alerts.extend(rule_result.get("alerts", []))
+                # 计算规则置信度
+                rule_conf = 0.0
+                rs = rule_result.get("summary", {})
+                if rs.get("is_attack"):
+                    rule_conf = rs.get("confidence", 0.9)
+                elif rule_result.get("alerts"):
+                    rule_conf = min(0.3 + len(rule_result["alerts"]) * 0.05, 0.9)
+                # 级联短路：高置信度直接返回，不跑其他检测器
+                if rule_conf >= self._cascade_threshold:
+                    logger.info(f"[级联短路] 规则引擎置信度={rule_conf:.2f} ≥ {self._cascade_threshold}，跳过其他检测器")
+                    ensemble = self._ensemble_vote(results)
+                    return {
+                        "results_by_detector": results,
+                        "ensemble_vote": ensemble,
+                        "total_alerts": len(all_alerts),
+                        "detectors_used": detectors_used,
+                        "cascade_short_circuit": True,
+                    }
+            except Exception as e:
+                logger.error(f"[rule_based] 级联第一级异常: {e}")
+                results["rule_based"] = {"error": str(e), "alerts": []}
+
+        # ---- 第二级：跑剩余检测器 ----
         for strategy in self._strategies:
+            if strategy.name == "rule_based":
+                continue  # 已跑过
             try:
                 result = strategy.detect(packets, flows, context)
                 results[strategy.name] = result
-                alerts = result.get("alerts", [])
-                all_alerts.extend(alerts)
-                logger.info(f"[{strategy.name}] 检测完成: {len(alerts)} 条告警")
+                detectors_used.append(strategy.name)
+                all_alerts.extend(result.get("alerts", []))
+                logger.info(f"[{strategy.name}] 检测完成: {len(result.get('alerts', []))} 条告警")
             except Exception as e:
                 logger.error(f"[{strategy.name}] 检测异常: {e}")
                 results[strategy.name] = {"error": str(e), "alerts": []}
 
-        # 集成投票
+        # 集成投票（Stacking 或加权）
         ensemble = self._ensemble_vote(results)
 
         return {
             "results_by_detector": results,
             "ensemble_vote": ensemble,
             "total_alerts": len(all_alerts),
-            "detectors_used": [s.name for s in self._strategies],
+            "detectors_used": detectors_used,
+            "cascade_short_circuit": False,
         }
 
     def set_meta_learner(self, learner) -> None:
@@ -415,9 +453,28 @@ class DetectionEngine:
 # ============================================================
 
 def create_default_engine() -> DetectionEngine:
-    """创建默认的检测引擎（四引擎集成）"""
+    """创建默认的检测引擎（级联 + Stacking 融合架构）"""
     strategies = DetectorFactory.create_all()
-    return DetectionEngine(strategies=strategies)
+    engine = DetectionEngine(strategies=strategies)
+
+    # 加载训练好的 Stacking 元学习器（如果存在）
+    import os
+    meta_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "models", "meta_learner.joblib"
+    )
+    if os.path.exists(meta_path):
+        try:
+            import joblib
+            bundle = joblib.load(meta_path)
+            engine.set_meta_learner(bundle["model"])
+            logger.info(f"已加载 Stacking 元学习器（训练 F1={bundle.get('train_f1', '?')}）")
+        except Exception as e:
+            logger.warning(f"加载 meta_learner 失败，回退到固定权重: {e}")
+    else:
+        logger.info("未找到 meta_learner.joblib，使用固定权重加权融合")
+
+    return engine
 
 
 

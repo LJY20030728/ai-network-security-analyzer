@@ -131,6 +131,16 @@ def main():
     # Stacking 元学习器
     meta = LogisticRegression(max_iter=500).fit(oof, ya)
 
+    # 保存训练好的元学习器，供运行时加载（启用 Stacking 融合）
+    import joblib
+    meta_path = os.path.join(ROOT, "models", "meta_learner.joblib")
+    joblib.dump({
+        "model": meta,
+        "engine_order": ENGINES,
+        "train_f1": float(f1_score(ya, meta.predict(oof))),
+    }, meta_path)
+    print(f"已保存 meta-learner: {meta_path}")
+
     # ---------- 基引擎在完整开发集重训，预测 held-out ----------
     Xa_num, Xb_num = Xa[:, :n_num], Xb[:, :n_num]
     clf = sup_model().fit(Xa, ya)

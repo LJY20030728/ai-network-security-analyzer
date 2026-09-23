@@ -45,7 +45,7 @@
 
 | 维度 | 说明 |
 |------|------|
-| **算法深度** | 76 维 CICFlowMeter 特征提取、四引擎集成投票、自适应阈值、STL 时序分解 |
+| **算法深度** | 76 维 CICFlowMeter 特征提取、四引擎 Stacking 融合、自适应阈值、STL 时序分解 |
 | **AI 工程** | 幻觉控制三件套、RAG 混合检索+重排序、本地向量推理 |
 | **工程质量** | 148 单元测试、FastAPI + Pydantic、SQLite WAL、DPAPI 加密、全局异常处理 |
 | **轻量可移植** | 平均内存峰值 23MB、本地推理不依赖外部服务、Windows .exe 打包 |
@@ -159,7 +159,7 @@
 ▼          ▼          ▼          ▼          ▼
 解析层     检测层     AI 层     存储层     安全层
 Scapy     四引擎     LLM       SQLite    DPAPI
-流式解析   集成投票   +RAG      WAL       加密存储
+流式解析   Stacking融合   +RAG      WAL       加密存储
 ```
 
 ### 架构分层说明
@@ -187,7 +187,7 @@ Scapy     四引擎     LLM       SQLite    DPAPI
 ┌──────▼───┐ ┌───▼────┐ ┌──▼─────┐ ┌─▼──────┐ ┌▼────────────┐
 │  解析层   │ │ 检测层  │ │ AI 层  │ │ 存储层  │ │  安全层      │
 │ Scapy    │ │ 四引擎  │ │ LLM    │ │ SQLite │ │  DPAPI      │
-│ 流式解析  │ │ 集成投票│ │ +RAG   │ │ WAL    │ │  加密存储    │
+│ 流式解析  │ │ Stacking融合│ │ +RAG   │ │ WAL    │ │  加密存储    │
 └──────────┘ └────────┘ └────────┘ └────────┘ └─────────────┘
 ```
 
@@ -569,7 +569,7 @@ docker compose up -d --build
 
 **真实结论**：在"监督模型已经很强"的 UNSW 场景，拍脑袋的固定权重会把弱引擎（规则 / 孤立森林）的噪声也加权进来、反而拉低 F1（0.958 < 0.969）；GridSearch / Stacking 都自动把权重集中到监督模型（~0.9）、回到最优。这证明**融合权重必须数据驱动**。
 
-需诚实说明：固定权重并非毫无价值——在真实 PCAP 的未知攻击 / 无标签冷启动环境里，监督模型可能对训练分布外的攻击失效，此时基线与孤立森林能提供监督给不出的信号，固定权重是换取鲁棒性的保守工程取舍。检测引擎通过 `set_meta_learner()` 注入训练好的元学习器，未注入时回退加权，保证开箱可用。
+**当前运行时只走 Stacking**：`create_default_engine()` 自动加载 `models/meta_learner.joblib`（LogisticRegression，UNSW OOF 训练 F1=0.9685），规则引擎置信度 ≥0.85 时级联短路，剩余流量交 Stacking 判定（阈值 0.5）。**固定权重 fallback 已删除**——不再有"拍脑袋权重"路径。需诚实说明：在真实 PCAP 的未知攻击 / 无标签冷启动环境里，监督模型可能对训练分布外的攻击失效，此时基线与孤立森林提供的异常信号仍通过 Stacking 元学习器参与判定，保证开箱可用。
 
 ---
 
@@ -715,7 +715,7 @@ class MyDetector(DetectionStrategy):
 # 2. 注册到工厂
 DetectorFactory.register("my_detector", MyDetector)
 
-# 3. 在集成引擎中使用（自动加权投票）
+# 3. 在集成引擎中使用（Stacking 元学习器融合）
 from src.analysis.detection_engine import DetectionEngine
 engine = DetectionEngine()
 engine.add_strategy(MyDetector(), weight=0.1)

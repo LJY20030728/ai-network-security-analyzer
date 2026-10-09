@@ -772,6 +772,26 @@ pyinstaller --noconfirm --windowed --name "AI-Network-Security-Analyzer" ^
 
 详细更新记录请查看 [CHANGELOG.md](CHANGELOG.md)。
 
+### [3.4.1] - 2026-10-09
+
+**Hotfix：修复运行时孤立森林仍未执行的严重 bug（v3.4.0 发布后对抗性审查发现）**
+
+- **根因**：`default_baseline.json` 不包含 `train_windows` 原始数据，导致 `_try_load_default_baseline()` 中 `if self.baseline._train_windows:` 条件为 False，孤立森林未被学习（`learned=False`），运行时 `detect_windows()` 不执行，13维特征中孤立森林3维永远为0
+- **修复**：当 `_train_windows` 为空时，用 `normal.pcap`（219窗口，优先）或 `baseline_demo_normal.pcap`（45窗口，fallback）重新聚合窗口并训练孤立森林
+- **次生问题修复**：用45窗口小样本训练导致100%异常率和攻击漏检，改用 `normal.pcap`（219窗口）训练，正常流量异常率从100%降到8.7%
+- **验证结果**：synflood prob=0.7672 ✅，portscan prob=0.8581 ✅，normal prob=0.4315 ✅，44个相关测试全部通过
+
+### [3.4.0] - 2026-10-09
+
+**核心修复：孤立森林形同虚设 bug；扩展 UDP/QUIC 检测；预置默认基线；13维元学习器重训**
+
+- **孤立森林对最终判定零贡献（最严重）**：`to_dict()` 只输出元信息，不包含 `anomaly_windows` 和 `total_windows`，导致训练时孤立森林特征永远是 `[1.0, 0.0, 0.0]`。修复后 `isolation_mean_score` 获得元学习器最高绝对权重 -3.5069
+- **孤立森林特征从 3 维扩展到 6 维（总特征 10→13）**：新增 `isolation_mean_score`、`isolation_max_score`、`isolation_top_dim_risk`
+- **UDP/QUIC 攻击完整检测**：UDP flood、DNS amplification、QUIC connection flood、QUIC long flow anomaly、QUIC initial ratio anomaly
+- **预置默认基线**：随安装包分发 `default_baseline.json`，首次开箱即用无需手动学习
+- **重新训练13维元学习器**：1732窗口样本（1468攻击/264正常），5折 CV F1 = 0.7747 ± 0.0129
+- **新增3个测试文件（18测试）**，全部176测试通过
+
 ### [3.3.0] - 2026-10-09
 
 **架构收敛：移除监督模型，改为三引擎 Stacking 融合 + 清除死代码**

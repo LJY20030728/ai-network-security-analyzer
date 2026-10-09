@@ -747,6 +747,32 @@ Packaged files in `dist/` directory. Recommended to use Inno Setup to create ins
 
 ---
 
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for full details.
+
+### [3.4.1] - 2026-10-09
+
+**Hotfix: Fix isolation forest not executing at runtime (found by adversarial review after v3.4.0 release)**
+
+- **Root cause**: `default_baseline.json` does not contain `train_windows` raw data, causing `if self.baseline._train_windows:` to be False, isolation forest not learned (`learned=False`), `detect_windows()` not executed at runtime, 3 isolation forest features always 0 in 13-dim features
+- **Fix**: When `_train_windows` is empty, use `normal.pcap` (219 windows, priority) or `baseline_demo_normal.pcap` (45 windows, fallback) to re-aggregate windows and train isolation forest
+- **Secondary fix**: Training with 45-window small sample caused 100% anomaly rate and attack missed detection; switched to `normal.pcap` (219 windows), normal traffic anomaly rate dropped from 100% to 8.7%
+- **Verification**: synflood prob=0.7672 ✅, portscan prob=0.8581 ✅, normal prob=0.4315 ✅, 44 related tests all passed
+
+### [3.4.0] - 2026-10-09
+
+**Core fix: isolation forest zero-contribution bug; UDP/QUIC detection; preconfigured baseline; 13-dim meta-learner retraining**
+
+- **Isolation forest zero contribution (most severe)**: `to_dict()` only output metadata, missing `anomaly_windows` and `total_windows`, causing isolation forest features to always be `[1.0, 0.0, 0.0]` during training. After fix, `isolation_mean_score` gets highest absolute weight -3.5069
+- **Isolation forest features expanded from 3 to 6 dims (total 10→13)**: Added `isolation_mean_score`, `isolation_max_score`, `isolation_top_dim_risk`
+- **UDP/QUIC attack complete detection**: UDP flood, DNS amplification, QUIC connection flood, QUIC long flow anomaly, QUIC initial ratio anomaly
+- **Preconfigured default baseline**: `default_baseline.json` distributed with installer, out-of-box without manual learning
+- **13-dim meta-learner retrained**: 1732 window samples (1468 attack/264 normal), 5-fold CV F1 = 0.7747 ± 0.0129
+- **Added 3 test files (18 tests)**, all 176 tests passed
+
+---
+
 ## License
 
 MIT License

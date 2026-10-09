@@ -282,8 +282,29 @@ class TrafficAnalyzer:
                     if self.use_ml and self.isolation_detector is None:
                         from src.analysis.isolation_detector import IsolationDetector
                         self.isolation_detector = IsolationDetector()
-                        if self.baseline._train_windows:
-                            self.isolation_detector.learn_windows(self.baseline._train_windows)
+                        train_windows = self.baseline._train_windows
+                        if not train_windows:
+                            # 默认基线JSON未保存原始窗口，用golden正常样本重新聚合
+                            # 优先用normal.pcap（219窗口，训练更充分），fallback到baseline_demo_normal.pcap
+                            project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                            for demo_name in ["normal.pcap", "baseline_demo_normal.pcap"]:
+                                demo_pcap = os.path.join(project_root, "data", "samples", "golden", demo_name)
+                                if os.path.exists(demo_pcap):
+                                    try:
+                                        from scapy.all import rdpcap
+                                        from src.capture.packet_parser import PacketParser
+                                        raw = rdpcap(demo_pcap)
+                                        pkts = PacketParser().parse_list(raw)
+                                        train_windows = self.baseline._aggregate_windows(pkts)
+                                        logger.info(f"默认基线补全孤立森林训练窗口 | 从{demo_name}聚合{len(train_windows)}个窗口")
+                                        break
+                                    except Exception as e:
+                                        logger.warning(f"默认基线补全孤立森林窗口失败({demo_name}): {e}")
+                        if train_windows and len(train_windows) >= 10:
+                            self.isolation_detector.learn_windows(train_windows)
+                            logger.info(f"默认基线同步训练孤立森林完成 | {len(train_windows)}窗口 | learned={self.isolation_detector.learned}")
+                        else:
+                            logger.warning(f"默认基线孤立森林训练窗口不足（{len(train_windows)}），孤立森林将不可用")
                     logger.info(f"默认基线自动加载成功 | 来源={default_path}")
                 else:
                     logger.warning("默认基线加载失败（learned=False）")

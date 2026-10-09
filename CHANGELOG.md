@@ -4,6 +4,38 @@
 
 ---
 
+## [3.4.1] - 2026-10-09
+
+**Hotfix：修复运行时孤立森林仍未执行的严重 bug（v3.4.0 发布后对抗性审查发现）**
+
+### Fixed（v3.4.0 遗留的运行时 bug）
+- **孤立森林运行时仍未执行（最严重）**：v3.4.0 修复了 `_build_ml_profile()` 代码层面的 bug，
+  但对抗性审查发现运行时孤立森林仍然不执行。根因链：
+  `default_baseline.json` 不包含 `train_windows` 原始数据
+  → `TrafficBaseline.load()` 后 `_train_windows = []`（空列表）
+  → `_try_load_default_baseline()` 中 `if self.baseline._train_windows:` 条件为 False
+  → `IsolationDetector.learn_windows()` 未被调用
+  → `isolation_detector.learned = False`
+  → `analyze_stream()` 中 `if self.isolation_detector.learned:` 不满足
+  → 孤立森林 `detect_windows()` 不执行
+  → `ml_profile = None`，13维特征中孤立森林3维永远为0
+  **修复**：当 `_train_windows` 为空时，用 `normal.pcap`（219窗口，优先）或
+  `baseline_demo_normal.pcap`（45窗口，fallback）重新聚合窗口并训练孤立森林。
+- **孤立森林100%异常率导致攻击漏检（修复过程中发现）**：用45窗口的小样本训练孤立森林，
+  导致测试时所有窗口都被标记为异常（100%异常率），`isolation_mean_score` 的负权重
+  把攻击概率从0.72拉低到0.24，synflood/portscan 全部漏检。
+  **修复**：改用 `normal.pcap`（219窗口）训练，正常流量异常率从100%降到8.7%。
+
+### 验证结果（修复后 vs 修复前 vs v3.4.0）
+| 样本 | v3.4.0（孤立森林禁用） | v3.4.0发布版（小样本训练） | v3.4.1（normal.pcap训练） |
+|------|----------------------|--------------------------|-------------------------|
+| synflood | prob=0.7167 ✅ | prob=0.2425 ❌漏检 | prob=0.7672 ✅ |
+| portscan | prob=0.8274 ✅ | prob=0.3776 ❌漏检 | prob=0.8581 ✅ |
+| normal | prob=0.4907 ✅ | prob=0.1348 ✅ | prob=0.4315 ✅ |
+| normal异常率 | N/A | 100% | 8.7% |
+
+---
+
 ## [3.4.0] - 2026-10-09
 
 **核心修复：孤立森林形同虚设 bug；扩展 UDP/QUIC 检测；预置默认基线；13维元学习器重训**

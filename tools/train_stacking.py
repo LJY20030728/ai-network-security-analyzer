@@ -51,15 +51,16 @@ except Exception:
 
 import numpy as np
 
+from scapy.all import rdpcap
 from src.analysis.baseline import TrafficBaseline, WindowAccumulator
 from src.analysis.isolation_detector import IsolationDetector
 from src.analysis.flow_extractor import TrafficAnalyzer
 from src.analysis.stacking_fusion import ThreeEngineStacking, DEFAULT_MODEL_PATH
-from src.capture.pcap_parser import PcapParser
 from src.capture.packet_parser import PacketParser
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GOLDEN = os.path.join(ROOT, "data", "samples", "golden")
+MIXED = os.path.join(ROOT, "data", "samples", "mixed")
 OUT_JSON = os.path.join(ROOT, "data", "eval_perf", "stacking_training.json")
 
 # 窗口标签：样本级真值下推到窗口级（弱标注，见 docstring）
@@ -74,6 +75,16 @@ SAMPLE_LABELS = {
     "lightscan": 1,
     "burst": 1,
     "baseline_demo_attack": 1,
+}
+# v3.4.0 新增：时间混合样本（正常流量+攻击流量拼接，整体标签为攻击）
+MIXED_LABELS = {
+    "mix_normal_synflood": 1,
+    "mix_normal_portscan": 1,
+    "mix_normal_dnstunnel": 1,
+    "mix_normal_rststorm": 1,
+    "mix_short_normal_synflood": 1,
+    "mix_short_normal_portscan": 1,
+    "mix_normal_burst": 1,
 }
 
 
@@ -138,7 +149,28 @@ def collect_features(analyzer, baseline, iso, packets, label, window_sec):
             ml_profile = None
             if iso is not None and iso.learned:
                 mlres = iso.detect_windows(windows)
-                ml_profile = iso.to_dict()
+                # 修复：构建包含实际检测结果的 ml_profile（to_dict 只含元信息）
+                anoms = mlres.get("anomalies", [])
+                if anoms:
+                    scores = [a.get("anomaly_score", 0.0) for a in anoms]
+                    mean_score = sum(scores) / len(scores)
+                    max_score = min(scores)
+                    from collections import Counter
+                    dims = [a.get("dimension", "") for a in anoms if a.get("dimension")]
+                    top_dim = Counter(dims).most_common(1)[0][0] if dims else ""
+                else:
+                    mean_score = max_score = 0.0
+                    top_dim = ""
+                ml_profile = {
+                    "name": "isolation-forest-unsupervised",
+                    "learned": True,
+                    "anomaly_windows": len(anoms),
+                    "total_windows": len(windows),
+                    "mean_anomaly_score": round(mean_score, 4),
+                    "max_anomaly_score": round(max_score, 4),
+                    "top_dimension": top_dim,
+                    "score_threshold": float(iso._score_threshold),
+                }
             feats = fusion.extract_features(
                 anomalies,
                 {"drift": bres.get("drift"), "multi_dim_alerts": bres.get("multi_dim_alerts")},
@@ -153,19 +185,20 @@ def collect_features(analyzer, baseline, iso, packets, label, window_sec):
 
 
 def main():
-    parser = PcapParser()
+    parser = PacketParser()
     normal_path = os.path.join(GOLDEN, "normal.pcap")
     if not os.path.exists(normal_path):
         print("缺少 normal.pcap，无法学习基线")
         return 1
 
     print("=" * 76)
-    print("训练三引擎 Stacking 元学习器")
+    print("训练三引擎 Stacking 元学习器（v3.4.0，13维特征）")
     print("=" * 76)
 
     # 1) 用正常流量学习基线 + 孤立森林
     print("\n[1] 学习正常流量基线画像（normal.pcap）")
-    normal_pkts = parser.parse_file(normal_path)
+    normal_raw = rdpcap(normal_path)
+    normal_pkts = parser.parse_list(normal_raw)
     baseline = TrafficBaseline()
     baseline.learn(normal_pkts)
     win_sec = getattr(baseline, "window_sec", 10)
@@ -184,25 +217,33 @@ def main():
         print(f"    ⚠ 正常窗口不足（{len(n_windows)}），孤立森林不参与训练")
         iso = None
 
-    # 2) 逐样本、逐窗口提取特征
-    print("\n[2] 逐窗口提取三引擎特征")
+    # 2) 逐样本、逐窗口提取特征（golden + 混合样本）
+    print("\n[2] 逐窗口提取三引擎特征（golden + 混合样本）")
     X_rows, y_rows, per_sample = [], [], {}
     analyzer = TrafficAnalyzer(use_baseline=True)
     analyzer.baseline = baseline
     analyzer.isolation_detector = iso
 
-    for name, label in sorted(SAMPLE_LABELS.items()):
-        path = os.path.join(GOLDEN, f"{name}.pcap")
+    # 合并所有样本标签
+    all_labels = dict(SAMPLE_LABELS)
+    all_labels.update(MIXED_LABELS)
+    # 混合样本目录
+    sample_dirs = {name: GOLDEN for name in SAMPLE_LABELS}
+    sample_dirs.update({name: MIXED for name in MIXED_LABELS})
+
+    for name, label in sorted(all_labels.items()):
+        path = os.path.join(sample_dirs[name], f"{name}.pcap")
         if not os.path.exists(path):
             print(f"    [跳过] {name} 不存在")
             continue
-        packets = parser.parse_file(path)
+        raw = rdpcap(path)
+        packets = parser.parse_list(raw)
         rows, labs = collect_features(analyzer, baseline, iso, packets, label, win_sec)
         if rows:
             X_rows.extend(rows)
             y_rows.extend(labs)
         per_sample[name] = {"label": label, "windows": len(rows), "packets": len(packets)}
-        print(f"    {name:<24} 标签={label} | 包 {len(packets):>6} | 窗口特征 {len(rows):>4}")
+        print(f"    {name:<32} 标签={label} | 包 {len(packets):>6} | 窗口特征 {len(rows):>4}")
 
     if len(X_rows) < 10:
         print(f"\n可用训练样本仅 {len(X_rows)} 条，不足以训练元学习器，已中止")
@@ -234,8 +275,9 @@ def main():
         "feature_importance": result["feature_importance"],
         "per_sample": per_sample,
         "limitations": [
-            "训练数据来自 10 个合成 golden 样本，非真实生产流量",
+            "训练数据来自 10 个合成 golden 样本 + 7 个时间混合样本，非真实生产流量",
             "样本级标签下推到窗口级属于弱标注，存在标签噪声",
+            "v3.4.0 起特征维度从10扩展到13（新增孤立森林异常分统计+top维度风险）",
             "元学习器权重不应被解读为生产环境最优融合策略",
             "真实部署前请用自有标注流量重新运行本脚本",
         ],

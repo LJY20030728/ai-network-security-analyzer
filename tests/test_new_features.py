@@ -244,7 +244,7 @@ class TestStackingFusion:
         fusion = ThreeEngineStacking()
         assert fusion is not None
         assert tuple(ENGINE_ORDER) == ("rule_based", "baseline", "isolation_forest")
-        assert fusion.feature_dim == 10
+        assert fusion.feature_dim == 13  # v3.4.0: 10→13维（新增孤立森林异常分统计）
 
     def test_feature_extraction_shape(self):
         from src.analysis.stacking_fusion import ThreeEngineStacking
@@ -255,7 +255,7 @@ class TestStackingFusion:
             {"drift": None, "multi_dim_alerts": []},
             {"learned": True, "anomaly_windows": 2, "total_windows": 10},
         )
-        assert feats.shape == (10,)
+        assert feats.shape == (13,)  # v3.4.0: 10→13维
 
     def test_predict_without_meta_learner_uses_fallback(self):
         """元学习器缺失时必须回退固定权重，并如实标注来源"""

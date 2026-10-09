@@ -8,7 +8,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.141-green.svg)](https://fastapi.tiangolo.com/)
 [![Gradio](https://img.shields.io/badge/Gradio-6.x-orange.svg)](https://www.gradio.app/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-163%20passed-brightgreen.svg)](#测试)
+[![Tests](https://img.shields.io/badge/tests-176%20passed-brightgreen.svg)](#测试)
 [![CI](https://github.com/LJY20030728/ai-network-security-analyzer/actions/workflows/ci.yml/badge.svg)](https://github.com/LJY20030728/ai-network-security-analyzer/actions/workflows/ci.yml)
 
 **[中文版](#目录) | [English Version](README_EN.md)**
@@ -37,19 +37,20 @@
 传统网络取证分析依赖安全分析师用 Wireshark 逐包查看 PCAP 文件，效率极低且高度依赖个人经验。规则引擎虽然能自动化检测，但对未知攻击和大流量变种漏报严重（实测规则引擎在 UNSW-NB15 上攻击召回仅 0.0001）。
 
 本项目是一个 **AI 辅助的离线网络取证分析工具**，实现了：
-- **三引擎 Stacking 融合检测**：规则引擎（5 类阈值规则）+ EWMA 时序基线 + 孤立森林，三者结论交由 Stacking 元学习器（LogisticRegression）融合；置信度来源始终如实标注
+- **三引擎 Stacking 融合检测（13维特征）**：规则引擎（9类阈值规则，含TCP+UDP+QUIC）+ EWMA 时序基线 + 孤立森林，三者结论交由 Stacking 元学习器（LogisticRegression）融合；置信度来源始终如实标注。v3.4.0 修复孤立森林形同虚设 bug，孤立森林异常分获得元学习器最高权重
 - **LLM 威胁研判**：大模型将技术告警翻译为人类可读的威胁分析，配套幻觉控制三件套（输出校验 / 交叉验证 / 人工复核标记）
 - **RAG 安全知识问答**：本地向量库（BGE ONNX + ChromaDB，1687 片段），混合检索（向量 + BM25 + RRF）+ 重排序
 - **全流程闭环**：检测 → 分析 → 取证报告（五要素）→ 历史知识库（跨样本关联/趋势分析）
 - **流式处理**：单遍流式解析，内存 O(活跃流+窗口)，可处理 GB 级 PCAP
+- **预置默认基线**：随安装包分发默认基线，首次开箱即用无需手动学习
 
 ### 为什么选择这个项目
 
 | 维度 | 说明 |
 |------|------|
-| **算法深度** | 三引擎 Stacking 融合（规则/时序基线/无监督）、自适应阈值、STL 时序分解、逐包流式特征聚合 |
+| **算法深度** | 三引擎 Stacking 融合（规则/时序基线/无监督，13维特征）、孤立森林异常分统计+top维度风险、UDP/QUIC完整检测、自适应阈值、STL 时序分解、逐包流式特征聚合 |
 | **AI 工程** | 幻觉控制三件套、RAG 混合检索+重排序、本地向量推理 |
-| **工程质量** | 163 单元测试全绿、FastAPI + Pydantic、SQLite WAL、DPAPI 加密、全局异常处理、CI（含 Windows/DPAPI 专项 job）、依赖锁定 |
+| **工程质量** | 176 单元测试全绿、FastAPI + Pydantic、SQLite WAL、DPAPI 加密、全局异常处理、CI（含 Windows/DPAPI 专项 job）、依赖锁定 |
 | **轻量可移植** | 平均内存峰值 23MB、本地推理不依赖外部服务、Windows .exe 打包 |
 | **可验证** | 所有指标都有评测脚本和结果文件，不是"拍脑袋" |
 
@@ -63,18 +64,21 @@
 
 | 引擎 | 类型 | 运行时角色 | 说明 |
 |------|------|------|------|
-| **规则引擎** | 阈值规则 | 活跃 | 5 类规则（SYN 洪水 / 端口扫描 / DNS 隧道 / 大流量传输 / RST 风暴），阈值全部来自 `config/settings.py`，可 `.env` 覆盖 |
-| **时序基线** | EWMA + 中位数/MAD | 活跃 | 4 维度联合（窗口包数 / 字节数 / SYN 数 / 目的端口数），支持漂移检测与多维度联合告警 |
-| **孤立森林** | 无监督异常检测 | 活跃（**默认开启**） | 与基线同窗口输入，捕获维度间耦合异常。需先用正常流量学习基线后才生效 |
+| **规则引擎** | 阈值规则 | 活跃 | 9 类规则（SYN 洪水 / 端口扫描 / DNS 隧道 / 大流量传输 / RST 风暴 / **UDP 洪水 / DNS 放大 / QUIC 连接风暴 / QUIC 长流异常**），阈值全部来自 `config/settings.py`，可 `.env` 覆盖 |
+| **时序基线** | EWMA + 中位数/MAD | 活跃 | 4 维度联合（窗口包数 / 字节数 / SYN 数 / 目的端口数），支持漂移检测与多维度联合告警。**预置默认基线**，首次开箱即用 |
+| **孤立森林** | 无监督异常检测 | 活跃（**默认开启**） | 与基线同窗口输入，捕获维度间耦合异常。v3.4.0 修复 `to_dict()` 不输出异常分的 bug，孤立森林特征从 3 维扩展到 6 维 |
 
-**融合方式**：三引擎输出被映射为 10 维特征，交 `ThreeEngineStacking`（`src/analysis/stacking_fusion.py`）融合：
+**融合方式**：三引擎输出被映射为 **13 维特征**，交 `ThreeEngineStacking`（`src/analysis/stacking_fusion.py`）融合：
 
 1. **元学习器（默认路径）**：`models/stacking_meta_learner.joblib` —— LogisticRegression，引擎顺序 `[rule_based, baseline, isolation_forest]`。加载时会**校验引擎顺序**，不匹配则拒绝加载以免给出错误判定。
+   - v3.4.0 训练结果：1732 窗口样本，5 折 CV F1 = **0.7747 ± 0.0129**
+   - 特征权重前 5：`isolation_mean_score(-3.51)` > `rule_triggered_rules(+2.77)` > `rule_has_alert(+2.38)` > `baseline_multi_dim_triggered(+1.42)` > `isolation_anomaly_ratio(+0.99)`
+   - **孤立森林的 `isolation_mean_score` 获得最高绝对权重**，证明 bug 修复后孤立森林真正参与决策（修复前权重为 0）
 2. **固定权重回退**：元学习器缺失或预测异常时，退化为规则 0.4 / 基线 0.3 / 孤立森林 0.3 的人工权重，并通过 `confidence_source="weighted_fallback"` 明确标注「这不是模型输出」。
 
 - **自适应阈值**：基于输入流量 P95 分位数动态调整，适应不同网络环境
 - **STL 高级模式**：零依赖轻量级时序分解（趋势+季节性+残差），捕捉周期性偏离
-- **可复现训练**：`python tools/train_stacking.py` 用仓库自带 golden 样本逐窗口提取三引擎特征并训练元学习器（不依赖任何外部数据集）
+- **可复现训练**：`python tools/train_stacking.py` 用仓库自带 golden + 混合样本逐窗口提取三引擎特征并训练元学习器（不依赖任何外部数据集）
 
 ### 🛡️ 置信度诚信标注
 

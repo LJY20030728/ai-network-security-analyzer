@@ -1,3 +1,56 @@
+# 更新日志 | Changelog
+
+本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/) 规范。
+
+---
+
+## [3.4.0] - 2026-10-09
+
+**核心修复：孤立森林形同虚设 bug；扩展 UDP/QUIC 检测；预置默认基线；13维元学习器重训**
+
+### Fixed（对抗性审查发现的关键 bug）
+- **孤立森林对最终判定零贡献（最严重）**：元学习器中 `isolation_anomaly_count=0.0, isolation_anomaly_ratio=0.0`。
+  根因是 `to_dict()` 只输出元信息（learned/train_windows），不包含 `anomaly_windows` 和 `total_windows`，
+  而 `extract_features()` 正需要这两个字段。训练时孤立森林特征永远是 `[1.0, 0.0, 0.0]`，
+  LogisticRegression 自然学不到非零权重。
+  **修复**：新增 `_build_ml_profile()` 方法，构建包含实际检测结果的完整画像
+  （anomaly_windows/total_windows/mean_anomaly_score/max_anomaly_score/top_dimension）。
+  修复后 `isolation_mean_score` 获得元学习器**最高绝对权重 -3.5069**（修复前为 0）。
+
+### Added
+- **孤立森林特征从 3 维扩展到 6 维（总特征 10→13）**：
+  新增 `isolation_mean_score`（异常窗口平均异常分归一化）、
+  `isolation_max_score`（最异常窗口分数归一化）、
+  `isolation_top_dim_risk`（top贡献维度风险等级：syn/dports=1.0, packets/bytes=0.5）
+- **UDP/QUIC 攻击完整检测**（此前只检测 TCP 攻击）：
+  - `UDP_FLOOD_SUSPECTED`：单目标 UDP 包数超阈值
+  - `DNS_AMPLIFICATION_SUSPECTED`：DNS 响应/请求字节比 >5.0
+  - `QUIC_CONNECTION_FLOOD`：不同源端口数 >50（UDP 443）
+  - `QUIC_LONG_FLOW_ANOMALY`：单条 QUIC 流包数 >200
+  - `QUIC_INITIAL_RATIO_ANOMALY`：大包（>1200字节）占比 >30%
+  - `QUIC_UNKNOWN_VERSION`：从 raw_summary 解析 QUIC 版本号
+- **预置默认基线**：随安装包分发 `data/baselines/default_baseline.json`（45窗口，2729包学习），
+  `TrafficAnalyzer` 初始化时自动加载，首次开箱即用无需手动学习基线。
+  `baseline_source` 字段标记来源（`none`/`user`/`default`），用户手动学习后覆盖为 `user`
+- **时间混合训练样本**：`tools/generate_mixed_samples.py` 生成 7 个正常+攻击时间拼接样本
+  （mix_normal_synflood/portscan/dnstunnel/rststorm/burst 等），用于元学习器训练
+- **新增 3 个测试文件**：`test_isolation_13dim.py`（5测试）、`test_udp_detection.py`（7测试）、
+  `test_default_baseline.py`（6测试）
+
+### Changed
+- **元学习器重新训练（13维）**：1732 窗口样本（攻击 1468 / 正常 264），
+  5 折 CV F1 = **0.7747 ± 0.0129**（v3.3.0 为 0.7251，提升 6.8%）
+  特征权重前 5：isolation_mean_score(-3.51) > rule_triggered_rules(+2.77) >
+  rule_has_alert(+2.38) > baseline_multi_dim_triggered(+1.42) > isolation_anomaly_ratio(+0.99)
+- `settings.py`：新增 8 个 UDP/QUIC 阈值配置（udp_flood_min_packets=100 等）
+- `flow_extractor.py`：`__init__` 自动加载默认基线，`_detect_anomalies` 新增 UDP/QUIC 检测
+
+### Removed
+- 清理冗余文件：39 个 uploads pcap、17 个 report JSON、4 个 HTML、
+  6 个旧模块 .pyc、3 个临时检查脚本
+
+---
+
 ## [3.1.2] - 2026-09-22
 
 ### Fixed

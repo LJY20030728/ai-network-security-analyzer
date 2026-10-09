@@ -1,12 +1,12 @@
 # AI Network Security Analyzer
 
-> AI-Assisted Network Forensics System — PCAP Offline Analysis + Four-Engine Integrated Detection + LLM Threat Assessment + RAG Security Knowledge Q&A
+> AI-Assisted Network Forensics System — PCAP Offline Analysis + Three-Engine Stacking Fusion Detection + LLM Threat Assessment + RAG Security Knowledge Q&A
 
 [![Python](https://img.shields.io/badge/Python-3.11-blue.svg)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110-green.svg)](https://fastapi.tiangolo.com/)
 [![Gradio](https://img.shields.io/badge/Gradio-6.x-orange.svg)](https://www.gradio.app/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-163%20passed-brightgreen.svg)](#testing)
+[![Tests](https://img.shields.io/badge/tests-176%20passed-brightgreen.svg)](#testing)
 
 **[中文版 README](README.md) | English Version**
 
@@ -33,18 +33,20 @@
 Traditional network forensics relies on security analysts manually inspecting PCAP files packet-by-packet with Wireshark — extremely inefficient and highly dependent on individual experience. While rule engines automate detection, they suffer from severe false negatives for unknown attacks (rule-engine attack recall on UNSW-NB15 is only 0.0001).
 
 This project is an **AI-assisted offline network forensics analysis tool** that implements:
-- **Four-Engine Integrated Detection**: Rule engine + EWMA time-series baseline + Isolation Forest + Supervised model (HistGradientBoosting). Each engine produces its own verdict with an **explicitly labelled confidence source** — a heuristic prior is never presented as a model output.
+- **Three-Engine Stacking Fusion Detection (13-dim features)**: Rule engine (9 rule types incl. TCP+UDP+QUIC) + EWMA time-series baseline + Isolation Forest, fused by a Stacking meta-learner (LogisticRegression); confidence source is always honestly labelled. v3.4.0 fixes the isolation-forest zero-contribution bug — isolation forest anomaly score now gets the highest meta-learner weight
 - **LLM Threat Assessment**: Large language model translates technical alerts into human-readable threat analysis, with hallucination control trilogy
-- **RAG Security Knowledge Q&A**: Local vector store (BGE ONNX + ChromaDB), hybrid retrieval + reranking
+- **RAG Security Knowledge Q&A**: Local vector store (BGE ONNX + ChromaDB, 1687 chunks), hybrid retrieval (vector + BM25 + RRF) + reranking
 - **Full-Process Closed Loop**: Detection → Analysis → Forensic Report (five elements) → Historical Knowledge Base (cross-sample correlation / trend analysis)
+- **Streaming Processing**: Single-pass streaming parsing, memory O(active flows + windows), handles GB-scale PCAP
+- **Preloaded Default Baseline**: Shipped with installer, works out-of-the-box without manual baseline learning
 
 ### Why This Project?
 
 | Dimension | Description |
 |-----------|-------------|
-| **Algorithm Depth** | 76-dim CICFlowMeter feature extraction, four-engine ensemble voting, adaptive threshold, STL time-series decomposition |
+| **Algorithm Depth** | Three-engine Stacking fusion (rule/baseline/unsupervised, 13-dim), isolation forest anomaly score + top-dim risk, UDP/QUIC full detection, adaptive threshold, STL decomposition, per-packet streaming feature aggregation |
 | **AI Engineering** | Hallucination control trilogy, RAG hybrid retrieval + reranking, local vector inference |
-| **Engineering Quality** | 163 unit tests, FastAPI + Pydantic, SQLite WAL, DPAPI encryption, global exception handling |
+| **Engineering Quality** | 176 unit tests all green, FastAPI + Pydantic, SQLite WAL, DPAPI encryption, global exception handling, CI (with Windows/DPAPI job), dependency locking |
 | **Lightweight & Portable** | Average memory peak 23MB, local inference no external service dependency, Windows .exe packaging |
 | **Verifiable** | All metrics have evaluation scripts and result files — no "guesstimates" |
 

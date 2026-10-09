@@ -44,10 +44,13 @@ THREE_ENGINE_FEATURE_NAMES = [
     "baseline_deviation_count",    # 基线偏差窗口数（归一化，cap=10）
     "baseline_multi_dim_triggered",# 是否出现多维度联合偏差（0/1）
     "baseline_drifted",            # 基线是否漂移（0/1）
-    # === 孤立森林（3 维）===
+    # === 孤立森林（6 维）===
     "isolation_available",         # 孤立森林是否可用（已学习）
     "isolation_anomaly_count",     # 异常窗口数（归一化，cap=10）
     "isolation_anomaly_ratio",     # 异常窗口占比（0-1）
+    "isolation_mean_score",        # 异常窗口平均异常分（归一化，abs(score)/abs(threshold)）
+    "isolation_max_score",         # 最异常窗口的异常分（归一化）
+    "isolation_top_dim_risk",      # top贡献维度风险等级（syn/dports=1.0, packets/bytes=0.5）
 ]
 
 ENGINE_ORDER = ("rule_based", "baseline", "isolation_forest")
@@ -110,7 +113,7 @@ class ThreeEngineStacking:
         drifted = baseline_result.get("drift") or anomalies.get("baseline_drift")
         baseline_drifted = 1.0 if drifted else 0.0
 
-        # === 孤立森林（3 维）===
+        # === 孤立森林（6 维）===
         ml_profile = ml_profile or {}
         iso_learned = bool(ml_profile.get("learned"))
         isolation_available = 1.0 if iso_learned else 0.0
@@ -119,10 +122,28 @@ class ThreeEngineStacking:
         total_windows = float(ml_profile.get("total_windows", 0) or 0)
         isolation_anomaly_ratio = min(iso_count / total_windows, 1.0) if total_windows else 0.0
 
+        # 新增3维：异常分统计 + top维度风险
+        mean_score = float(ml_profile.get("mean_anomaly_score", 0.0) or 0.0)
+        max_score = float(ml_profile.get("max_anomaly_score", 0.0) or 0.0)
+        threshold = float(ml_profile.get("score_threshold", 0.0) or 0.0)
+        # 归一化：异常分是负值，越小越异常。abs(score)/abs(threshold)，cap=1
+        denom = abs(threshold) if abs(threshold) > 1e-6 else 1.0
+        isolation_mean_score = min(abs(mean_score) / denom, 1.0) if iso_count > 0 else 0.0
+        isolation_max_score = min(abs(max_score) / denom, 1.0) if iso_count > 0 else 0.0
+        # top贡献维度风险：syn/dports 是高风险（扫描/洪水特征），packets/bytes 是中风险
+        top_dim = ml_profile.get("top_dimension", "")
+        if top_dim in ("window_syn", "window_dports"):
+            isolation_top_dim_risk = 1.0
+        elif top_dim in ("window_packets", "window_bytes"):
+            isolation_top_dim_risk = 0.5
+        else:
+            isolation_top_dim_risk = 0.0
+
         return np.array([
             rule_has_alert, rule_alert_count_norm, max_severity, rule_triggered_rules,
             baseline_deviation_count, baseline_multi_dim, baseline_drifted,
             isolation_available, isolation_anomaly_count, isolation_anomaly_ratio,
+            isolation_mean_score, isolation_max_score, isolation_top_dim_risk,
         ], dtype=np.float64)
 
     # ------------------------------------------------------------------
@@ -160,7 +181,7 @@ class ThreeEngineStacking:
         raw = np.array([
             float(np.mean(features[0:4])),   # rule_based
             float(np.mean(features[4:7])),   # baseline
-            float(np.mean(features[7:10])),  # isolation_forest
+            float(np.mean(features[7:13])),  # isolation_forest
         ])
         total = float(raw.sum())
         share = raw / total if total > 0 else np.zeros_like(raw)
@@ -186,7 +207,10 @@ class ThreeEngineStacking:
         rule_score = min(features[0] * 0.5 + features[1] * 0.2 + features[2] / 4.0 * 0.2
                          + features[3] * 0.1, 1.0)
         base_score = min(features[4] * 0.6 + features[5] * 0.25 + features[6] * 0.15, 1.0)
-        iso_score = min(features[8] * 0.7 + features[9] * 0.3, 1.0)
+        # 孤立森林6维：available(7) + count(8) + ratio(9) + mean_score(10) + max_score(11) + top_dim_risk(12)
+        iso_score = min(features[8] * 0.35 + features[9] * 0.25
+                        + features[10] * 0.15 + features[11] * 0.15
+                        + features[12] * 0.10, 1.0)
         return float(
             FALLBACK_WEIGHTS["rule_based"] * rule_score
             + FALLBACK_WEIGHTS["baseline"] * base_score

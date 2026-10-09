@@ -95,6 +95,16 @@ class AnalysisSettings(BaseSettings):
     large_flow_min_mb: float = 10.0
     rst_storm_min_count: int = 30
 
+    # UDP/QUIC 攻击检测阈值（v3.4.0 新增）
+    udp_flood_min_packets: int = 100
+    udp_flood_high_packets: int = 500
+    dns_amp_min_ratio: float = 5.0
+    dns_amp_min_responses: int = 5
+    quic_flood_min_connections: int = 50
+    quic_long_flow_min_packets: int = 200
+    quic_initial_ratio_threshold: float = 0.3
+    quic_unknown_version_alert: bool = True
+
     # EWMA 时序基线引擎
     baseline_alpha: float = 0.1
     baseline_sigma: float = 3.0
@@ -198,6 +208,16 @@ class Settings(BaseSettings):
     dns_tunnel_high_count: int = 20
     large_flow_min_mb: float = 10.0
     rst_storm_min_count: int = 30
+
+    # ===== UDP/QUIC 攻击检测阈值（v3.4.0 新增，平铺）=====
+    udp_flood_min_packets: int = 100
+    udp_flood_high_packets: int = 500
+    dns_amp_min_ratio: float = 5.0
+    dns_amp_min_responses: int = 5
+    quic_flood_min_connections: int = 50
+    quic_long_flow_min_packets: int = 200
+    quic_initial_ratio_threshold: float = 0.3
+    quic_unknown_version_alert: bool = True
 
     # ===== EWMA 时序基线引擎（平铺，向后兼容）=====
     baseline_alpha: float = 0.1

@@ -6,22 +6,25 @@
     "isolation_forest"
   ],
   "window_sec": 10,
-  "training_samples": 797,
-  "n_attack_windows": 533,
+  "training_samples": 1732,
+  "n_attack_windows": 1468,
   "n_normal_windows": 264,
-  "cv_f1_mean": 0.7250522283976248,
-  "cv_f1_std": 0.023138964574777262,
+  "cv_f1_mean": 0.7747013475845461,
+  "cv_f1_std": 0.012887786592850994,
   "feature_importance": {
-    "rule_has_alert": 2.3789328781080012,
-    "rule_alert_count_norm": 0.004880221233123627,
-    "rule_max_severity": -0.578416342276186,
-    "rule_triggered_rules": 2.688919864461842,
-    "baseline_deviation_count": -0.8272241718923008,
-    "baseline_multi_dim_triggered": 1.349848098542499,
-    "baseline_drifted": -0.08969974073490088,
-    "isolation_available": -0.08969974073490088,
-    "isolation_anomaly_count": 0.0,
-    "isolation_anomaly_ratio": 0.0
+    "rule_has_alert": 2.376158988239776,
+    "rule_alert_count_norm": 0.159049911375692,
+    "rule_max_severity": -0.8674923587532481,
+    "rule_triggered_rules": 2.7677764793812747,
+    "baseline_deviation_count": -0.6845711058027386,
+    "baseline_multi_dim_triggered": 1.4164563675470163,
+    "baseline_drifted": -0.08122222601796117,
+    "isolation_available": -0.08122222601796117,
+    "isolation_anomaly_count": 0.6132625847119065,
+    "isolation_anomaly_ratio": 0.9886476176003458,
+    "isolation_mean_score": -3.5069489081044694,
+    "isolation_max_score": 0.9099077751963165,
+    "isolation_top_dim_risk": -0.7454937482393047
   },
   "per_sample": {
     "baseline_demo_attack": {
@@ -54,6 +57,41 @@
       "windows": 217,
       "packets": 1495
     },
+    "mix_normal_burst": {
+      "label": 1,
+      "windows": 281,
+      "packets": 4809
+    },
+    "mix_normal_dnstunnel": {
+      "label": 1,
+      "windows": 47,
+      "packets": 2739
+    },
+    "mix_normal_portscan": {
+      "label": 1,
+      "windows": 51,
+      "packets": 2779
+    },
+    "mix_normal_rststorm": {
+      "label": 1,
+      "windows": 52,
+      "packets": 2809
+    },
+    "mix_normal_synflood": {
+      "label": 1,
+      "windows": 52,
+      "packets": 2929
+    },
+    "mix_short_normal_portscan": {
+      "label": 1,
+      "windows": 226,
+      "packets": 1530
+    },
+    "mix_short_normal_synflood": {
+      "label": 1,
+      "windows": 226,
+      "packets": 1680
+    },
     "normal": {
       "label": 0,
       "windows": 219,
@@ -76,8 +114,9 @@
     }
   },
   "limitations": [
-    "训练数据来自 10 个合成 golden 样本，非真实生产流量",
+    "训练数据来自 10 个合成 golden 样本 + 7 个时间混合样本，非真实生产流量",
     "样本级标签下推到窗口级属于弱标注，存在标签噪声",
+    "v3.4.0 起特征维度从10扩展到13（新增孤立森林异常分统计+top维度风险）",
     "元学习器权重不应被解读为生产环境最优融合策略",
     "真实部署前请用自有标注流量重新运行本脚本"
   ]

@@ -2,6 +2,7 @@
 网络流提取与统计分析模块
 从数据包列表中提取网络流、计算统计特征、生成分析报告
 """
+import os
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, field
 from collections import defaultdict, Counter
@@ -239,12 +240,55 @@ class TrafficAnalyzer:
             "dns_tunnel_high_count": settings.dns_tunnel_high_count,
             "large_flow_min_mb": settings.large_flow_min_mb,
             "rst_storm_min_count": settings.rst_storm_min_count,
+            # v3.4.0 新增：UDP/QUIC 攻击检测阈值
+            "udp_flood_min_packets": settings.udp_flood_min_packets,
+            "udp_flood_high_packets": settings.udp_flood_high_packets,
+            "dns_amp_min_ratio": settings.dns_amp_min_ratio,
+            "dns_amp_min_responses": settings.dns_amp_min_responses,
+            "quic_flood_min_connections": settings.quic_flood_min_connections,
+            "quic_long_flow_min_packets": settings.quic_long_flow_min_packets,
+            "quic_initial_ratio_threshold": settings.quic_initial_ratio_threshold,
+            "quic_unknown_version_alert": settings.quic_unknown_version_alert,
         }
         # EWMA 时序基线（学习-检测两阶段）
         self.baseline: Optional[TrafficBaseline] = None
         self.use_baseline = use_baseline
         self.baseline_drift: Optional[Dict[str, Any]] = None
+        self.baseline_source: str = "none"  # "none" / "user" / "default"
+
+        # v3.4.0：自动加载预置默认基线（首次开箱即用，无需手动学习）
+        if self.use_baseline:
+            self._try_load_default_baseline()
+
         logger.info("综合流量分析器初始化完成（规则阈值参数化）")
+
+    def _try_load_default_baseline(self) -> None:
+        """
+        v3.4.0：自动加载预置默认基线。
+        默认基线随安装包分发（data/baselines/default_baseline.json），
+        首次开箱即用时基线和孤立森林即可工作，无需用户手动学习。
+        用户手动学习新基线后会覆盖默认基线（baseline_source 变为 "user"）。
+        """
+        default_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+            "data", "baselines", "default_baseline.json"
+        )
+        if os.path.exists(default_path):
+            try:
+                self.baseline = TrafficBaseline.load(default_path)
+                if self.baseline and self.baseline.learned:
+                    self.baseline_source = "default"
+                    # 同步初始化孤立森林（与基线同窗口输入）
+                    if self.use_ml and self.isolation_detector is None:
+                        from src.analysis.isolation_detector import IsolationDetector
+                        self.isolation_detector = IsolationDetector()
+                        if self.baseline._train_windows:
+                            self.isolation_detector.learn_windows(self.baseline._train_windows)
+                    logger.info(f"默认基线自动加载成功 | 来源={default_path}")
+                else:
+                    logger.warning("默认基线加载失败（learned=False）")
+            except Exception as e:
+                logger.warning(f"默认基线加载异常: {e}")
 
     def learn_baseline(self, packets: List[PacketInfo]) -> bool:
         """学习正常流量基线画像（供检测阶段对照）；启用 ML 时同步训练孤立森林（同窗口输入）"""
@@ -252,6 +296,7 @@ class TrafficAnalyzer:
             return False
         self.baseline = TrafficBaseline()
         self.baseline.learn(packets)
+        self.baseline_source = "user"  # 用户手动学习，覆盖默认基线
         if self.use_ml:
             from src.analysis.isolation_detector import IsolationDetector
             self.isolation_detector = IsolationDetector()
@@ -309,7 +354,8 @@ class TrafficAnalyzer:
                     windows = self.baseline._aggregate_windows(packets)
                     ml_result = self.isolation_detector.detect_windows(windows)
                     anomalies = self._merge_ml_anomalies(anomalies, ml_result)
-                    ml_profile = self.isolation_detector.to_dict()
+                    # 修复：构建包含实际检测结果的 ml_profile（to_dict 只含元信息）
+                    ml_profile = self._build_ml_profile(ml_result, windows)
                 except Exception as e:
                     logger.warning(f"ML 检测失败（不影响主流程）: {e}")
 
@@ -531,7 +577,8 @@ class TrafficAnalyzer:
                 try:
                     mlres = self.isolation_detector.detect_windows(windows)
                     anomalies = self._merge_ml_anomalies(anomalies, mlres)
-                    ml_profile = self.isolation_detector.to_dict()
+                    # 修复：构建包含实际检测结果的 ml_profile
+                    ml_profile = self._build_ml_profile(mlres, windows)
                 except Exception as e:
                     logger.warning(f"ML 流式检测失败（不影响主流程）: {e}")
 
@@ -637,6 +684,44 @@ class TrafficAnalyzer:
         anomalies["baseline_deviations_added"] = added
         anomalies["baseline_multi_dim_alerts"] = len(multi_alerts)
         return anomalies
+
+    def _build_ml_profile(self, ml_result: Dict[str, Any],
+                          windows: List[Dict[str, float]]) -> Dict[str, Any]:
+        """
+        构建包含实际检测结果的孤立森林画像（修复 to_dict 只含元信息的bug）。
+
+        输出字段供 stacking_fusion.extract_features 使用：
+          learned, anomaly_windows, total_windows,
+          mean_anomaly_score, max_anomaly_score, top_dimension, score_threshold
+        """
+        anoms = ml_result.get("anomalies", []) if ml_result else []
+        total = len(windows) if windows else 0
+        if anoms:
+            scores = [a.get("anomaly_score", 0.0) for a in anoms]
+            mean_score = sum(scores) / len(scores)
+            max_score = min(scores)  # 负值越小越异常
+            # 出现次数最多的 top 贡献维度
+            from collections import Counter
+            dims = [a.get("dimension", "") for a in anoms if a.get("dimension")]
+            top_dim = Counter(dims).most_common(1)[0][0] if dims else ""
+        else:
+            mean_score = 0.0
+            max_score = 0.0
+            top_dim = ""
+        profile = {
+            "name": "isolation-forest-unsupervised",
+            "learned": True,
+            "anomaly_windows": len(anoms),
+            "total_windows": total,
+            "mean_anomaly_score": round(mean_score, 4),
+            "max_anomaly_score": round(max_score, 4),
+            "top_dimension": top_dim,
+            "score_threshold": float(
+                self.isolation_detector._score_threshold
+                if self.isolation_detector else 0.0
+            ),
+        }
+        return profile
 
     def _merge_ml_anomalies(self, anomalies: Dict[str, Any],
                               ml_result: Dict[str, Any]) -> Dict[str, Any]:
@@ -844,6 +929,145 @@ class TrafficAnalyzer:
                     "time_window": _time_window(rst_packets[src]),
                     "description": f"源IP {src} 发送了 {count} 个RST包，可能是扫描或异常连接"
                 })
+
+        # 6. UDP Flood 检测（v3.4.0 新增）
+        udp_by_dst = defaultdict(int)
+        udp_packets_by_dst: Dict[str, List] = defaultdict(list)
+        for p in packets:
+            if p.protocol == "UDP":
+                udp_by_dst[p.dst_ip] += 1
+                udp_packets_by_dst[p.dst_ip].append(p)
+        for dst, count in udp_by_dst.items():
+            if count >= t["udp_flood_min_packets"]:
+                alerts.append({
+                    "type": "UDP_FLOOD_SUSPECTED",
+                    "severity": "HIGH" if count > t["udp_flood_high_packets"] else "MEDIUM",
+                    "dst_ip": dst,
+                    "udp_packet_count": count,
+                    "detector": "rule-based-udp-flood",
+                    "rule_threshold": {"udp_flood_min_packets": t["udp_flood_min_packets"]},
+                    "time_window": _time_window(udp_packets_by_dst[dst]),
+                    "description": f"目标IP {dst} 收到 {count} 个UDP包，疑似UDP洪水攻击"
+                })
+
+        # 7. DNS Amplification 检测（v3.4.0 新增）
+        # 特征：DNS响应包字节数远大于请求包（放大攻击）
+        dns_req_bytes = defaultdict(int)
+        dns_resp_bytes = defaultdict(int)
+        dns_resp_count = defaultdict(int)
+        dns_pkts_by_src: Dict[str, List] = defaultdict(list)
+        for p in packets:
+            if p.protocol == "DNS":
+                if p.dns_query:  # 请求
+                    dns_req_bytes[p.src_ip] += p.length
+                elif p.dns_response:  # 响应
+                    dns_resp_bytes[p.dst_ip] += p.length
+                    dns_resp_count[p.dst_ip] += 1
+                    dns_pkts_by_src[p.dst_ip].append(p)
+        for target, resp_bytes in dns_resp_bytes.items():
+            req_bytes = dns_req_bytes.get(target, 1)
+            ratio = resp_bytes / req_bytes if req_bytes > 0 else float(resp_bytes)
+            if (ratio >= t["dns_amp_min_ratio"]
+                    and dns_resp_count[target] >= t["dns_amp_min_responses"]):
+                alerts.append({
+                    "type": "DNS_AMPLIFICATION_SUSPECTED",
+                    "severity": "HIGH",
+                    "target_ip": target,
+                    "amplification_ratio": round(ratio, 2),
+                    "response_bytes": resp_bytes,
+                    "request_bytes": req_bytes,
+                    "response_count": dns_resp_count[target],
+                    "detector": "rule-based-dns-amplification",
+                    "rule_threshold": {"dns_amp_min_ratio": t["dns_amp_min_ratio"]},
+                    "time_window": _time_window(dns_pkts_by_src[target]),
+                    "description": f"目标IP {target} DNS响应/请求字节比={ratio:.1f}x，"
+                                   f"响应{dns_resp_count[target]}个包，疑似DNS放大攻击"
+                })
+
+        # 8. QUIC/HTTP3 异常检测（v3.4.0 新增，完整检测）
+        quic_packets = [p for p in packets if p.protocol == "UDP" and p.dst_port == 443]
+        if quic_packets:
+            # 8a. QUIC 连接风暴：大量不同源端口（每个源端口≈一条QUIC连接）
+            quic_src_ports = defaultdict(set)
+            quic_pkts_by_src: Dict[str, List] = defaultdict(list)
+            for p in quic_packets:
+                quic_src_ports[p.src_ip].add(p.src_port)
+                quic_pkts_by_src[p.src_ip].append(p)
+            for src, ports in quic_src_ports.items():
+                if len(ports) >= t["quic_flood_min_connections"]:
+                    alerts.append({
+                        "type": "QUIC_CONNECTION_FLOOD",
+                        "severity": "HIGH",
+                        "src_ip": src,
+                        "unique_quic_connections": len(ports),
+                        "detector": "rule-based-quic-flood",
+                        "rule_threshold": {"quic_flood_min_connections": t["quic_flood_min_connections"]},
+                        "time_window": _time_window(quic_pkts_by_src[src]),
+                        "description": f"源IP {src} 发起 {len(ports)} 条不同QUIC连接（源端口），"
+                                       f"疑似QUIC连接洪水"
+                    })
+
+            # 8b. QUIC 长流异常：单条流包数过多（可能是加密隧道/数据外泄）
+            quic_flows = defaultdict(int)
+            quic_flow_pkts: Dict[str, List] = defaultdict(list)
+            for p in quic_packets:
+                flow_key = f"{p.src_ip}:{p.src_port}->{p.dst_ip}:{p.dst_port}"
+                quic_flows[flow_key] += 1
+                quic_flow_pkts[flow_key].append(p)
+            for flow_key, count in quic_flows.items():
+                if count >= t["quic_long_flow_min_packets"]:
+                    alerts.append({
+                        "type": "QUIC_LONG_FLOW_ANOMALY",
+                        "severity": "MEDIUM",
+                        "flow": flow_key,
+                        "packet_count": count,
+                        "detector": "rule-based-quic-long-flow",
+                        "rule_threshold": {"quic_long_flow_min_packets": t["quic_long_flow_min_packets"]},
+                        "time_window": _time_window(quic_flow_pkts[flow_key]),
+                        "description": f"QUIC流 {flow_key} 持续 {count} 个包，"
+                                       f"疑似加密隧道或数据外泄"
+                    })
+
+            # 8c. QUIC 初始包比例异常（初始包通常较大，>1200字节；正常连接初始包占比<5%）
+            quic_large_pkts = sum(1 for p in quic_packets if p.length > 1200)
+            quic_initial_ratio = quic_large_pkts / len(quic_packets) if quic_packets else 0
+            if quic_initial_ratio >= t["quic_initial_ratio_threshold"]:
+                alerts.append({
+                    "type": "QUIC_INITIAL_RATIO_ANOMALY",
+                    "severity": "MEDIUM",
+                    "large_packet_ratio": round(quic_initial_ratio, 3),
+                    "total_quic_packets": len(quic_packets),
+                    "large_packet_count": quic_large_pkts,
+                    "detector": "rule-based-quic-initial-ratio",
+                    "rule_threshold": {"quic_initial_ratio_threshold": t["quic_initial_ratio_threshold"]},
+                    "time_window": _time_window(quic_packets),
+                    "description": f"QUIC大包（疑似初始包）占比={quic_initial_ratio:.1%}，"
+                                   f"正常应<5%，疑似QUIC隧道或异常握手"
+                })
+
+            # 8d. QUIC 版本号异常（尝试从 raw_summary 解析未知版本）
+            if t.get("quic_unknown_version_alert", True):
+                unknown_versions = set()
+                for p in quic_packets:
+                    if p.raw_summary and "QUIC" in p.raw_summary:
+                        # 尝试提取版本号（raw_summary 可能包含 "Version=0x..."）
+                        import re
+                        m = re.search(r'Version[=:\s]+0x([0-9a-fA-F]+)', p.raw_summary)
+                        if m:
+                            ver = m.group(1).lower()
+                            # 已知版本：1=QUIC v1, 0xff000020=草案20, 0xff000021=草案21, 0x6b3343cf=v2
+                            known = {"00000001", "ff000020", "ff000021", "6b3343cf", "ff00001d"}
+                            if ver not in known and ver != "00000000":
+                                unknown_versions.add(ver)
+                if unknown_versions:
+                    alerts.append({
+                        "type": "QUIC_UNKNOWN_VERSION",
+                        "severity": "LOW",
+                        "unknown_versions": list(unknown_versions),
+                        "detector": "rule-based-quic-version",
+                        "description": f"检测到未知QUIC版本号: {', '.join(unknown_versions)}，"
+                                       f"可能是实验性协议或异常客户端"
+                    })
 
         return {
             "total_alerts": len(alerts),

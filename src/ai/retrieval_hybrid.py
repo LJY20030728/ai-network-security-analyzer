@@ -22,7 +22,7 @@ RAG 检索质量优化（对应评测 diagnosis 的三条改进方向中的 ①�
 import math
 import re
 from collections import Counter, defaultdict
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from loguru import logger
 

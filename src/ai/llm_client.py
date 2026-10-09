@@ -4,7 +4,7 @@
 支持流式输出、重试、错误处理
 """
 from openai import OpenAI
-from typing import List, Dict, Any, Optional, Generator
+from typing import List, Dict, Optional, Generator
 from loguru import logger
 import json
 import time

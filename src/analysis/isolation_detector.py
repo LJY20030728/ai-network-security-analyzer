@@ -44,11 +44,21 @@ class IsolationDetector:
     def __init__(self,
                  contamination: Optional[float] = None,
                  random_state: Optional[int] = None,
-                 max_samples: Optional[int] = None):
+                 max_samples: Optional[int] = None,
+                 n_jobs: Optional[int] = None):
         from sklearn.ensemble import IsolationForest
         self.contamination = contamination if contamination is not None else settings.ml_contamination
         self.random_state = random_state if random_state is not None else settings.ml_random_state
         self.max_samples = max_samples if max_samples is not None else settings.ml_max_samples
+        # 默认串行（1）。理由：
+        #   1) 4 维、百级窗口的数据量极小，并行收益趋近于零；
+        #   2) n_jobs=-1 会拉起多进程/loky，在受限环境（沙箱/权限收紧的终端）直接
+        #      失败为 PermissionError [WinError 5]，且是本项目 6 个单测失败的真因；
+        #   3) 桌面工具不应在用户机器上无预警占满所有核心。
+        # 需要并行时通过 settings.ml_n_jobs 或参数显式开启。
+        self.n_jobs = n_jobs if n_jobs is not None else int(
+            getattr(settings, "ml_n_jobs", 1) or 1
+        )
 
         self.model: Optional[IsolationForest] = None
         self._learned = False
@@ -74,7 +84,7 @@ class IsolationDetector:
             random_state=self.random_state,
             max_samples=min(self.max_samples, max(2, len(windows))),
             n_estimators=100,
-            n_jobs=-1,
+            n_jobs=self.n_jobs,
         )
         self.model.fit(X)
 

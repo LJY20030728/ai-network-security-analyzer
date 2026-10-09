@@ -1,4 +1,4 @@
-﻿"""
+"""
 BGE 中文 Embedding（ONNX Runtime 轻量实现）
 ============================================
 针对中文安全知识库的检索质量优化：
@@ -48,25 +48,39 @@ MODEL_DOWNLOAD_URLS = {
 
 
 def _candidate_dirs() -> List[str]:
-    """模型目录候选（按优先级）"""
+    """
+    模型目录候选（按优先级）。
+
+    注：原先每段都包了 try/except + pass，但 os.path.join / os.path.dirname /
+    getattr 均不会抛异常，属于"空保护"——它掩盖不了任何真实故障，
+    却让读者误以为这些路径构造可能失败。此处改为直接构造，
+    并在最终结果为空时给出明确告警（否则 RAG 会静默降级为关键词匹配）。
+    """
     candidates = []
+
     # 0. PyInstaller 打包内部目录（onedir 模式下 add-data 位于 _internal，sys._MEIPASS 指向它）
-    try:
-        meipass = getattr(sys, "_MEIPASS", None)
-        if meipass:
-            candidates.append(str(os.path.join(meipass, "models", MODEL_DIR_NAME)))
-    except Exception:
-        pass
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidates.append(os.path.join(meipass, "models", MODEL_DIR_NAME))
+
     # 1. 程序入口同级（exe 旁手动部署 models/ 的场景）
-    try:
-        candidates.append(str(os.path.join(os.path.dirname(os.path.abspath(sys.executable)), "models", MODEL_DIR_NAME)))
-    except Exception:
-        pass
+    candidates.append(
+        os.path.join(os.path.dirname(os.path.abspath(sys.executable)), "models", MODEL_DIR_NAME)
+    )
+
     # 2. 项目根（本文件 src/ai/embeddings/ → 上溯 4 级）
-    try:
-        candidates.append(str(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "models", MODEL_DIR_NAME)))
-    except Exception:
-        pass
+    candidates.append(
+        os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
+                os.path.abspath(__file__))))),
+            "models", MODEL_DIR_NAME,
+        )
+    )
+
+    if not candidates:
+        logger.warning(
+            "未能构造出任何嵌入模型候选目录，RAG 语义检索将不可用（会退化为关键词匹配）"
+        )
     return candidates
 
 

@@ -9,8 +9,7 @@ import json
 import os
 import platform
 import sys
-import traceback
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
@@ -224,8 +223,11 @@ class LogObserver:
                     "avg_peak_memory_mb": perf.get("avg_peak_memory_mb", 0),
                     "total_samples": perf.get("total_samples", 0),
                 }
-        except Exception:
-            pass
+        except Exception as e:
+            # 只影响诊断报告中的一个可选项，但必须留痕：
+            # 否则报告会"少一段"而无人知晓原因
+            report.setdefault("diagnostic_notes", []).append(f"性能指标读取失败: {e}")
+            logger.warning(f"诊断报告：读取性能指标失败: {e}")
 
         # 7. 模型文件检查
         try:
@@ -241,8 +243,15 @@ class LogObserver:
             report["models"] = models
             if not models:
                 report["recommendations"].append("未找到训练好的模型文件，监督检测功能不可用")
-        except Exception:
-            pass
+        except Exception as e:
+            # 【重要】静默失败会让诊断报告给出 "healthy" 结论，
+            # 而实际上"监督检测是否可用"这一项根本没被检查过 —— 会误导排查。
+            report["models"] = {}
+            report.setdefault("diagnostic_notes", []).append(f"模型文件检查失败: {e}")
+            report["recommendations"].append(
+                f"无法检查模型文件（{type(e).__name__}: {e}），监督检测可用性未知"
+            )
+            logger.warning(f"诊断报告：模型文件检查失败: {e}")
 
         # 总体健康状态
         report["health_status"] = "healthy" if not report["recommendations"] else "warning"

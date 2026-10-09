@@ -6,7 +6,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
 import pytest
-from scapy.all import IP, TCP, UDP, ARP, Ether
+from scapy.all import IP, TCP, UDP, ARP, DNS, DNSQR, DNSRR, Ether
 
 from src.capture.packet_parser import PacketParser
 from src.utils.paths import app_root, data_dir, asset_dir, seed_assets
@@ -44,6 +44,93 @@ class TestPacketParser:
         info = parser.parse(pkt)
         assert info.timestamp.startswith("2023-")
         assert "." in info.timestamp  # 毫秒精度
+
+
+class TestDnsParsing:
+    """DNS 解析回归测试。
+
+    背景（两个真实缺陷）：
+      1. scapy 2.7 下 DNS 应答包的 ancount 可能为 None（字段未解析），
+         原代码 `packet[DNS].ancount > 0` 会抛
+         TypeError: '>' not supported between instances of 'NoneType' and 'int'，
+         且该比较不在 try 保护范围内 → 整个 PCAP 解析中断。
+      2. scapy 2.7 已把 qd/an/ns/ar 改为 PacketListField，`packet[DNS].an`
+         是**列表**，原代码 `packet[DNS].an.rdata` 必然抛 AttributeError，
+         被 try 静默吞掉 → 真实流量上 dns_response 永远为空。
+    """
+
+    def test_dns_query(self, parser):
+        pkt = (Ether()/IP(src="10.0.0.1", dst="8.8.8.8")/UDP(sport=53000, dport=53) /
+               DNS(id=1, qr=0, rd=1, qd=DNSQR(qname="example.com", qtype="A")))
+        pkt.time = 1700000000.0
+        info = parser.parse(pkt)
+        assert info.protocol == "DNS"
+        assert "example.com" in info.dns_query
+        assert info.dns_response == ""      # 查询包不应有应答内容
+
+    def test_dns_response_extracts_rdata(self, parser):
+        """应答记录必须能被提取（此前因 an 是列表而永远为空）"""
+        pkt = (Ether()/IP(src="8.8.8.8", dst="192.168.1.10")/UDP(sport=53, dport=53000) /
+               DNS(id=0x1234, qr=1, rd=1, ra=1,
+                   qd=DNSQR(qname="example.com", qtype="A"),
+                   an=DNSRR(rrname="example.com", type="A", ttl=300, rdata="93.184.216.34")))
+        pkt.time = 1700000000.0
+        info = parser.parse(pkt)
+        assert info.protocol == "DNS"
+        assert info.dns_response == "93.184.216.34"
+
+    def test_dns_response_multiple_records(self, parser):
+        """多条应答记录时取首条，且不得抛异常"""
+        pkt = (Ether()/IP(src="8.8.8.8", dst="192.168.1.10")/UDP(sport=53, dport=53000) /
+               DNS(id=2, qr=1, rd=1, ra=1,
+                   qd=DNSQR(qname="multi.com", qtype="A"),
+                   an=DNSRR(rrname="multi.com", type="A", rdata="1.1.1.1") /
+                      DNSRR(rrname="multi.com", type="A", rdata="2.2.2.2")))
+        pkt.time = 1700000000.0
+        info = parser.parse(pkt)
+        assert info.dns_response == "1.1.1.1"
+
+    def test_dns_ancount_none_does_not_crash(self, parser):
+        """★ 核心回归：ancount 为 None 时不得抛 TypeError 中断解析"""
+        pkt = (Ether()/IP(src="8.8.8.8", dst="192.168.1.10")/UDP(sport=53, dport=53000) /
+               DNS(id=3, qr=1, rd=1, ra=1,
+                   qd=DNSQR(qname="none.com", qtype="A"),
+                   an=DNSRR(rrname="none.com", type="A", rdata="9.9.9.9")))
+        pkt.time = 1700000000.0
+        # 模拟 scapy 未解析出 ancount 的情形
+        pkt[DNS].ancount = None
+        info = parser.parse(pkt)          # 修复前这里抛 TypeError
+        assert info.protocol == "DNS"
+        assert info.dns_response == "9.9.9.9"
+
+    def test_dns_ancount_declared_but_an_empty(self, parser):
+        """ancount 声称有应答但 an 段为空（本项目部分 golden 样本正是如此）：
+        不得抛异常，dns_response 应为空字符串。"""
+        pkt = (Ether()/IP(src="8.8.8.8", dst="192.168.1.10")/UDP(sport=53, dport=53000) /
+               DNS(id=6, qr=1, rd=1, ra=1, qd=DNSQR(qname="empty.com", qtype="A")))
+        pkt.time = 1700000000.0
+        pkt[DNS].ancount = 1          # 声明有 1 条，但没有实际记录
+        info = parser.parse(pkt)
+        assert info.protocol == "DNS"
+        assert info.dns_response == ""
+
+    def test_dns_response_without_an_section(self, parser):
+        """qr=1 但没有 an 段（如 NXDOMAIN）不得抛异常"""
+        pkt = (Ether()/IP(src="8.8.8.8", dst="192.168.1.10")/UDP(sport=53, dport=53000) /
+               DNS(id=4, qr=1, rd=1, ra=1, rcode=3,
+                   qd=DNSQR(qname="nxdomain.com", qtype="A")))
+        pkt.time = 1700000000.0
+        info = parser.parse(pkt)
+        assert info.protocol == "DNS"
+        assert info.dns_response == ""
+
+    def test_dns_non_ascii_qname_does_not_crash(self, parser):
+        """畸形/非 UTF-8 域名不得中断解析"""
+        pkt = (Ether()/IP(src="10.0.0.1", dst="8.8.8.8")/UDP(sport=53000, dport=53) /
+               DNS(id=5, qr=0, rd=1, qd=DNSQR(qname=b"\xff\xfe\x00bad", qtype="A")))
+        pkt.time = 1700000000.0
+        info = parser.parse(pkt)          # decode(errors='ignore') 应兜住
+        assert info.protocol == "DNS"
 
 
 @pytest.fixture

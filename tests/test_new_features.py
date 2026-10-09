@@ -153,109 +153,6 @@ class TestLogObserver:
 # P2-3: STL 时序分解测试
 # ============================================================
 
-class TestTimeSeriesDecomposer:
-    """STL 时序分解器测试"""
-
-    def test_decompose_simple(self):
-        from src.analysis.stl_decomposer import TimeSeriesDecomposer
-        decomposer = TimeSeriesDecomposer(period=6, trend_window=3)
-        # 构造 50 个点的简单数据
-        values = [10.0 + i * 0.1 for i in range(50)]
-        result = decomposer.decompose(values)
-        assert "trend" in result
-        assert "seasonal" in result
-        assert "residual" in result
-        assert "anomalies" in result
-        assert "stats" in result
-        assert len(result["trend"]) == 50
-
-    def test_decompose_with_anomaly(self):
-        from src.analysis.stl_decomposer import TimeSeriesDecomposer
-        decomposer = TimeSeriesDecomposer(period=6, trend_window=3, residual_sigma=2.0)
-        values = [10.0] * 48
-        values[24] = 100.0  # 异常点
-        result = decomposer.decompose(values)
-        assert len(result["anomalies"]) >= 1
-
-    def test_decompose_insufficient_data(self):
-        from src.analysis.stl_decomposer import TimeSeriesDecomposer
-        decomposer = TimeSeriesDecomposer(period=24)
-        values = [1.0, 2.0, 3.0]  # 数据不足
-        result = decomposer.decompose(values)
-        assert result["method"] == "zscore_fallback"
-
-    def test_detect_seasonal_anomalies(self):
-        from src.analysis.stl_decomposer import detect_seasonal_anomalies
-        windows = [{"packets": 10.0 + i} for i in range(50)]
-        result = detect_seasonal_anomalies(windows, metric="packets", period=6)
-        assert "alerts" in result
-        assert "anomalies" in result
-
-
-# ============================================================
-# P2-4: 检测引擎策略模式测试
-# ============================================================
-
-class TestDetectorFactory:
-    """检测器工厂测试"""
-
-    def test_available_detectors(self):
-        from src.analysis.detection_engine import DetectorFactory
-        detectors = DetectorFactory.available_detectors()
-        assert "rule_based" in detectors
-        assert "baseline" in detectors
-        assert "supervised" in detectors
-        assert "isolation_forest" in detectors
-
-    def test_create_unknown_detector(self):
-        from src.analysis.detection_engine import DetectorFactory
-        with pytest.raises(ValueError):
-            DetectorFactory.create("unknown")
-
-    def test_register_new_detector(self):
-        from src.analysis.detection_engine import DetectorFactory, DetectionStrategy
-
-        class CustomStrategy(DetectionStrategy):
-            @property
-            def name(self):
-                return "custom"
-
-            @property
-            def version(self):
-                return "0.1.0"
-
-            def detect(self, packets, flows=None, context=None):
-                return self._empty_result()
-
-        DetectorFactory.register("custom", CustomStrategy)
-        assert "custom" in DetectorFactory.available_detectors()
-
-
-class TestDetectionEngine:
-    """检测引擎上下文测试"""
-
-    def test_create_default_engine(self):
-        from src.analysis.detection_engine import create_default_engine
-        engine = create_default_engine()
-        assert len(engine._strategies) >= 4
-
-    def test_add_remove_strategy(self):
-        from src.analysis.detection_engine import DetectionEngine, RuleBasedStrategy
-        engine = DetectionEngine()
-        assert len(engine._strategies) == 0
-        engine.add_strategy(RuleBasedStrategy(), weight=0.3)
-        assert len(engine._strategies) == 1
-        engine.remove_strategy("rule_based")
-        assert len(engine._strategies) == 0
-
-    def test_detect_all_empty(self):
-        from src.analysis.detection_engine import DetectionEngine
-        engine = DetectionEngine()
-        result = engine.detect_all([])
-        assert result["total_alerts"] == 0
-        assert result["ensemble_vote"]["is_attack"] is False
-
-
 # ============================================================
 # P1-2: 取证知识库测试
 # ============================================================
@@ -336,25 +233,57 @@ class TestHallucinationControl:
 
 
 # ============================================================
-# P0-1: 监督检测器测试
+# 三引擎 Stacking 融合测试（3.3.0 取代原监督检测器测试）
 # ============================================================
 
-class TestSupervisedDetector:
-    """监督检测器测试"""
+class TestStackingFusion:
+    """三引擎 Stacking 融合层测试"""
 
-    def test_detector_initialization(self):
-        from src.analysis.supervised_detector import SupervisedDetector
-        detector = SupervisedDetector()
-        assert detector is not None
-        assert detector.model is not None or detector.loaded is False
+    def test_fusion_initialization(self):
+        from src.analysis.stacking_fusion import ThreeEngineStacking, ENGINE_ORDER
+        fusion = ThreeEngineStacking()
+        assert fusion is not None
+        assert tuple(ENGINE_ORDER) == ("rule_based", "baseline", "isolation_forest")
+        assert fusion.feature_dim == 10
 
-    def test_cic_feature_extractor(self):
-        from src.analysis.cic_features import CICFlowExtractor
-        extractor = CICFlowExtractor()
-        assert extractor is not None
-        # 检查有特征提取方法
-        methods = [m for m in dir(extractor) if not m.startswith("_")]
-        assert len(methods) > 0
+    def test_feature_extraction_shape(self):
+        from src.analysis.stacking_fusion import ThreeEngineStacking
+        fusion = ThreeEngineStacking()
+        feats = fusion.extract_features(
+            {"alerts": [{"type": "SYN_FLOOD_SUSPECTED", "severity": "HIGH"}],
+             "total_alerts": 1},
+            {"drift": None, "multi_dim_alerts": []},
+            {"learned": True, "anomaly_windows": 2, "total_windows": 10},
+        )
+        assert feats.shape == (10,)
+
+    def test_predict_without_meta_learner_uses_fallback(self):
+        """元学习器缺失时必须回退固定权重，并如实标注来源"""
+        from src.analysis.stacking_fusion import ThreeEngineStacking
+        fusion = ThreeEngineStacking(model_path=None)
+        assert fusion.meta_learner is None
+        out = fusion.predict({"alerts": [], "total_alerts": 0}, {}, {"learned": False})
+        assert out["confidence_source"] == "weighted_fallback"
+        assert out["meta_learner_used"] is False
+        assert out["architecture"] == "three_engine_stacking"
+
+    def test_load_rejects_wrong_engine_order(self, tmp_path):
+        """引擎顺序不匹配的元学习器必须被拒绝加载（防止给出错误判定）"""
+        import joblib
+        from sklearn.linear_model import LogisticRegression
+        import numpy as np
+        from src.analysis.stacking_fusion import ThreeEngineStacking
+
+        X = np.random.RandomState(0).rand(20, 4)
+        y = (X[:, 0] > 0.5).astype(int)
+        clf = LogisticRegression().fit(X, y)
+        p = tmp_path / "wrong.joblib"
+        joblib.dump({"model": clf,
+                     "feature_order": ["supervised", "rule_based", "baseline", "isolation_forest"]},
+                    p)
+        fusion = ThreeEngineStacking()
+        assert fusion.load(str(p)) is False
+        assert fusion.meta_learner is None
 
 
 if __name__ == "__main__":

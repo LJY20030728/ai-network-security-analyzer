@@ -153,7 +153,7 @@ class ThreatAnalyzer:
         :return: {"ok": True, "structured": {...}, "raw_text": "..."}
                  校验失败时 ok=False，structured=None，raw_text 保留原文（降级展示）
         """
-        from .schemas import StructuredThreatReport, try_parse_structured_report
+        from .schemas import try_parse_structured_report
 
         anomaly_str = json.dumps(sanitize_struct(anomaly_report), ensure_ascii=False, indent=2)
         samples_str = ""

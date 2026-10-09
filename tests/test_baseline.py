@@ -5,11 +5,8 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
-import pytest
-from datetime import datetime, timedelta
 
-from src.analysis.baseline import TrafficBaseline, _median, _mad, MAD_SIGMA_FACTOR
-from src.capture.packet_parser import PacketInfo
+from src.analysis.baseline import TrafficBaseline, _median, _mad
 from tests.conftest import mk, make_window_traffic
 
 
@@ -30,7 +27,6 @@ class TestMedianMad:
 
     def test_mad_sigma_factor_scale(self):
         """MAD 换算系数：标准正态数据 MAD≈0.6745σ → z 与 σ 语义可比"""
-        from statistics import pstdev
         data = [float(x) for x in range(1, 101)]  # 均匀分布
         med = _median(data)
         mad = _mad(data, med)

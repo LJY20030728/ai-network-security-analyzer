@@ -8,7 +8,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import pytest
 
 from src.analysis.flow_extractor import TrafficAnalyzer, FlowExtractor
-from src.capture.packet_parser import PacketInfo
 from tests.conftest import mk
 
 

@@ -9,6 +9,87 @@
 
 ---
 
+## [3.3.0] - 2026-10-09
+
+**架构收敛：移除监督模型，改为三引擎 Stacking 融合；清除死代码**
+
+### Removed（经实测验证后移除）
+- **整体移除监督模型引擎**：`src/analysis/supervised_detector.py`（370 行）、
+  `src/analysis/cic_features.py`（351 行，76 维 CICFlowMeter 特征）、
+  `models/supervised_detector.joblib`、`models/unsw_supervised_detector.joblib`
+- 移除其配套的 UNSW-NB15 数据集（47 MB CSV）与 4 个评测/训练脚本
+  （`eval_supervised_baseline.py` / `eval_unsw_oot.py` / `evaluate_unsw.py` /
+  `evaluate_unsw_cic.py` / `train_unsw_supervised.py` / `plot_validation_comparison.py`）
+- 移除依赖监督模型的 `feature_importance.py`、`generalization_eval.py`、
+  `tune_thresholds.py`、`fusion_comparison.py`、`tools/benchmark.py`
+- 移除相关结果 JSON 与 `docs/监督模型增量价值验证.md`
+
+**移除理由（实测，非主观）**：做「信号分解」实验，把**纯模型判定**与
+**规则/基线启发式判定**分开统计，避免把规则的功劳算到模型头上。结果：在本项目
+自带测试样本上模型相对启发式的**有效增量为 0**，且对一个正常样本产生误报；
+成本上流式峰值内存 6.8 MB → 18.6 MB（+174%）。
+根因是**分布不一致**：模型在 UNSW-NB15（完整 CICFlowMeter 特征）上训练，而项目
+自测样本以单包流为主，时延类特征（Flow Duration / IAT / Active / Idle）退化为 0，
+落在训练分布之外。模型在自身训练域内 F1=0.9487 真实可复现，属**"能力真实但
+跨域迁移失效"**。既然在当前可验证数据上拿不到收益，保留即为不诚实。
+
+### Added
+- `src/analysis/stacking_fusion.py`：三引擎 Stacking 融合器
+  （规则 + 时序基线 + 孤立森林 → 10 维特征 → LogisticRegression）
+- **融合接入运行路径**：`analyze_stream()` 与 `analyze_packets()` 均输出
+  `stacking_fusion`（此前 Stacking 仅存在于无人调用的 `detection_engine.py`）
+- **引擎顺序校验**：加载元学习器时校验 `feature_order`，不匹配即**拒绝加载**，
+  防止用错误的引擎顺序喂特征而给出看似正常、实则错误的判定
+- **固定权重回退**：元学习器缺失/异常时退化为规则 0.4 / 基线 0.3 / 孤立森林 0.3，
+  并通过 `confidence_source="weighted_fallback"` 明确标注「非模型输出」
+- `tools/train_stacking.py`：用 golden 样本逐窗口提取三引擎特征训练元学习器，
+  不依赖任何外部数据集。结果：797 窗口（攻击 533 / 正常 264），CV F1 = 0.7251 ± 0.0231
+- 引擎贡献度 `contributions`（归一化为占比，和为 1）
+
+### Changed
+- `ML_ENGINE_ENABLED` 默认 `false` → **`true`**（孤立森林默认启用；需先学习基线才生效）
+- 新增 `STACKING_FUSION_ENABLED`（默认 true）
+- 移除 `SUPERVISED_ENGINE_ENABLED` / `SUPERVISED_WINDOW_PACKETS`
+- 置信度来源标注由 `model` / `aggregate_heuristic` / `model+aggregate`
+  改为 `model` / `weighted_fallback`
+- 版本号升至 3.3.0（`config/settings.py` 为单一版本源）
+
+### Fixed
+- **修复 `hallucination_control.py` 中一处永远为空的死分支**（原为 `pass`）：
+  改为真实一致性检测——规则引擎零告警但 LLM 以确定性措辞断言具体攻击类型时告警
+- **修复 Stacking 引擎贡献度展示**：原先直接取特征均值（求和 >100%，
+  如 `rule_based:170%`），现归一化为占比
+- **修复 DNS 应答包解析**：`packet[DNS].ancount` 为 `None` 时抛 `TypeError` 中断
+  整个 PCAP 解析；且新版 scapy 中 `an` 已是列表，`an.rdata` 必然失败并被静默吞掉，
+  导致 `dns_response` 在真实流量上永远为空。改为不依赖 `ancount`、安全取首条记录，
+  并补 7 个回归测试
+- **修复 `.env` 被整体覆盖的数据破坏风险**：读取失败时旧代码把内容当空列表仍写回，
+  会抹掉用户的 API Key / Base URL / 模型名。现读取失败即放弃落盘，补 4 个字节级测试
+- **全项目静默吞异常治理**：逐一复核 `except: pass`，从 28 处降至 2 处
+  （其余改为显式 error/warning 日志，仅保留 2 处有明确理由的合理沉默）
+- **修复 `tools/` 29 个评测脚本无法运行**：Windows 控制台 GBK 编码导致打印
+  emoji/中文时抛 `UnicodeEncodeError`；`n_jobs=-1` 在受限环境抛
+  `PermissionError [WinError 5]`。新增 `force_utf8_stdout()` 与 `resolve_n_jobs()` 统一治理
+
+### Removed（死代码）
+- 删除 `src/analysis/detection_engine.py`：策略模式实现，内含 2 处引用**不存在 API**
+  的坏代码（`SupervisedDetector.detect_pcap`、`IsolationForestDetector`），
+  且从未被运行路径调用
+- 删除 `src/api/routes/*`（5 个 APIRouter）：从未被 `include_router` 挂载
+- 删除未被任何活代码调用的 `src/services/{analysis,baseline,knowledge,report}_service.py`
+- 删除 `src/services/history_service.py`→保留（有测试覆盖）
+- 修复 `tools/` 中 5 处指向不存在模块 `src.utils.time_utils` 的导入
+
+### Migration
+- 数据库列自动迁移（幂等）：`analysis_history.supervised_verdict` →
+  `stacking_verdict`，`supervised_confidence` → `stacking_confidence`，保留历史数据
+
+### Tests
+- **163 passed / 0 skipped / 0 failed**
+- 新增：DNS 解析回归 7 个、配置持久化安全 4 个、摘要格式化 16 个、Stacking 融合 4 个
+
+---
+
 ## [3.1.1] - 2026-09-21
 
 ### 科学验证口径补强

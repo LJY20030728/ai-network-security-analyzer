@@ -10,7 +10,6 @@
 import os
 import shutil
 import sys
-from typing import Optional
 
 from loguru import logger
 

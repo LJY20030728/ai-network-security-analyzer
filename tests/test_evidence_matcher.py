@@ -2,7 +2,6 @@
 """L4 证据比对匹配器单元测试：特征提取 / 匹配度 / 检索失败降级"""
 import os
 import sys
-import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 

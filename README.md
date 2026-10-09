@@ -1,14 +1,15 @@
 # AI Network Security Analyzer | AI 网络安全分析系统
 
-> **中文**：AI 辅助的网络取证分析系统 — PCAP 离线分析 + 四引擎集成检测 + LLM 威胁研判 + RAG 安全知识问答
+> **中文**：AI 辅助的网络取证分析系统 — 流式 PCAP 分析 + 三引擎 Stacking 融合检测 + LLM 威胁研判 + RAG 安全知识问答
 >
-> **English**: AI-Assisted Network Forensics System — PCAP Offline Analysis + Four-Engine Integrated Detection + LLM Threat Assessment + RAG Security Knowledge Q&A
+> **English**: AI-Assisted Network Forensics System — Streaming PCAP Analysis + Three-Engine Stacking Fusion Detection + LLM Threat Assessment + RAG Security Knowledge Q&A
 
 [![Python](https://img.shields.io/badge/Python-3.11-blue.svg)](https://www.python.org/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.110-green.svg)](https://fastapi.tiangolo.com/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.141-green.svg)](https://fastapi.tiangolo.com/)
 [![Gradio](https://img.shields.io/badge/Gradio-6.x-orange.svg)](https://www.gradio.app/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-148%20passed-brightgreen.svg)](#测试)
+[![Tests](https://img.shields.io/badge/tests-163%20passed-brightgreen.svg)](#测试)
+[![CI](https://github.com/LJY20030728/ai-network-security-analyzer/actions/workflows/ci.yml/badge.svg)](https://github.com/LJY20030728/ai-network-security-analyzer/actions/workflows/ci.yml)
 
 **[中文版](#目录) | [English Version](README_EN.md)**
 
@@ -36,18 +37,19 @@
 传统网络取证分析依赖安全分析师用 Wireshark 逐包查看 PCAP 文件，效率极低且高度依赖个人经验。规则引擎虽然能自动化检测，但对未知攻击和大流量变种漏报严重（实测规则引擎在 UNSW-NB15 上攻击召回仅 0.0001）。
 
 本项目是一个 **AI 辅助的离线网络取证分析工具**，实现了：
-- **级联 + Stacking 融合检测**：监督模型（HistGradientBoosting）为主引擎 + 规则引擎 + EWMA 时序基线 + 孤立森林；规则引擎高置信度(≥0.85)短路返回，剩余流量由 Stacking 元学习器（LogisticRegression，UNSW 训练 F1=0.9685）自动融合
-- **LLM 威胁研判**：大模型将技术告警翻译为人类可读的威胁分析，配套幻觉控制三件套
-- **RAG 安全知识问答**：本地向量库（BGE ONNX + ChromaDB），混合检索 + 重排序
+- **三引擎 Stacking 融合检测**：规则引擎（5 类阈值规则）+ EWMA 时序基线 + 孤立森林，三者结论交由 Stacking 元学习器（LogisticRegression）融合；置信度来源始终如实标注
+- **LLM 威胁研判**：大模型将技术告警翻译为人类可读的威胁分析，配套幻觉控制三件套（输出校验 / 交叉验证 / 人工复核标记）
+- **RAG 安全知识问答**：本地向量库（BGE ONNX + ChromaDB，1687 片段），混合检索（向量 + BM25 + RRF）+ 重排序
 - **全流程闭环**：检测 → 分析 → 取证报告（五要素）→ 历史知识库（跨样本关联/趋势分析）
+- **流式处理**：单遍流式解析，内存 O(活跃流+窗口)，可处理 GB 级 PCAP
 
 ### 为什么选择这个项目
 
 | 维度 | 说明 |
 |------|------|
-| **算法深度** | 76 维 CICFlowMeter 特征提取、四引擎 Stacking 融合、自适应阈值、STL 时序分解 |
+| **算法深度** | 三引擎 Stacking 融合（规则/时序基线/无监督）、自适应阈值、STL 时序分解、逐包流式特征聚合 |
 | **AI 工程** | 幻觉控制三件套、RAG 混合检索+重排序、本地向量推理 |
-| **工程质量** | 148 单元测试、FastAPI + Pydantic、SQLite WAL、DPAPI 加密、全局异常处理 |
+| **工程质量** | 163 单元测试全绿、FastAPI + Pydantic、SQLite WAL、DPAPI 加密、全局异常处理、CI（含 Windows/DPAPI 专项 job）、依赖锁定 |
 | **轻量可移植** | 平均内存峰值 23MB、本地推理不依赖外部服务、Windows .exe 打包 |
 | **可验证** | 所有指标都有评测脚本和结果文件，不是"拍脑袋" |
 
@@ -55,25 +57,42 @@
 
 ## 核心特性
 
-### 🔍 四引擎集成检测
+### 🔍 三引擎 Stacking 融合检测
+
+系统在同一遍流式解析中并行维护 3 个检测引擎的输入，各引擎结论交由 Stacking 元学习器融合为 PCAP 级判定。
 
 | 引擎 | 类型 | 运行时角色 | 说明 |
 |------|------|------|------|
-| **监督模型** | HistGradientBoosting | Stacking 主导（LR 系数 9.37） | 流级预测+PCAP 级聚合；UNSW-NB15（194 维）F1=0.9704、UNSW-CIC 重提取版（76 维）F1=0.9487 |
-| **规则引擎** | 阈值规则 | 级联第一级（≥0.85 短路） | 10+ 可配置规则（SYN 洪水/端口扫描/DNS 隧道/RST 风暴等） |
-| **时序基线** | EWMA + 中位数/MAD | Stacking 输入（LR 系数 -0.03） | 4 维度联合检测，多维度同时偏差触发 CRITICAL |
-| **孤立森林** | 无监督异常检测 | Stacking 输入（LR 系数 -0.37） | 低维表格数据适合，检测未知异常 |
+| **规则引擎** | 阈值规则 | 活跃 | 5 类规则（SYN 洪水 / 端口扫描 / DNS 隧道 / 大流量传输 / RST 风暴），阈值全部来自 `config/settings.py`，可 `.env` 覆盖 |
+| **时序基线** | EWMA + 中位数/MAD | 活跃 | 4 维度联合（窗口包数 / 字节数 / SYN 数 / 目的端口数），支持漂移检测与多维度联合告警 |
+| **孤立森林** | 无监督异常检测 | 活跃（**默认开启**） | 与基线同窗口输入，捕获维度间耦合异常。需先用正常流量学习基线后才生效 |
+
+**融合方式**：三引擎输出被映射为 10 维特征，交 `ThreeEngineStacking`（`src/analysis/stacking_fusion.py`）融合：
+
+1. **元学习器（默认路径）**：`models/stacking_meta_learner.joblib` —— LogisticRegression，引擎顺序 `[rule_based, baseline, isolation_forest]`。加载时会**校验引擎顺序**，不匹配则拒绝加载以免给出错误判定。
+2. **固定权重回退**：元学习器缺失或预测异常时，退化为规则 0.4 / 基线 0.3 / 孤立森林 0.3 的人工权重，并通过 `confidence_source="weighted_fallback"` 明确标注「这不是模型输出」。
 
 - **自适应阈值**：基于输入流量 P95 分位数动态调整，适应不同网络环境
 - **STL 高级模式**：零依赖轻量级时序分解（趋势+季节性+残差），捕捉周期性偏离
-- **策略模式架构**：可扩展，新增检测算法只需实现接口并注册
+- **可复现训练**：`python tools/train_stacking.py` 用仓库自带 golden 样本逐窗口提取三引擎特征并训练元学习器（不依赖任何外部数据集）
+
+### 🛡️ 置信度诚信标注
+
+报告与界面中的每一个置信度都标注来源，避免把固定权重回退伪装成模型输出：
+
+| `confidence_source` | 含义 | 展示文案 |
+|---|---|---|
+| `model` | 由三引擎 Stacking 元学习器 `predict_proba` 得出 | 元学习器输出（Stacking） |
+| `weighted_fallback` | 元学习器不可用时的固定权重（人工先验，**非模型输出**） | 固定权重回退（非模型输出） |
+
+同时 `stacking_fusion` 结果包含 `contributions`（三引擎各自的特征贡献占比，归一化为和为 1）与 `meta_learner_used`，便于判断该判定是否可信。
 
 ### 🤖 LLM 威胁研判 + 幻觉控制
 
 - **威胁分析**：大模型自动生成威胁分析报告，跨告警关联，攻击链还原
 - **幻觉控制三件套**：
   - `OutputValidator`：格式/长度/合理性/与证据一致性/幻觉特征词检测
-  - `ConfidenceCrossValidator`：LLM vs 规则 vs 监督模型交叉验证，矛盾检测
+  - `ConfidenceCrossValidator`：LLM vs 规则引擎 vs 三引擎融合交叉验证，矛盾检测
   - `ReviewMarker`：低置信度/矛盾结论自动标记"需人工复核"
 - **思考过程可视化**：显示 LLM 分析和思考过程
 - **多模型兼容**：智谱/DeepSeek/OpenAI 兼容接口
@@ -126,50 +145,70 @@
 
 ## 技术架构
 
-### 分层架构
+### 真实运行时结构
+
+> **诚实声明**：以下是代码的**实际**装配方式。早期版本的 README 曾展示一张
+> `路由层 → 服务层 → 核心层` 的分层图，但 `src/api/routes/*` 与 `src/services/*`
+> **从未被 `include_router` 挂载**（`git grep include_router` 全仓库 0 命中），
+> 因此那张图描述的是设计意图而非运行事实。现已按实际结构改写。
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        桌面窗口（pywebview）                       │
-│              Gradio UI + 自定义 HTML/CSS（蓝色二次元风格）         │
+│                     桌面窗口（pywebview）                          │
+│              Gradio UI（自定义 HTML/CSS，蓝色二次元风格）            │
 └──────────────────────────────┬──────────────────────────────────┘
-                               │ HTTP (localhost:8080)
+                               │ HTTP 127.0.0.1:8080（仅回环）
 ┌──────────────────────────────▼──────────────────────────────────┐
-│                      FastAPI 后端服务                              │
-│         Pydantic Settings │ 全局中间件 │ 统一异常处理              │
+│         src/ui/gradio_app.py —— 单一 app 装配点（FastAPI 实例）      │
+│  · api_token_middleware：/api/* 令牌鉴权 + 每请求审计（health 豁免）  │
+│  · 28 个 /api/* 路由（内置）· 全局异常处理 · Gradio 挂载于 /          │
+└──────────────────────────────┬──────────────────────────────────┘
+                               │ 进程内函数调用（UI 不走 HTTP）
+┌──────────────────────────────▼──────────────────────────────────┐
+│                        领域层（可独立单测）                          │
+│  src/capture/   流式包解析（PcapReader / PacketParser）             │
+│  src/analysis/  三引擎检测（规则/基线/孤立森林）+ Stacking 融合         │
+│  src/ai/        LLM 客户端 + RAG 混合检索 + 幻觉控制 + 证据比对        │
+│  src/report/    HTML 取证报告 + 摘要格式化（summary_formatter）       │
+├─────────────────────────────────────────────────────────────────┤
+│                    基础层（被依赖，不反向依赖 UI）                     │
+│  config/settings.py（单一配置源）│ src/core/exceptions.py            │
+│  src/storage/（SQLite WAL / 取证知识库）│ src/security/（DPAPI）      │
+│  src/utils/（路径 / 日志 / 错误处理 / 文件哈希与上传校验）              │
 └─────────────────────────────────────────────────────────────────┘
-                               │
-┌──────────────────────────────▼──────────────────────────────────┐
-│                        路由层（src/api/routes/）                   │
-│  analyze.py │ baseline.py │ knowledge.py │ chat.py │ system.py │
-└──────────────────────────────┬──────────────────────────────────┘
-                               │
-┌──────────────────────────────▼──────────────────────────────────┐
-│                        服务层（src/services/）                     │
-│  analysis_service │ baseline_service │ knowledge_service          │
-│  report_service │ history_service                                │
-└──────────────────────────────┬──────────────────────────────────┘
-                               │
-┌──────────────────────────────▼──────────────────────────────────┐
-│                        核心层（src/core/）                        │
-│  errors.py（30个错误码）│ exceptions.py（8大类异常）│ middleware.py │
-└──────────────────────────────┬──────────────────────────────────┘
-                               │
-┌──────────┬──────────┬──────────┬──────────┬─────────────────────┘
-▼          ▼          ▼          ▼          ▼
-解析层     检测层     AI 层     存储层     安全层
-Scapy     四引擎     LLM       SQLite    DPAPI
-流式解析   Stacking融合   +RAG      WAL       加密存储
 ```
 
-### 架构分层说明
+**关于 `src/api/routes/*` 与 `src/services/*`**：这两个目录保留了按领域拆分的
+实现（分析 / 基线 / 知识库 / 报告服务，以及 5 个 APIRouter），但目前未挂载。
+它们可以正常导入，且 `analysis_service` 已通过端到端验证；是否接入
+`gradio_app` 是待决策项，而非已知缺陷。接口契约见 `src/api/schemas.py`。
 
-| 层级 | 目录 | 职责 | 特点 |
-|------|------|------|------|
-| **核心层** | `src/core/` | 异常体系、错误码、中间件 | 基础设施，不依赖业务 |
-| **服务层** | `src/services/` | 业务逻辑实现 | 单例模式，可独立测试 |
-| **路由层** | `src/api/routes/` | API路由定义 | 参数校验，调用服务 |
-| **配置层** | `config/settings.py` | 集中配置管理 | Pydantic，按功能分组 |
+### 配置与依赖管理
+
+| 项 | 位置 | 说明 |
+|---|---|---|
+| 项目元数据 | `pyproject.toml` | 依赖声明、ruff / mypy / pytest 配置 |
+| 开发依赖 | `requirements.txt` | 下界+上界（防大版本破坏性变更） |
+| **可复现构建** | `requirements.lock` | 精确锁定版本，CI 与发布构建使用此文件 |
+| 单一版本源 | `config/settings.py` 的 `version` | FastAPI app、证据元信息（`rule_version`）均从此读取 |
+
+### 模块职责
+
+| 目录 | 职责 | 是否在运行路径 |
+|------|------|------|
+| `src/ui/gradio_app.py` | 单一 app 装配点：FastAPI 实例、28 个路由、鉴权中间件、Gradio UI | ✅ 是 |
+| `src/capture/` | PCAP 流式解析与单包字段提取 | ✅ 是 |
+| `src/analysis/` | 三引擎检测、Stacking 融合、时序基线 | ✅ 是 |
+| `src/ai/` | LLM 客户端、RAG 混合检索、幻觉控制、证据比对 | ✅ 是 |
+| `src/report/` | HTML 取证报告、摘要格式化（`summary_formatter.py`） | ✅ 是 |
+| `src/storage/` | SQLite（WAL）分析/对话/基线表、取证知识库 | ✅ 是 |
+| `src/security/` | DPAPI 加密存储（Windows-only，非 Windows 回退明文并告警） | ✅ 是 |
+| `src/utils/` | 路径、日志、错误处理、文件哈希与上传校验 | ✅ 是 |
+| `config/settings.py` | 集中配置（Pydantic Settings，可 `.env` 覆盖） | ✅ 是 |
+| `src/core/exceptions.py` | 业务异常体系 | ✅ 是 |
+| `src/api/routes/` | 按领域拆分的 APIRouter（12 端点） | ❌ **未挂载**（见上文诚实声明） |
+| `src/services/` | 领域服务层（analysis/baseline/knowledge/report/history） | ⚠️ 可导入且已端到端验证，但 UI 未调用 |
+| `src/analysis/stacking_fusion.py` | 三引擎 Stacking 融合器（元学习器 + 固定权重回退） | ✅ 是 |
 
 ## 快速开始
 
@@ -212,7 +251,7 @@ python desktop_app.py
 python -m uvicorn src.api.main:app --host 127.0.0.1 --port 8080
 ```
 
-> 核心检测（规则引擎 / 监督模型 / 时序基线 / 孤立森林）**无需任何 API Key 即可运行**；只有「AI 威胁研判」与「安全问答」需要大模型 Key。
+> 核心检测（规则引擎 / 时序基线 / 孤立森林 / Stacking 融合）**无需任何 API Key 即可运行**；只有「AI 威胁研判」与「安全问答」需要大模型 Key。
 
 ### 方式二：Windows 安装包（推荐普通用户）
 
@@ -254,7 +293,7 @@ docker compose up -d --build
 4. 点击「开始分析」
 5. 查看结果：
    - **主引擎判定**：攻击/正常 + 置信度 + 攻击流比例 + 攻击类别
-   - **告警列表**：四引擎检测到的所有告警，按严重度排序
+   - **告警列表**：各引擎检测到的所有告警，按严重度排序
    - **流量统计**：包数/流数/字节数/协议分布
    - **AI 威胁分析**：LLM 生成的威胁分析报告（含幻觉控制校验）
    - **取证报告**：点击下载五要素完整 HTML 报告
@@ -333,65 +372,34 @@ docker compose up -d --build
 
 > 本节所有数字均为真实运行产物，原始结果保存在 `data/eval_perf/`、`data/eval_rag/`、`data/eval_cicids/`，可通过对应脚本一键复现，非估算或模拟。
 
-### 监督模型检测效果
+### 三引擎融合与各引擎独立评测
 
-监督模型（HistGradientBoosting）作为**主检测器**，并在两个数据集上分别验证：
+> 3.3.0 移除了此前的监督模型（HistGradientBoosting，76 维 CIC 特征）及其配套的 UNSW
+> 数据集评测。原因：实测验证显示该模型在本项目样本上**有效增量为 0 且引入误报**，
+> 而其训练域（UNSW-NB15）与本项目的实际输入分布不一致，属于能力真实但迁移失效。
+> 为避免保留无法复现的指标，相关代码、模型文件、数据集与实验脚本已整体移除。
 
-| 数据集 | 流数量 | 精确率 | 召回率 | F1 | 准确率 |
-|--------|--------|--------|--------|-----|--------|
-| **UNSW-NB15**（同分布划分） | 175,341 | 0.9637 | **0.9772** | **0.9704** | 0.9594 |
-| **UNSW-CIC 重提取版**（76 维 CICFlowMeter，同分布分层，**非公开 CIC-IDS2017**） | 447,915 | 0.9351 | 0.9628 | **0.9487** | 0.9792 |
+当前三个引擎均可独立评测（脚本在 	ools/，结果写入 data/eval_perf/）：
 
-> **诚实说明（UNSW-CIC 重提取版）**：上表 0.9487 是二分类**聚合** F1；分攻击类别看少数类召回偏低（DoS 0.168、Analysis 0.260、Shellcode 0.241、Worms 0.306），攻击类 **macro recall 仅 0.4683**。该数据为 UNSW-NB15 底层流量经 CICFlowMeter 重提取（时间轴为行序×0.5s 合成、无真实时间戳），并非公开 CIC-IDS2017，仅用于验证 76 维 CICFlowMeter 特征体系。
+| 评测 | 脚本 | 产出 |
+|---|---|---|
+| 黄金样本回归（规则 + 基线命中 5/5、正常误报 0） | 	ools/verify_golden.py | 终端输出 + data/samples/golden/regression_result.json |
+| 孤立森林 vs EWMA 基线（FPR / TPR） | 	ools/eval_ml_engine.py | data/eval_perf/ml_engine.json |
+| 基线窗口/σ 敏感性网格 | 	ools/eval_window_sensitivity.py | data/eval_perf/window_sensitivity.json |
+| 基线引擎增量价值（纯规则 vs 规则+基线） | 	ools/verify_baseline_value.py | 终端输出 |
+| 三引擎 Stacking 元学习器训练 | 	ools/train_stacking.py | models/stacking_meta_learner.joblib + data/eval_perf/stacking_training.json |
 
-**对比无监督/规则引擎**（同一 UNSW-NB15 测试集）：
+**Stacking 元学习器训练结果**（	ools/train_stacking.py，可一键复跑）：
 
-| 检测器 | 攻击召回率 |
-|--------|-----------|
-| 规则引擎（大流量类） | 0.0001 |
-| 孤立森林 | 0.2107 |
-| 时序基线（σ=2 最优） | 0.5045 |
-| **监督模型** | **0.9772** |
+| 指标 | 数值 |
+|------|------|
+| 训练窗口样本 | 797（攻击 533 / 正常 264） |
+| 窗口划分 | 10s |
+| 5 折交叉验证 F1 | **0.7251 ± 0.0231** |
 
-监督模型相对规则引擎把大流量攻击召回从 0.0001 提升到 0.9772（约 **9700 倍**），这正是把它设为主检测器的原因。
-
-### 过拟合检测与模型稳定性
-
-| 指标 | 数值 | 说明 |
-|------|------|------|
-| 训练集 F1 | 0.9791 | — |
-| 测试集 F1 | 0.9704 | — |
-| **F1 差距** | **0.0088** | ✅ 过拟合风险低（< 0.03） |
-| **5 折交叉验证 F1** | **0.9394 ± 0.0429** | 整体稳定（含一折 0.86，反映少数批次波动） |
-| L2 正则化 / 早停 | l2=1.0 / early_stopping=True | 双重防过拟合 |
-
-**结论**：训练/测试 F1 差距仅 0.0088，同分布下过拟合风险低。但需注意——真正的跨数据集迁移会因特征体系不对齐而显著下降（见下文「泛化能力评估」，UNSW→NSL 仅 0.192），因此系统在新环境必须靠基线学习 / 本地重训，而不能直接套用现成模型。
-
-### 时间外推验证（Out-of-Time，最贴近真实部署）
-
-分层随机划分衡量的是"同一时间窗内"的泛化，但真实部署中模型总是被用在**未来**采集的流量上。为检验时间外推能力，使用 UNSW-NB15 **官方两个不同时间窗**的划分：整个官方 training-set（175,341 条）训练、官方 testing-set（82,332 条，另一时间窗）独立测试（`tools/eval_unsw_oot.py`）：
-
-![三层验证口径对比](docs/validation_split_comparison.png)
-
-| 验证口径 | F1 | 说明 |
-|----------|-----|------|
-| 同分布（分层随机） | 0.9704 | 同一时间窗，性能上界 |
-| **时间外推 OOT** | **0.8924** | 另一时间窗，P 0.8187 / R 0.9808 / Acc 0.8698 |
-| 跨数据集 UNSW→NSL | 0.1924 | 换特征体系 / 数据集，泛化下界 |
-
-- 训练自身 F1=0.9783，时间外推后 F1 衰减 **0.0859**、仍保持 0.89——说明模型并非只记住同分布样本，对未来时间窗有合理外推能力。
-- OOT 下 **Normal 类召回 0.734（误报偏多，P 降到 0.82）是真实短板**：模型倾向于把新时间窗里未见模式的正常流判为攻击。这指向"部署时应结合基线学习 + 本地少量校准"，而非零样本直接上线。
-- 测试期出现 5 个训练时未见的 `state` 取值，按全 0 处理（类别值未知的保守兜底）。
-
-### UNSW-NB15 每类别召回率
-
-| 攻击类型 | 召回率 | | 攻击类型 | 召回率 |
-|----------|--------|-|----------|--------|
-| Backdoor | 1.0000 | | Exploits | 0.9953 |
-| Worms | 1.0000 | | DoS | 0.9988 |
-| Generic | 1.0000 | | Shellcode | 0.9911 |
-| Reconnaissance | 0.9991 | | Analysis | 0.9171 |
-| Normal | 0.9215 | | Fuzzers | 0.8715 |
+> **口径局限（必读）**：训练数据来自 10 个**合成** golden 样本，标签由样本级下推到
+> 窗口级（弱标注，存在噪声），因此元学习器权重**不应被解读为生产环境最优融合策略**。
+> 真实部署前请用自有标注流量重新运行 	ools/train_stacking.py。
 
 ### RAG 检索效果（双口径 Recall@k / MRR）
 
@@ -411,18 +419,52 @@ docker compose up -d --build
 
 ### 流式 vs 全量：内存压测（30 万包 / 28 MB PCAP）
 
+三引擎（规则 / 时序基线 / 孤立森林）全部在单遍流式解析中完成，不持有全量包列表。
+
 | 模式 | 耗时 | 内存峰值 | 告警数 |
 |------|------|----------|--------|
-| 全量加载 | 246.7s | **1112.3 MB** | 15 |
-| 流式解析 | 244.0s | **6.8 MB** | 15 |
+| 全量加载（`rdpcap` + `analyze_packets`） | 380.8s | **1207.7 MB** | 15 |
+| **流式解析（`PcapReader` + `analyze_stream`）** | 325.3s | **8.8 MB** | 15 |
 
-流式处理内存峰值降低 **162.8 倍**，且告警结果完全一致（`data/eval_perf/perf_baseline.json`）。这是系统能在普通笔记本上分析 GB 级 PCAP 的关键。
+- 流式内存峰值降低约 **137 倍**（1207.7 MB → 8.8 MB），**告警结果完全一致（15/15）**
+- 这是系统能在一台普通笔记本上分析 GB 级 PCAP 的关键
+- ⚠️ **耗时数字请谨慎解读**：同一份文件在本机不同时间测得 244.0s 与 325.3s（相差 33%），
+  绝对耗时受机器负载影响很大；**跨版本比较内存峰值与告警一致性是可靠的**
+- 原始数据见 `data/eval_perf/perf_baseline.json`
+
+### 改动无回归验证（多口径）
+
+用三组独立口径验证三引擎改动的告警结果未发生非预期变化：
+
+| 验证 | 命令 | 结果 |
+|------|------|------|
+| 黄金样本回归 | `python tools/verify_golden.py` | 攻击命中 **5/5**；normal 误报 **0** 条；exit 0 |
+| 压测告警一致性 | `python tools/bench_stream.py` | 全量 15 条 / 流式 15 条 → **PASS** |
+| 引擎独立性 | `python tools/eval_ml_engine.py` | 孤立森林 FPR=0.04 / TPR=0.857；EWMA 基线 FPR=0 / TPR=0.286 |
+
+### 改动无回归验证（多口径）
+
+用三组独立口径验证三引擎改动的**告警结果未发生非预期变化**：
+
+| 验证 | 命令 | 结果 |
+|------|------|------|
+| 黄金样本回归 | `python tools/verify_golden.py` | 攻击命中 **5/5**；normal 误报 **0** 条；exit 0 |
+| 压测告警一致性 | `python tools/bench_stream.py` | 全量 15 条 / 流式 15 条 → **PASS** |
+| 同文件交替对照 | 见下文说明 | 三份样本告警数**逐一相同**（49/49、0/0、0/0） |
+
+同文件交替对照的实测增量（预热后，排除 sklearn 首次导入的一次性开销）：
+
+| 样本 | window=0 | window=5000 | 内存增量 | 告警 |
+|------|----------|-------------|----------|------|
+| baseline_demo_attack（11.7k 包，高基数） | 8.77 MB | 25.60 MB | +16.83 MB | 49 → 49 |
+| baseline_demo_normal（2.7k 包） | 2.08 MB | 11.87 MB | +9.79 MB | 0 → 0 |
+| normal（1.5k 包） | 0.42 MB | 2.39 MB | +1.97 MB | 0 → 0 |
 
 ### 测试覆盖
 
 | 指标 | 数值 |
 |------|------|
-| 测试结果 | **148 passed / 19 skipped / 0 failed** |
+| 测试结果 | **163 passed / 0 skipped / 0 failed** |
 | 测试文件数 | 17 个 |
 | 覆盖模块 | 算法检测 / API 路由 / 存储 / 安全 / 服务层 / 工具 |
 
@@ -431,45 +473,6 @@ docker compose up -d --build
 ## 深度评测与优化实验
 
 > 每个实验都对应根目录一个可复现脚本，图表与 CSV 数据保存在 `docs/`。
-
-### 1. 特征重要性分析（Permutation Importance）
-
-不拍脑袋选特征，而是在**真实未见过的测试集**（分层抽取 4000 条代表性样本）上做置换重要性（`n_repeats=3`，以 F1 为评分），逐一验证每个特征被打乱后模型性能的真实下降幅度：
-
-![特征重要性](docs/feature_importance.png)
-
-**Top 5 最重要特征**（置换重要性均值）：
-
-| 排名 | 特征 | 重要性 | 含义 |
-|------|------|--------|------|
-| 1 | `sttl` | **0.2229** | 源到目的 TTL（攻击流 TTL 分布显著异常，是决定性特征，重要性远超其他） |
-| 2 | `ct_state_ttl` | 0.0089 | 流状态 TTL 关联计数 |
-| 3 | `sbytes` | 0.0072 | 源到目的字节数 |
-| 4 | `ct_srv_src` | 0.0061 | 源地址同服务连接计数 |
-| 5 | `ct_srv_dst` | 0.0057 | 目的地址同服务连接计数 |
-
-另有按特征类别聚合的重要性图 `docs/feature_category_importance.png`。
-
----
-
-### 2. 泛化能力与跨域迁移评估（含"失败"的真实结果）
-
-不回避模型短板。选取 UNSW 与 NSL-KDD **语义可对应的 5 个共有特征**（时长 / 源字节 / 目的字节 / 连接计数 / 同服务计数），实测四种情形：
-
-![泛化能力评估](docs/generalization_evaluation.png)
-
-| 情形 | F1 | 说明 |
-|------|-----|------|
-| A. UNSW 同分布 | 0.9635 | 训练/测试同分布，性能上界 |
-| B. NSL 独立测试集 | 0.7967 | NSL 官方独立测试，换数据集后明显下降 |
-| C. UNSW → NSL 跨域迁移 | **0.1924** | 直接把 UNSW 模型用到 NSL，几乎失效 |
-| D. NSL 完整 31 特征 | 0.7785 | 仅用 NSL 自身特征训练（对照） |
-
-**域偏移鸿沟 Δ = 0.604**。这个"难看"的结果恰恰是系统设计的核心依据：**一个模型无法跨网络环境直接使用**——不同环境的协议构成、服务分布、流量基线差异巨大。因此产品没有押注"一个通用模型走天下"，而是提供「基线管理」让系统学习每个环境自身的正常画像、并支持本地重训；AI（RAG + LLM）负责跨环境通用的研判与解释。这也说明为什么基线学习是必备功能而非锦上添花。
-
-> 关于监督模型选型：HistGradientBoosting 与 XGBoost / LightGBm 性能差距 < 0.01，但它是 sklearn 原生、零额外依赖、PyInstaller 打包最稳定，因此工程上最优，不引入两个重依赖。
-
----
 
 ### 3. 性能压测（10 个样本，真实计时 / 内存）
 
@@ -513,34 +516,13 @@ docker compose up -d --build
 
 ---
 
-### 5. 检测融合架构（级联 + Stacking）
-
-当前运行的检测融合架构：规则引擎第一级快速过滤，剩余流量交 Stacking 元学习器判定。在无泄漏 held-out 上（开发集 5 折 OOF 生成基引擎预测、训练融合器，独立 20% 评估）实测：
-
-![融合架构对比](docs/fusion_architecture_comparison.png)
-
-| 方案 | held-out F1 |
-|------|------------|
-| 仅监督模型 | 0.9691 |
-| 级联 + Stacking（当前运行） | **0.9691** |
-| Stacking 元学习器 | 0.9691 |
-| GridSearch 权重 | 0.9692 |
-| 人工指定权重 | 0.9577 |
-
-**运行时路径**：
-1. **规则引擎第一级**：SYN 洪水 / 端口扫描 / DNS 隧道等规则，置信度 ≥0.85 直接判定（级联短路，省 75% 计算）
-2. **Stacking 元学习器**：`models/meta_learner.joblib`（LogisticRegression，UNSW OOF 训练 F1=0.9685），输入四引擎置信度，输出最终攻击概率（阈值 0.5）
-3. **LR 学到的系数**：监督模型 9.37（主导）、规则 0.009、基线 -0.03、孤立森林 -0.37——数据自动告诉系统：监督模型已经很强，其他引擎在冷启动 / 未知攻击场景补充信号
-
----
-
 ### 6. 与现有工具的差异化对比
 
 | 维度 | Wireshark | Suricata/Snort | **本系统** |
 |------|-----------|----------------|-----------|
 | 分析方式 | 人工逐包查看 | 规则/签名匹配 | **多引擎 + AI 自动研判** |
 | 目标用户 | 网络专家 | 安全工程师 | 安全运维 / 分析师 |
-| 未知/加密流量 | 人工发现 | 规则外漏报 | 行为基线 + 无监督 + 监督兜底 |
+| 未知/加密流量 | 人工发现 | 规则外漏报 | 行为基线 + 无监督异常检测 |
 | 威胁解读 | 无 | 原始告警 | LLM 翻译为人类可读报告 + 处置建议 |
 | 知识问答 | 无 | 无 | RAG 安全知识库（1687 片段） |
 | 输出物 | 数据包列表 | 告警日志 | 取证五要素 HTML 报告 |
@@ -557,36 +539,23 @@ ai-network-security-analyzer/
 ├── config/                    # 配置层（v3.0.0 重构）
 │   └── settings.py           # Pydantic Settings，按功能分组
 ├── src/
-│   ├── core/                  # 核心层（v3.0.0 新增）
-│   │   ├── errors.py          # 30个标准化错误码
-│   │   ├── exceptions.py      # 8大类业务异常（AppError基类）
-│   │   └── middleware.py      # 请求日志+全局异常处理中间件
-│   ├── services/              # 服务层（v3.0.0 新增）
-│   │   ├── analysis_service.py # PCAP分析服务
-│   │   ├── baseline_service.py # 基线管理服务
-│   │   ├── knowledge_service.py # 知识库服务
-│   │   ├── report_service.py   # 报告生成服务
-│   │   └── history_service.py # 历史记录服务
-│   ├── api/                   # API 层
-│   │   ├── main.py            # FastAPI 主应用（v3.0.0 精简版，~100行）
-│   │   ├── routes/            # 路由层（v3.0.0 新增）
-│   │   │   ├── analyze.py      # PCAP分析路由
-│   │   │   ├── baseline.py    # 基线管理路由
-│   │   │   ├── knowledge.py   # 知识库路由
-│   │   │   ├── chat.py        # 安全问答路由
-│   │   │   └── system.py      # 系统路由
-│   │   ├── schemas.py         # Pydantic 模型（20+）
+│   ├── core/                  # 核心层
+│   │   ├── errors.py          # 标准化错误码（ErrorCode 枚举）
+│   │   └── exceptions.py      # 业务异常体系（AppError 基类）
+│   ├── services/              # 服务层（仅保留有测试覆盖的历史记录服务）
+│   │   └── history_service.py # 历史记录服务（薄封装，供测试与外部复用）
+│   ├── api/                   # API 层（app 装配在 src/ui/gradio_app.py）
+│   │   ├── main.py            # 规范入口：re-export 唯一 app 实例
+│   │   ├── schemas.py         # Pydantic 响应模型
 │   │   ├── history_store.py   # 历史记录存储（SQLite）
-│   │   ├── task_queue.py      # 任务队列
+│   │   ├── task_queue.py      # 异步任务队列
 │   │   └── audit.py           # 审计日志
-│   ├── analysis/              # 分析引擎
-│   │   ├── cic_features.py    # 76 维 CICFlowMeter 特征提取
-│   │   ├── supervised_detector.py  # 监督检测器（HistGradientBoosting）
-│   │   ├── flow_extractor.py  # 流提取 + 四引擎集成
-│   │   ├── baseline.py        # EWMA 时序基线 + STL 高级检测
-│   │   ├── stl_decomposer.py # 零依赖轻量级 STL 时序分解
-│   │   ├── isolation_detector.py  # 孤立森林无监督检测
-│   │   └── detection_engine.py    # 策略模式 + 工厂模式检测引擎
+│   ├── analysis/              # 分析引擎（三引擎 + Stacking 融合）
+│   │   ├── flow_extractor.py  # 流提取 + 三引擎集成 + Stacking 融合
+│   │   ├── stacking_fusion.py # 三引擎 Stacking 融合器（含引擎顺序校验与固定权重回退）
+│   │   ├── baseline.py        # EWMA 时序基线 + 多维度联合检测
+│   │   ├── stl_decomposer.py  # 零依赖轻量级 STL 时序分解
+│   │   └── isolation_detector.py  # 孤立森林无监督检测（默认启用）
 │   ├── ai/                    # AI 模块
 │   │   ├── llm_client.py      # 大模型客户端
 │   │   ├── threat_analyzer.py # 威胁分析器
@@ -598,14 +567,15 @@ ai-network-security-analyzer/
 │   │   ├── packet_parser.py   # 包解析
 │   │   └── pcap_parser.py     # PCAP 文件解析
 │   ├── report/                # 报告生成
-│   │   └── html_report.py     # HTML 取证报告（五要素）
+│   │   ├── html_report.py     # HTML 取证报告（五要素）
+│   │   └── summary_formatter.py  # 摘要文本格式化（纯函数，可单测）
 │   ├── storage/               # 存储层
 │   │   ├── database.py        # SQLite 数据库（WAL，三表+索引）
 │   │   └── forensic_kb.py     # 取证知识库（关联/趋势/缓存）
 │   ├── security/              # 安全层
 │   │   └── secure_store.py    # DPAPI 加密存储
 │   ├── ui/                    # UI 层
-│   │   ├── gradio_app.py      # Gradio UI（v3.0.0 骨架）
+│   │   ├── gradio_app.py      # Gradio UI + FastAPI app 装配（28 个 /api 路由）
 │   │   └── custom_style.css   # 蓝色二次元风格自定义 CSS
 │   └── utils/                 # 工具函数
 │       ├── paths.py           # 路径管理
@@ -613,14 +583,12 @@ ai-network-security-analyzer/
 │       ├── error_handler.py   # 错误处理三层
 │       └── log_observer.py    # 日志可观测性
 ├── models/                    # 训练好的模型
-│   ├── supervised_detector.joblib      # UNSW-CIC 重提取版监督模型（76 维，F1=0.9487）
-│   └── unsw_supervised_detector.joblib # UNSW 专用模型（Recall=0.9772）
+│   └── stacking_meta_learner.joblib    # 三引擎 Stacking 元学习器
 ├── data/                      # 数据目录
 │   ├── samples/golden/        # 黄金测试样本（10 个）
 │   ├── baselines/             # 基线文件（JSON 兼容备份）
 │   ├── db/                    # SQLite 数据库
 │   ├── chroma_db/             # ChromaDB 向量库
-│   ├── eval_cicids/csv/       # 训练数据（CIC/UNSW）
 │   └── eval_perf/             # 评测结果
 ├── tests/                     # 测试（148 个用例 / 17 个文件）
 │   ├── test_services/         # 服务层单元测试（v3.0.0 新增）
@@ -628,8 +596,6 @@ ai-network-security-analyzer/
 │   ├── test_new_features.py   # 新功能综合测试（34 个）
 │   └── ...
 ├── tools/                     # 可复现实验脚本
-│   ├── train_unsw_supervised.py  # UNSW 监督模型训练（分层随机）
-│   ├── eval_supervised_baseline.py  # CIC 监督基线
 │   ├── generalization_eval.py # 泛化 / 跨域迁移评估
 │   ├── fusion_comparison.py   # 融合架构对比
 │   ├── benchmark.py           # 性能基准（time + tracemalloc）
@@ -710,14 +676,11 @@ python tools/eval_rag_recall.py
 # 结果保存在 data/eval_perf/rag_recall_result.json
 ```
 
-### 训练监督模型
+### 训练三引擎 Stacking 元学习器
 
 ```bash
-# CIC 模型
-python tools/eval_supervised_baseline.py
-
-# UNSW 专用模型
-python tools/train_unsw_supervised.py
+# 用 golden 样本逐窗口提取三引擎特征并训练元学习器
+python tools/train_stacking.py
 ```
 
 ### 代码规范
@@ -772,7 +735,7 @@ BGE ONNX 模型加载后约占用 100-200MB，但可以按需加载。普通电�
 
 **A**：定位不同，是互补关系：
 - **vs Wireshark**：Wireshark 是协议分析器，需要人工逐包查看；本项目是自动化分析工具，上传 PCAP 后自动给出威胁判定和取证报告。
-- **vs Suricata**：Suricata 是实时 IDS/IPS，基于规则，需要持续运行；本项目是离线取证分析工具，专注事后分析，用监督模型检测未知攻击。
+- **vs Suricata**：Suricata 是实时 IDS/IPS，基于规则，需要持续运行；本项目是离线取证分析工具，专注事后分析，用行为基线 + 无监督异常检测覆盖未知攻击。
 
 实际使用场景：用 Suricata 实时监控发现告警，然后用本项目对相关 PCAP 做深度取证分析。
 
@@ -805,6 +768,86 @@ pyinstaller --noconfirm --windowed --name "AI-Network-Security-Analyzer" ^
 
 详细更新记录请查看 [CHANGELOG.md](CHANGELOG.md)。
 
+### [3.3.0] - 2026-10-09
+
+**架构收敛：移除监督模型，改为三引擎 Stacking 融合 + 清除死代码**
+
+**移除（经实测验证后）**
+- 整体移除监督模型引擎：`src/analysis/supervised_detector.py`（370 行）、
+  `src/analysis/cic_features.py`（351 行，76 维 CIC 特征）、两个模型文件
+  （`supervised_detector.joblib` / `unsw_supervised_detector.joblib`）
+- 移除其配套的 UNSW-NB15 数据集（47 MB CSV）、4 个评测/训练脚本、
+  相关结果 JSON 与 `docs/监督模型增量价值验证.md`
+- 移除依赖监督模型的 `feature_importance.py`、`generalization_eval.py`、
+  `tune_thresholds.py`、`fusion_comparison.py`
+- **移除理由**：实测（`model_only` vs `aggregate` 信号分解）显示该模型在本项目样本上
+  **有效增量为 0、且对一个正常样本产生误报**；根因是其训练域（UNSW-NB15）与本项目输入
+  分布不一致（合成样本以单包流为主，时延类特征退化为 0，落在训练分布之外）。
+  模型在其训练域内 F1=0.9487 是真实的，属"能力真实但迁移失效"。
+  为避免保留不可复现的指标，相关代码与数据整体移除。
+
+**新增**
+- `src/analysis/stacking_fusion.py`：三引擎 Stacking 融合器
+  （规则 + 时序基线 + 孤立森林 → 10 维特征 → LogisticRegression）
+- 融合接入运行路径：`analyze_stream()` 与 `analyze_packets()` 均输出
+  `stacking_fusion` 结果（此前 Stacking 仅存在于无人调用的 `detection_engine.py`）
+- **引擎顺序校验**：加载元学习器时校验 `feature_order`，不匹配即拒绝加载，
+  防止用错误的引擎顺序给出判定
+- `tools/train_stacking.py`：用 golden 样本逐窗口提取三引擎特征训练元学习器，
+  完全自给自足、不依赖外部数据集。CV F1 = 0.7251 ± 0.0231（797 窗口，弱标注）
+- 置信度来源标注改为 `model`（元学习器输出）/ `weighted_fallback`（固定权重回退，非模型输出）
+
+**默认值变更**
+- `ML_ENGINE_ENABLED` 由 `false` 改为 **`true`**（孤立森林默认启用，需先学习基线才生效）
+- 新增 `STACKING_FUSION_ENABLED=true`
+- 移除 `SUPERVISED_ENGINE_ENABLED` / `SUPERVISED_WINDOW_PACKETS`
+
+**清除死代码**
+- 删除 `src/analysis/detection_engine.py`（策略模式实现，含 2 处引用不存在 API 的坏代码，
+  且从未被运行路径调用）
+- 删除 `src/api/routes/*`（5 个 APIRouter，从未被 `include_router` 挂载）
+- 删除未被调用的 `src/services/{analysis,baseline,knowledge,report}_service.py`
+- 修复 `hallucination_control.py` 中一处**永远为空的死分支**（原为 `pass`），
+  改为真实的一致性检测：规则引擎零告警但 LLM 以确定性措辞断言具体攻击类型时告警
+- 修复 Stacking 引擎贡献度展示：原先直接取特征均值（求和 >100%，如 `rule_based:170%`），
+  现归一化为占比（和为 1）
+
+**数据库迁移**
+- `analysis_history` 表列 `supervised_verdict` / `supervised_confidence`
+  自动迁移为 `stacking_verdict` / `stacking_confidence`（幂等，保留历史数据）
+
+**测试**：163 passed / 0 skipped / 0 failed
+
+### [3.2.0] - 2026-10-08
+
+**工程化收口：让文档与代码一致 + 补齐缺失能力**
+
+**修复（缺陷）**：
+- **监督模型接入流式主路径**：此前 `analyze_stream()` 从未调用监督模型，导致 UI 上"主引擎判定"永远空白、幻觉控制的第三方交叉验证永不生效。现以有界窗口（`supervised_window_packets`，默认 5000）方式接入，并通过 `scope` 字段如实标注覆盖范围
+- **消除合成置信度**：`supervised_detector` 原先把聚合启发式的固定先验 `0.85` 直接写入模型置信度字段，属于"把规则值冒充模型输出"。现拆分为 `model_confidence` / `aggregate_confidence` / `confidence`，并新增 `confidence_source` 标注来源（`model` / `aggregate_heuristic` / `model+aggregate`）
+- **补齐 `HistoryStore.update_analysis`**：该方法此前缺失，但"报告丢失后重新分析"流程会调用它，异常被 `except` 静默吞掉 → 重新分析结果从未落库。已在 `Database` 实现（列白名单 + 参数化占位符）并由 `HistoryStore` 暴露
+- **修复 5 处指向不存在模块的导入**：`src.utils.time_utils` 在全项目 5 处被引用但该文件不存在（`ModuleNotFoundError`），这是 `src/api/routes/*` 与 `services/*` 从未真正可用的硬原因；另修复 `analysis_service` 把 `TrafficAnalyzer` 从错误的 `detection_engine` 导入
+- **修复服务层字段名不匹配**：`HistoryService.get_table_rows` / `get_dropdown_choices` 读取的键（`timestamp`/`filename`/`alert_count`…）与数据库实际列名（`ts`/`file`/`alerts`…）不一致，导致历史表格与下拉框单元格全部为空
+- **修复孤立森林并行度导致 6 个单测失败**：`n_jobs=-1` 在多进程受限环境直接 `PermissionError`，且该模块数据量极小（4 维、百级窗口）并行无收益。改为默认串行 `ml_n_jobs=1`
+- **清除 8 个文件的 UTF-8 BOM**（U+FEFF 会让部分工具链解析失败）
+
+**工程化**：
+- 新增 `pyproject.toml`：项目元数据、依赖声明、ruff / mypy / pytest 配置
+- 新增 `requirements.lock`（精确锁定 30 个直接依赖版本），CI 与发布构建使用锁定文件，保证可复现
+- `requirements.txt` 全部加上界约束，防大版本破坏性变更
+- CI 新增 **Windows 测试 job**：DPAPI 加密是 Windows-only，此前只在 Linux 跑会漏掉真实缺陷；同时新增 `pull_request` 触发
+- 清理 54 处未使用导入、1 处可变默认参数；`F821 未定义名 = 0`
+
+**重构**：
+- 抽出 `src/report/summary_formatter.py`：原先内联在 Gradio 回调闭包中的展示逻辑（流量概览 / 主引擎判定 / 告警汇总 / 幻觉控制块）现为纯函数，可直接单测
+- 抽出 `src/utils/helpers.py` 的 `calculate_file_sha256` 与 `validate_upload_file`，消除三处重复的哈希实现
+
+**版本号统一**：`config/settings.py` 为单一版本源，FastAPI `app.version` 与证据元信息 `rule_version` 均从此读取（此前分别是 3.0.0 / 2.0.0 / 3.1.1 三个值）
+
+**测试**：`136 passed` → **`152 passed / 0 skipped / 0 failed`**（新增 16 个 formatter 测试，重写并启用此前被 `@pytest.mark.skip` 的服务层测试）
+
+**文档**：README 按代码实际行为改写——移除从未生效的分层架构图叙事、修正"级联短路省 75% 计算"等与代码不符的描述、明确区分"离线评测结论"与"当前运行时行为"
+
 ### [3.1.1] - 2026-09-21
 
 **科学验证口径补强 + 知识库可复现修复**：
@@ -833,7 +876,7 @@ pyinstaller --noconfirm --windowed --name "AI-Network-Security-Analyzer" ^
 - 删除重复图标、冗余 zip、运行时残留（dist/build/installer_output，约 1.1GB）
 - 求职材料移出公开仓库、本地单独备份
 
-测试：**148 passed / 19 skipped / 0 failed**
+测试：**148 passed / 19 skipped / 0 failed**（v3.1.0 时点数据，历史记录不予回溯修改）
 
 ### [2.1.0] - 2026-09-14
 
@@ -856,7 +899,7 @@ pyinstaller --noconfirm --windowed --name "AI-Network-Security-Analyzer" ^
 
 ### [2.0.0] - 2026-09-11
 
-- P0-P3完整重构：四引擎集成检测 + LLM幻觉控制 + RAG混合检索 + 取证知识库 + DPAPI加密
+- P0-P3完整重构：三引擎 Stacking 融合检测 + LLM幻觉控制 + RAG混合检索 + 取证知识库 + DPAPI加密
 - 141个单元测试全绿，平均分析耗时5.9s/文件，内存峰值23MB
 
 ---
@@ -895,8 +938,6 @@ SOFTWARE.
 - [scikit-learn](https://scikit-learn.org/) - 机器学习库
 - [ChromaDB](https://www.trychroma.com/) - 本地向量数据库
 - [BAAI/bge](https://huggingface.co/BAAI) - 中文优化的嵌入模型
-- [UNSW-NB15](https://research.unsw.edu.au/projects/unsw-nb15-dataset) - 网络安全数据集
-- [CICFlowMeter](https://www.unb.ca/cic/research/tools/flowmeter.html) - 网络流特征提取参考
 
 ---
 

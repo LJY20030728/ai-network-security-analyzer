@@ -1,0 +1,84 @@
+{
+  "architecture": "three_engine_stacking",
+  "engine_order": [
+    "rule_based",
+    "baseline",
+    "isolation_forest"
+  ],
+  "window_sec": 10,
+  "training_samples": 797,
+  "n_attack_windows": 533,
+  "n_normal_windows": 264,
+  "cv_f1_mean": 0.7250522283976248,
+  "cv_f1_std": 0.023138964574777262,
+  "feature_importance": {
+    "rule_has_alert": 2.3789328781080012,
+    "rule_alert_count_norm": 0.004880221233123627,
+    "rule_max_severity": -0.578416342276186,
+    "rule_triggered_rules": 2.688919864461842,
+    "baseline_deviation_count": -0.8272241718923008,
+    "baseline_multi_dim_triggered": 1.349848098542499,
+    "baseline_drifted": -0.08969974073490088,
+    "isolation_available": -0.08969974073490088,
+    "isolation_anomaly_count": 0.0,
+    "isolation_anomaly_ratio": 0.0
+  },
+  "per_sample": {
+    "baseline_demo_attack": {
+      "label": 1,
+      "windows": 60,
+      "packets": 11673
+    },
+    "baseline_demo_normal": {
+      "label": 0,
+      "windows": 45,
+      "packets": 2729
+    },
+    "burst": {
+      "label": 1,
+      "windows": 235,
+      "packets": 2080
+    },
+    "dnstunnel": {
+      "label": 1,
+      "windows": 2,
+      "packets": 10
+    },
+    "largeflow": {
+      "label": 1,
+      "windows": 1,
+      "packets": 8239
+    },
+    "lightscan": {
+      "label": 1,
+      "windows": 217,
+      "packets": 1495
+    },
+    "normal": {
+      "label": 0,
+      "windows": 219,
+      "packets": 1480
+    },
+    "portscan": {
+      "label": 1,
+      "windows": 6,
+      "packets": 50
+    },
+    "rststorm": {
+      "label": 1,
+      "windows": 6,
+      "packets": 80
+    },
+    "synflood": {
+      "label": 1,
+      "windows": 6,
+      "packets": 200
+    }
+  },
+  "limitations": [
+    "训练数据来自 10 个合成 golden 样本，非真实生产流量",
+    "样本级标签下推到窗口级属于弱标注，存在标签噪声",
+    "元学习器权重不应被解读为生产环境最优融合策略",
+    "真实部署前请用自有标注流量重新运行本脚本"
+  ]
+}

@@ -142,8 +142,8 @@ class AnalyzeResponse(BaseModel):
     total_bytes: Optional[int] = None
     alerts: int
     severity_summary: Optional[Dict[str, int]] = None
-    supervised_verdict: Optional[bool] = None
-    supervised_confidence: Optional[float] = None
+    stacking_verdict: Optional[bool] = None
+    stacking_confidence: Optional[float] = None
     ensemble_verdict: Optional[bool] = None
     ai_analysis: Optional[str] = None
     html_report_path: Optional[str] = None

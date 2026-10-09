@@ -80,6 +80,10 @@ class AnalysisSettings(BaseSettings):
     flow_timeout: int = 60  # 网络流超时时间（秒）
     anomaly_threshold: float = 0.7  # 异常检测阈值
 
+    # 三引擎 Stacking 融合（规则 + 基线 + 孤立森林）
+    # 默认开启：三引擎全部无外部模型依赖，开箱即用
+    stacking_fusion_enabled: bool = True
+
     # 规则引擎阈值
     syn_flood_min_count: int = 80
     syn_flood_high_count: int = 500
@@ -101,10 +105,11 @@ class AnalysisSettings(BaseSettings):
     baseline_drift_alpha: float = 0.05
 
     # ML 检测引擎（孤立森林）
-    ml_engine_enabled: bool = False
+    ml_engine_enabled: bool = True
     ml_contamination: float = 0.10
     ml_random_state: int = 42
     ml_max_samples: int = 256
+    ml_n_jobs: int = 1
 
 
 class StorageSettings(BaseSettings):
@@ -129,7 +134,7 @@ class ProjectSettings(BaseSettings):
     project_name: str = "AI Network Security Analyzer"
     debug: bool = True
     log_level: str = "INFO"
-    version: str = "3.1.1"
+    version: str = "3.3.0"
 
 
 class Settings(BaseSettings):
@@ -151,7 +156,7 @@ class Settings(BaseSettings):
     project_name: str = "AI Network Security Analyzer"
     debug: bool = True
     log_level: str = "INFO"
-    version: str = "3.1.1"
+    version: str = "3.3.0"
 
     # ===== 大模型配置（平铺，向后兼容）=====
     llm_api_key: str = ""
@@ -177,6 +182,12 @@ class Settings(BaseSettings):
     flow_timeout: int = 60
     anomaly_threshold: float = 0.7
 
+    # ===== 三引擎 Stacking 融合（平铺，向后兼容）=====
+    # 引擎：规则（阈值）+ 时序基线（EWMA）+ 孤立森林（无监督）
+    # 三者结论由 Stacking 元学习器融合（models/stacking_meta_learner.joblib）。
+    # 元学习器不可用时自动回退固定权重，并通过 confidence_source 如实标注来源。
+    stacking_fusion_enabled: bool = True
+
     # ===== 规则引擎阈值（平铺，向后兼容）=====
     syn_flood_min_count: int = 80
     syn_flood_high_count: int = 500
@@ -198,10 +209,13 @@ class Settings(BaseSettings):
     baseline_drift_alpha: float = 0.05
 
     # ===== ML 检测引擎（平铺，向后兼容）=====
-    ml_engine_enabled: bool = False
+    ml_engine_enabled: bool = True
     ml_contamination: float = 0.10
     ml_random_state: int = 42
     ml_max_samples: int = 256
+    # 孤立森林并行度：默认 1（串行）。4 维百级窗口并行无收益，
+    # 且 n_jobs=-1 在多进程受限环境会直接失败。需要时显式调大。
+    ml_n_jobs: int = 1
 
     # ===== LLM 多采样投票（平铺，向后兼容）=====
     llm_vote_samples: int = 3

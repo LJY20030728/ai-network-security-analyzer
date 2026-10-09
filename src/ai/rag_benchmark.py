@@ -4,7 +4,7 @@ RAG检索质量评测
 黄金问答集 + Recall@k计算
 用于量化评估知识库检索效果
 """
-from typing import List, Dict, Tuple
+from typing import List, Dict, Optional
 from loguru import logger
 
 
@@ -191,13 +191,15 @@ GOLDEN_QUESTIONS = [
 ]
 
 
-def run_rag_benchmark(rag_engine, top_k_list: List[int] = [1, 3, 5, 10]) -> Dict:
+def run_rag_benchmark(rag_engine, top_k_list: Optional[List[int]] = None) -> Dict:
     """
     运行RAG召回率评测
     :param rag_engine: RAG引擎实例
-    :param top_k_list: 要计算的k值列表
+    :param top_k_list: 要计算的k值列表（None 时默认 [1, 3, 5, 10]）
     :return: 评测结果字典
     """
+    if top_k_list is None:
+        top_k_list = [1, 3, 5, 10]
     questions = GOLDEN_QUESTIONS
     total = len(questions)
 

@@ -4,7 +4,7 @@
 （原实时抓包功能已移除，本模块专注 PCAP 离线解析场景）
 """
 from scapy.all import IP, TCP, UDP, ICMP, ARP, DNS, Raw
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from dataclasses import dataclass
 from datetime import datetime
 import json
@@ -27,6 +27,36 @@ class PacketInfo:
     raw_summary: str = ""       # Scapy摘要信息
     dns_query: str = ""         # DNS查询域名
     dns_response: str = ""      # DNS响应IP
+
+
+def _first_dns_rdata(dns) -> str:
+    """
+    从 DNS 应答段安全提取首条记录的 rdata 文本。
+
+    兼容 scapy 2.7 的两个行为变化：
+      1. `dns.ancount` 可能为 None（字段未解析）—— 调用方必须先做 `or 0` 处理
+      2. `dns.an` 已改为 PacketListField，是**列表**而非单条记录，
+         因此 `dns.an.rdata` 会抛 AttributeError。旧代码把这句包在 try 里，
+         结果是真实流量上 dns_response 永远为空（静默数据丢失）。
+
+    返回空字符串表示无法提取，绝不抛异常 —— 单个字段解析失败
+    不应影响整个数据包（乃至整个 PCAP）的解析。
+    """
+    try:
+        an = dns.an
+        if not an:
+            return ""
+        rec = an[0] if isinstance(an, list) else an
+        if rec is None:
+            return ""
+        rdata = getattr(rec, "rdata", None)
+        if rdata is None:
+            return ""
+        if isinstance(rdata, bytes):
+            return rdata.decode("utf-8", errors="ignore")
+        return str(rdata)
+    except Exception:
+        return ""
 
 
 class PacketParser:
@@ -92,15 +122,20 @@ class PacketParser:
                 # DNS层（DNS基于UDP）
                 if DNS in packet:
                     info.protocol = "DNS"
+                    # 查询域名：qd 在 scapy 2.7 亦是 PacketListField，需判空后取首条
                     if packet[DNS].qd:
-                        info.dns_query = packet[DNS].qd.qname.decode(errors='ignore')
-                    if packet[DNS].qr == 1 and packet[DNS].ancount > 0 and packet[DNS].an:
                         try:
-                            info.dns_response = packet[DNS].an.rdata
-                            if isinstance(info.dns_response, bytes):
-                                info.dns_response = info.dns_response.decode(errors='ignore')
+                            info.dns_query = packet[DNS].qd.qname.decode(errors='ignore')
                         except Exception:
-                            pass
+                            info.dns_query = ""
+                    # 应答记录提取。
+                    # 不再依赖 ancount 字段：
+                    #   · 内存中构造的包 ancount 恒为 None（scapy 惰性填充）
+                    #   · 畸形/截断包也可能给出错误的计数值
+                    # 改为直接判断 an 段是否有内容（an 在 scapy 2.7 是列表）。
+                    # 这样既不会因 None 抛 TypeError 中断解析，也不受计数字段误导。
+                    if packet[DNS].qr == 1:
+                        info.dns_response = _first_dns_rdata(packet[DNS])
 
             # ICMP层
             elif ICMP in packet:

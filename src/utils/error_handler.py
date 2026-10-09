@@ -12,7 +12,7 @@ P2-1: 统一错误处理模块（三层架构）
 """
 import functools
 import traceback
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Tuple
 
 from loguru import logger
 
@@ -210,17 +210,17 @@ class FallbackManager:
         """LLM 分析失败时的降级：基于规则引擎结果生成简单摘要"""
         alerts = analysis_result.get("anomaly_detection", {}).get("alerts", [])
         severity = analysis_result.get("anomaly_detection", {}).get("severity_summary", {})
-        supervised = analysis_result.get("supervised_detection", {})
+        stacking = analysis_result.get("stacking_fusion") or {}
 
         lines = ["⚠️ AI 分析暂时不可用，以下为规则引擎自动生成的基础分析：\n"]
 
         # 主引擎判定
-        if supervised:
-            verdict = "检测到攻击" if supervised.get("is_attack") else "未检测到明显攻击"
-            confidence = supervised.get("confidence", 0)
+        if stacking:
+            verdict = "检测到攻击" if stacking.get("is_attack") else "未检测到明显攻击"
+            confidence = stacking.get("confidence", 0)
             lines.append(f"【主引擎判定】{verdict}（置信度: {confidence:.1%}）")
-            if supervised.get("attack_flows"):
-                lines.append(f"【攻击流数量】{supervised['attack_flows']}")
+            if stacking.get("attack_flows"):
+                lines.append(f"【融合攻击概率】{stacking['attack_flows']}")
             lines.append("")
 
         # 告警统计

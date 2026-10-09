@@ -8,7 +8,7 @@ from collections import defaultdict, Counter
 from loguru import logger
 from typing import Optional
 from config.settings import settings
-from src.analysis.baseline import TrafficBaseline, WindowAccumulator
+from src.analysis.baseline import TrafficBaseline
 from ..capture.packet_parser import PacketInfo
 
 
@@ -215,11 +215,19 @@ class TrafficAnalyzer:
         "BASELINE_DEVIATION": "ewma-statistical-baseline",
     }
 
+    # 三引擎名称与顺序（必须与 Stacking 元学习器的 feature_order 严格一致）
+    ENGINE_ORDER = ("rule_based", "baseline", "isolation_forest")
+
     def __init__(self, use_baseline: bool = True, use_ml: Optional[bool] = None):
         self.flow_extractor = FlowExtractor()
-        # L2：孤立森林无监督第三轨（默认随 settings.ml_engine_enabled）
+        # 孤立森林无监督第三轨（默认随 settings.ml_engine_enabled，3.3.0 起默认开启）
         self.use_ml = settings.ml_engine_enabled if use_ml is None else use_ml
         self.isolation_detector = None
+
+        # 三引擎 Stacking 融合：规则 / 基线 / 孤立森林 → 元学习器
+        self._stacking = None
+        self._stacking_loaded = False
+
         # 规则阈值全部来自 settings（可 .env 覆盖），不再硬编码
         self._t = {
             "syn_flood_min_count": settings.syn_flood_min_count,
@@ -290,13 +298,12 @@ class TrafficAnalyzer:
         # 4. 规则引擎异常检测 + 时序基线偏差检测
         anomalies = self._detect_anomalies(packets, flows)
         ml_profile = None
-        supervised_result = None
         if self.baseline and self.baseline.learned:
             baseline_result = self.baseline.detect(packets)
             anomalies = self._merge_baseline_deviations(anomalies, baseline_result)
             # P1: 基线漂移失效提示（流量画像变化时检测结果可信度降低）
             self.baseline_drift = baseline_result.get("drift")
-            # L2: 孤立森林第三轨（同窗口输入，多维耦合异常）
+            # 孤立森林第三轨（同窗口输入，多维耦合异常）
             if self.isolation_detector and self.isolation_detector.learned:
                 try:
                     windows = self.baseline._aggregate_windows(packets)
@@ -306,43 +313,8 @@ class TrafficAnalyzer:
                 except Exception as e:
                     logger.warning(f"ML 检测失败（不影响主流程）: {e}")
 
-        # L3: 监督学习主引擎（HistGradientBoosting，CIC-UNSW 44万流训练，F1=0.9487）
-        try:
-            from src.analysis.supervised_detector import SupervisedDetector
-            if not hasattr(self, '_supervised_detector') or self._supervised_detector is None:
-                self._supervised_detector = SupervisedDetector()
-                self._supervised_detector.load()
-            if self._supervised_detector.loaded:
-                supervised_result = self._supervised_detector.detect(packets)
-        except Exception as e:
-            logger.warning(f"监督模型检测失败（不影响主流程）: {e}")
-
-        # P0-2 B: 自适应阈值（基于输入流量分位数动态调整）
-        adaptive_thresholds = None
-        try:
-            from src.analysis.supervised_detector import SupervisedDetector as _SD
-            adaptive_thresholds = _SD.adaptive_thresholds(packets)
-        except Exception as e:
-            logger.warning(f"自适应阈值计算失败: {e}")
-
-        # P0-2 C: 多模型集成投票（监督+规则+基线+孤立森林）
-        ensemble_result = None
-        try:
-            from src.analysis.supervised_detector import SupervisedDetector as _SD2
-            baseline_det = None
-            if self.baseline and self.baseline.learned:
-                baseline_det = {"detected": anomalies.get("total_alerts", 0) > 0}
-            iso_det = None
-            if ml_profile and ml_profile.get("learned"):
-                iso_det = {"anomaly_windows": ml_profile.get("anomaly_windows", 0)}
-            ensemble_result = _SD2.ensemble_vote(
-                supervised_result or {},
-                anomalies.get("alerts", []),
-                baseline_det,
-                iso_det,
-            )
-        except Exception as e:
-            logger.warning(f"多模型集成失败: {e}")
+        # 三引擎 Stacking 融合（规则 / 基线 / 孤立森林）
+        stacking_result = self._stack_engines(anomalies, ml_profile)
 
         report = {
             "summary": {
@@ -361,9 +333,7 @@ class TrafficAnalyzer:
             "baseline_profile": self.baseline.to_dict() if self.baseline else None,
             "baseline_drift": self.baseline_drift,
             "ml_profile": ml_profile,
-            "supervised_detection": supervised_result,
-            "ensemble_detection": ensemble_result,
-            "adaptive_thresholds": adaptive_thresholds,
+            "stacking_fusion": stacking_result,
         }
 
         logger.info(f"综合流量分析完成 | 发现 {len(anomalies.get('alerts', []))} 条异常告警")
@@ -372,9 +342,10 @@ class TrafficAnalyzer:
     def analyze_stream(self, packet_iter, use_baseline: bool = True,
                        sample_count: int = 0) -> Dict[str, Any]:
         """
-        流式综合分析（内存 O(活跃流数 + 窗口数)，支持 GB 级 PCAP，不持有原始包列表）。
+        流式综合分析（内存 O(活跃流数 + 窗口数)，支持 GB 级 PCAP，不持有全量原始包列表）。
         - 规则累加器与 _detect_anomalies 同阈值、同告警字段（证据链完整）
         - 基线经 WindowAccumulator 增量窗口聚合后走 detect_windows（含滚动更新/漂移）
+        - 三引擎（规则 / 基线 / 孤立森林）结论交由 Stacking 元学习器融合
         - 报告结构与 analyze_packets 一致，可作为大文件入口
         """
         from src.analysis.baseline import WindowAccumulator as _WA
@@ -564,6 +535,9 @@ class TrafficAnalyzer:
                 except Exception as e:
                     logger.warning(f"ML 流式检测失败（不影响主流程）: {e}")
 
+        # ---------- 三引擎 Stacking 融合 ----------
+        stacking_result = self._stack_engines(anomalies, ml_profile)
+
         # 流统计摘要（轻量：只出 top 数量与字节，不再全量 flow_stats）
         top_flows = sorted(flows.values(), key=lambda x: x["bytes"], reverse=True)[:10]
         report = {
@@ -593,6 +567,7 @@ class TrafficAnalyzer:
             "baseline_profile": baseline_profile,
             "baseline_drift": baseline_drift,
             "ml_profile": ml_profile,
+            "stacking_fusion": stacking_result,
             "streaming": True,
         }
         if samples:
@@ -692,6 +667,47 @@ class TrafficAnalyzer:
             anomalies["severity_summary"][sev] = sum(1 for a in alerts if a["severity"] == sev)
         anomalies["ml_anomalies_added"] = added
         return anomalies
+
+    # ------------------------------------------------------------------
+    # 三引擎 Stacking 融合
+    # ------------------------------------------------------------------
+    def _stack_engines(self, anomalies: Dict[str, Any],
+                       ml_profile: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """
+        把三个引擎（规则 / 基线 / 孤立森林）的结论交给 Stacking 元学习器融合。
+
+        元学习器不可用时自动回退为固定权重，并通过 confidence_source
+        明确标注"这不是模型输出"。
+
+        :return 融合结果字典；完全没有引擎信号时返回 None
+        """
+        try:
+            if not self._stacking_loaded:
+                from src.analysis.stacking_fusion import get_three_engine_stacking
+                self._stacking = get_three_engine_stacking()
+                self._stacking_loaded = True
+        except Exception as e:
+            logger.warning(f"Stacking 融合器初始化失败（将跳过融合）: {e}")
+            return None
+
+        if self._stacking is None:
+            return None
+
+        baseline_result = {
+            "drift": self.baseline_drift,
+            "multi_dim_alerts": (anomalies or {}).get("baseline_multi_dim_alerts"),
+        }
+        try:
+            result = self._stacking.predict(anomalies, baseline_result, ml_profile)
+            logger.info(
+                f"三引擎 Stacking 融合 | 判定={'攻击' if result['is_attack'] else '正常'} "
+                f"| 概率={result['attack_prob']} | 置信度={result['confidence']}"
+                f"({result['confidence_source']}) | 元学习器={'已用' if result['meta_learner_used'] else '回退'}"
+            )
+            return result
+        except Exception as e:
+            logger.warning(f"Stacking 融合失败（不影响各引擎独立告警）: {e}")
+            return None
 
     @staticmethod
     def _sort_alerts(alerts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

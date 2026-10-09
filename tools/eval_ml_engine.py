@@ -6,6 +6,19 @@
 - TPR 测试：7 个黄金攻击样本（至少 1 个异常窗口 = 检出）
 结果写入 data/eval_perf/ml_engine.json
 """
+
+# 受限环境（权限收紧的终端 / CI 沙箱）下 joblib 无法创建多进程命名管道，
+# 会直接 PermissionError: [WinError 5]。所有评测脚本强制走线程后端，
+# 保证结果可在任意环境复现（算法本身不变）。
+import os as _os
+_os.environ.setdefault("JOBLIB_MULTIPROCESSING", "0")
+_os.environ.setdefault("LOKY_MAX_CPU_COUNT", "1")
+try:
+    import joblib as _joblib
+    _joblib.parallel_backend("threading", n_jobs=1).__enter__()
+except Exception:
+    pass
+
 import json
 import os
 import sys
@@ -13,6 +26,14 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
 from loguru import logger
+
+# Windows 控制台默认 GBK，直接打印中文/emoji 会抛 UnicodeEncodeError
+try:
+    from src.utils.helpers import force_utf8_stdout
+    force_utf8_stdout()
+except Exception:
+    pass
+
 logger.remove()
 
 from src.capture.pcap_parser import PcapParser

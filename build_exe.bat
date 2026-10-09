@@ -35,8 +35,7 @@ echo.
     --add-data "data\knowledge\docs;data\knowledge\docs" ^
     --add-data "data\knowledge\attack_types;data\knowledge\attack_types" ^
     --add-data "models\bge-small-zh-v1.5;models\bge-small-zh-v1.5" ^
-    --add-data "models\supervised_detector.joblib;models" ^
-    --add-data "models\unsw_supervised_detector.joblib;models" ^
+    --add-data "models\stacking_meta_learner.joblib;models" ^
     --add-data "assets;assets" ^
     --icon "assets\app_icon.ico" ^
     --hidden-import=uvicorn.logging ^

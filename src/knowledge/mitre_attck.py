@@ -5,6 +5,7 @@ MITRE ATT&CK 知识库
 """
 from typing import List, Dict, Any, Optional
 import os
+from loguru import logger
 
 
 # MITRE ATT&CK 常见技术条目（精选网络流量分析相关的技术）
@@ -362,10 +363,16 @@ def _load_docs_dir(subdir: str, category: str) -> List[Dict[str, str]]:
                     "content": content,
                     "category": category,
                 })
-            except Exception:
+            except Exception as e:
+                # 单个文档读取失败不影响其余文档，必须留痕以便发现损坏文件
+                logger.warning(f"知识文档读取失败，已跳过: {fp} ({type(e).__name__}: {e})")
                 continue
-    except Exception:
-        pass
+    except Exception as e:
+        # 目录列举整体失败会让知识库静默变空，导致 RAG 检索退化为噪声
+        logger.error(
+            f"知识文档目录列举失败，本目录 {target_dir} 未加载任何知识条目: "
+            f"{type(e).__name__}: {e}"
+        )
     return items
 
 

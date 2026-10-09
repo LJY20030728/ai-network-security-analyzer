@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """P1-2 LLM 研判 vs 纯规则：Lumma-Stealer 真实恶意样本
 真值：真实恶意流量（malware-traffic-analysis.net 2025-12-30 Lumma Stealer）
 - 规则层：TrafficAnalyzer 全管道检出（真实恶意 → 告警=TP，无告警段=FN/盲区）
@@ -6,10 +6,30 @@
 - 结论：LLM 增量 = 对规则告警的确认率（真实样本应高）+ 结构化证据
 输出: data/eval_perf/llm_vs_rules_lumma.json
 """
+
+# 受限环境（权限收紧的终端 / CI 沙箱）下 joblib 无法创建多进程命名管道，
+# 会直接 PermissionError: [WinError 5]。所有评测脚本强制走线程后端，
+# 保证结果可在任意环境复现（算法本身不变）。
+import os as _os
+_os.environ.setdefault("JOBLIB_MULTIPROCESSING", "0")
+_os.environ.setdefault("LOKY_MAX_CPU_COUNT", "1")
+try:
+    import joblib as _joblib
+    _joblib.parallel_backend("threading", n_jobs=1).__enter__()
+except Exception:
+    pass
+
 import glob, io, json, os, sys, time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 from loguru import logger
+
+# Windows 控制台默认 GBK，直接打印中文/emoji 会抛 UnicodeEncodeError
+try:
+    from src.utils.helpers import force_utf8_stdout
+    force_utf8_stdout()
+except Exception:
+    pass
 logger.remove()
 
 PCAP_DIR = os.path.join(ROOT, "data/eval_real")

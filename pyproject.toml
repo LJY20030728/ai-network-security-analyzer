@@ -1,0 +1,139 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai-network-security-analyzer"
+version = "3.3.0"
+description = "AI 辅助的离线网络取证分析系统：流式 PCAP 解析 + 三引擎 Stacking 融合检测 + LLM 威胁研判 + RAG 安全知识问答"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Jingyu Liao", email = "" }]
+keywords = ["network-security", "forensics", "pcap", "ids", "llm", "rag", "anomaly-detection"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Security",
+]
+
+# 运行期直接依赖（下界=已验证可用，上界=防大版本破坏性变更）
+# 精确可复现版本见 requirements.lock（CI 与发布构建使用）
+dependencies = [
+    "fastapi>=0.115,<1",
+    "uvicorn[standard]>=0.30,<1",
+    "python-multipart>=0.0.9",
+    "scapy>=2.5,<3",
+    "dpkt>=1.9.8,<2",
+    "langchain>=0.3",
+    "langchain-openai>=0.2",
+    "langchain-community>=0.3",
+    "openai>=1.30",
+    "chromadb>=0.5",
+    "tiktoken>=0.7",
+    "onnxruntime>=1.17,<2",
+    "scikit-learn>=1.4,<2",
+    "numpy>=1.26,<3",
+    "pandas>=2.0,<4",
+    "matplotlib>=3.8,<4",
+    "joblib>=1.3,<2",
+    "python-dotenv>=1.0,<2",
+    "pydantic>=2.9,<3",
+    "pydantic-settings>=2.4,<3",
+    "loguru>=0.7,<1",
+    "tqdm>=4.66,<5",
+    "aiohttp>=3.10,<4",
+    "httpx>=0.27,<1",
+    "python-docx>=1.1,<2",
+    "PyPDF2>=3.0,<4",
+    "gradio>=6.0,<7",
+    "pywebview>=5.0",
+    "pillow>=10.0,<13",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pytest-cov>=5.0",
+    "ruff>=0.6",
+    "mypy>=1.11",
+]
+# 后端 API 服务（不含桌面窗口）
+server = []
+# 打包发布（PyInstaller + Inno Setup 由 scripts/ 调用）
+build = ["pyinstaller>=6.0"]
+
+[project.urls]
+Homepage = "https://github.com/LJY20030728/ai-network-security-analyzer"
+Repository = "https://github.com/LJY20030728/ai-network-security-analyzer"
+Issues = "https://github.com/LJY20030728/ai-network-security-analyzer/issues"
+
+[project.scripts]
+ai-nsa = "desktop_app:main"
+
+[tool.setuptools]
+# 项目是应用型仓库而非可安装库：显式声明包目录，避免 setuptools 误扫 venv/dist
+packages = ["config", "src"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+filterwarnings = [
+    "ignore::DeprecationWarning:scapy.*",
+]
+
+# ---------- 代码规范 ----------
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+exclude = ["venv", "dist", "build", "installer_output", "models", "data", ".git"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes（未定义名/未使用导入 —— 正是 gradio_app HTTPException 那类缺陷）
+    "I",    # isort
+    "B",    # flake8-bugbear（可变默认参数、静默 except 等）
+    "UP",   # pyupgrade
+    "S",    # flake8-bandit（安全）
+    "C4",   # comprehensions
+    "SIM",  # simplify
+]
+ignore = [
+    "E501",   # 行长度由 formatter 处理
+    "B008",   # FastAPI 的 Depends()/File() 默认参数是惯用法
+    "S101",   # 测试里用 assert
+    "S603",   # subprocess 调用多为打包脚本
+    "S607",   # 同上
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S", "B", "SIM"]          # 测试放宽安全与风格规则
+"tools/*" = ["S", "E", "B"]            # 实验脚本放宽
+"src/ui/gradio_app.py" = ["E402"]      # 需在 sys.path 注入后再 import
+
+[tool.ruff.lint.isort]
+known-first-party = ["config", "src", "tools"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+no_implicit_optional = true
+# 渐进式收紧：先只对核心域模块强制，UI/实验脚本暂不阻塞
+files = ["src/analysis", "src/capture", "src/ai", "src/storage", "src/security", "config"]
+ignore_missing_imports = true
+# 初期允许未注解的 def（当前注解率 ~61%，目标是逐步提升）
+disallow_untyped_defs = false
+check_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = ["scapy.*", "chromadb.*", "onnxruntime.*", "gradio.*", "webview.*", "joblib.*"]
+ignore_missing_imports = true

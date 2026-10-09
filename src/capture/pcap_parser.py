@@ -8,10 +8,8 @@ import logging
 warnings.filterwarnings("ignore", message=".*libpcap provider.*")
 for _lg in ("scapy", "scapy.runtime", "scapy.loading"):
     logging.getLogger(_lg).setLevel(logging.ERROR)
-from scapy.all import rdpcap, IP, TCP, UDP, ICMP, ARP, DNS, Raw, Ether
+from scapy.all import rdpcap, TCP, UDP, DNS
 from typing import List, Dict, Any, Optional
-from dataclasses import dataclass
-from datetime import datetime
 import json
 from loguru import logger
 from .packet_parser import PacketInfo, PacketParser

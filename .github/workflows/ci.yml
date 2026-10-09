@@ -1,18 +1,23 @@
 name: CI
 
 # 持续集成 / 持续交付流水线
-# - test:  每次 push 自动跑 105 个测试（质量门禁，失败则红叉拦截）
-# - build: 测试通过后自动 PyInstaller 打包 + Inno Setup 生成安装包
+# - test-linux:   Ubuntu 上跑全量单测（Python 3.11 + 3.13 矩阵）
+# - test-windows: Windows 上跑同一套单测。必须保留：核心安全能力 DPAPI
+#                 加密（src/security/secure_store.py）是 Windows-only，
+#                 Linux 上相关分支会被跳过，只在 Linux 跑会漏掉真实缺陷。
+# - build:        两个测试 job 全绿后 PyInstaller 打包 + Inno Setup 生成安装包
 # 手动触发：仓库 Actions 页 → "Run workflow"
 
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 jobs:
-  test:
-    name: 测试 · Python ${{ matrix.python-version }}
+  test-linux:
+    name: 测试(Linux) · Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -24,27 +29,41 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - name: 安装依赖
-        run: pip install -r requirements.txt
-      - name: 运行测试（105 用例全绿为通过标准）
+      - name: 安装依赖（锁定版本，保证可复现）
+        run: pip install -r requirements.lock
+      - name: 运行测试
+        run: pytest tests -q
+
+  test-windows:
+    name: 测试(Windows/DPAPI) · Python 3.11
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: 安装依赖（锁定版本，保证可复现）
+        run: pip install -r requirements.lock
+      - name: 运行测试（覆盖 DPAPI 等 Windows-only 分支）
         run: pytest tests -q
 
   build:
     name: 打包 · PyInstaller + Inno Setup
     runs-on: windows-latest
-    needs: test
+    needs: [test-linux, test-windows]
     steps:
       - uses: actions/checkout@v4
-      - name: 安装 Python 3.13
+      - name: 安装 Python 3.11（与开发/测试环境一致）
         uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version: "3.11"
       - name: 创建 venv 并安装依赖（含 PyInstaller）
         shell: cmd
         run: |
           python -m venv venv
           venv\Scripts\python.exe -m pip install --upgrade pip
-          venv\Scripts\python.exe -m pip install -r requirements.txt pyinstaller
+          venv\Scripts\python.exe -m pip install -r requirements.lock pyinstaller
       - name: 下载 BGE ONNX Embedding 模型（~91MB，打包必需）
         shell: cmd
         run: |

@@ -42,7 +42,11 @@ from src.ai.rag_engine import get_rag_engine
 from src.ai.threat_analyzer import get_threat_analyzer
 from src.knowledge import get_all_knowledge
 from src.report.html_report import save_html_report
-from src.utils.helpers import setup_logging, ensure_dir, format_bytes, get_timestamp_str
+from src.report.summary_formatter import format_analysis_summary, format_hallucination_block
+from src.utils.helpers import (
+    setup_logging, ensure_dir, format_bytes, get_timestamp_str,
+    calculate_file_sha256, validate_upload_file,
+)
 from src.utils.paths import data_dir, seed_assets
 from src.api.audit import AuditLogger
 from src.api.history_store import get_history_store
@@ -58,11 +62,11 @@ setup_logging(settings.log_level, log_file=_log_file)
 # 首次启动种子数据迁移（打包版：把内置预置基线复制到数据目录）
 seed_assets()
 
-# 创建FastAPI应用
+# 创建FastAPI应用（版本号统一取自 settings.version，单一来源）
 app = FastAPI(
     title=settings.project_name,
     description="基于流行为检测与LLM辅助研判的网络异常分析系统",
-    version="3.0.0"
+    version=settings.version
 )
 
 # CORS配置（仅允许本机访问，收紧默认全开策略）
@@ -121,12 +125,24 @@ def _generate_and_persist_token() -> str:
     # 与 settings 使用同一探测逻辑（exe同级 → cwd → 项目根）
     env_path = find_env_file()
     lines = []
-    if os.path.exists(env_path):
+    env_existed = os.path.exists(env_path)
+    read_ok = True
+    if env_existed:
         try:
             with open(env_path, "r", encoding="utf-8") as f:
                 lines = f.readlines()
-        except Exception:
+        except Exception as e:
+            # 【数据安全】原实现此处 lines = [] 并继续向下写回文件，
+            # 效果是：.env 无法读取时（编码/权限/被占用），
+            # 整个 .env 会被覆盖成只剩 API_AUTH_TOKEN 一行，
+            # 用户的 LLM_API_KEY / BASE_URL / MODEL 全部丢失。
+            # 且因为 token 已生成、鉴权看起来正常，故障被自我掩盖。
+            read_ok = False
             lines = []
+            logger.error(
+                f"⚠️ 读取 .env 失败（{type(e).__name__}: {e}）。"
+                f"为避免覆盖并丢失现有配置，本次跳过令牌落盘。"
+            )
     replaced = False
     for i, line in enumerate(lines):
         stripped = line.strip()
@@ -138,6 +154,15 @@ def _generate_and_persist_token() -> str:
                 break
     if not replaced:
         lines.append(f"API_AUTH_TOKEN={token}\n")
+
+    # 仅当"文件本来不存在"或"成功读取了原内容"时才写回，避免破坏用户配置
+    if env_existed and not read_ok:
+        logger.error(
+            "已跳过写入 .env：原文件存在但读取失败。"
+            "本次生成的 API_AUTH_TOKEN 仅在本次运行内存中有效，"
+            "请修复 .env 权限/编码后重启应用以持久化。"
+        )
+        return token
     try:
         with open(env_path, "w", encoding="utf-8") as f:
             f.writelines(lines)
@@ -178,8 +203,11 @@ async def api_token_middleware(request: Request, call_next):
                         client_ip=request.client.host if request.client else "",
                         user_agent=request.headers.get("user-agent", "")[:200],
                         note="unauthorized access attempt")
-                except Exception:  # noqa: BLE001
-                    pass
+                except Exception as e:
+                    # 审计写入失败必须可见：这是安全证据链，静默丢失等于无记录
+                    logger.error(
+                        f"⚠️ 审计日志写入失败（401 鉴权拒绝未能留痕）| {path}: {e}"
+                    )
                 return JSONResponse({"detail": "unauthorized: invalid or missing X-API-Token"}, status_code=401)
     try:
         response = await call_next(request)
@@ -196,8 +224,12 @@ async def api_token_middleware(request: Request, call_next):
                     duration_ms=(_time.perf_counter() - start) * 1000,
                     client_ip=request.client.host if request.client else "",
                     user_agent=request.headers.get("user-agent", "")[:200])
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as e:
+                # 审计写入失败必须可见：静默丢失会让"谁在什么时候调用了什么"
+                # 这段证据链出现空洞，事后审计无法还原
+                logger.error(
+                    f"⚠️ 审计日志写入失败（{request.method} {path} -> {status_code} 未留痕）: {e}"
+                )
     return response
 
 
@@ -692,42 +724,22 @@ ALLOWED_PCAP_EXTENSIONS = {".pcap", ".pcapng", ".cap", ".pcap.gz"}
 
 
 def _quick_sha256(filepath: str) -> str:
-    """计算文件 SHA-256（证据溯源）"""
-    import hashlib
-    try:
-        h = hashlib.sha256()
-        with open(filepath, "rb") as f:
-            for chunk in iter(lambda: f.read(1024 * 1024), b""):
-                h.update(chunk)
-        return h.hexdigest()
-    except Exception:
-        return ""
+    """计算文件 SHA-256（证据溯源）——委托 src.utils.helpers，避免三处重复实现"""
+    return calculate_file_sha256(filepath)
 
 
 def _check_upload_file(filename: str, size: int):
-    """校验上传文件类型与大小"""
-    ext = os.path.splitext(filename)[1].lower()
-    if ext not in ALLOWED_PCAP_EXTENSIONS:
-        raise HTTPException(status_code=400, detail=f"不支持的文件类型 {ext}，仅允许: {', '.join(sorted(ALLOWED_PCAP_EXTENSIONS))}")
-    max_bytes = settings.max_upload_mb * 1024 * 1024
-    if size > max_bytes:
-        raise HTTPException(status_code=413, detail=f"文件超过大小限制（{settings.max_upload_mb}MB）")
+    """校验上传文件类型与大小——委托 src.utils.helpers，由 UI 层决定如何提示"""
+    err = validate_upload_file(filename, size, max_mb=settings.max_upload_mb)
+    if err:
+        status = 413 if "大小限制" in err else 400
+        raise HTTPException(status_code=status, detail=err)
 
 
 def _analyze_pcap_task(filepath: str, enable_ai: bool, baseline_name: str = "") -> Dict[str, Any]:
     """在后台线程执行完整分析（解析+规则检测+基线对照+AI研判）"""
-    import hashlib
-
-    # 源文件 SHA-256（证据溯源）
-    sha256 = ""
-    try:
-        h = hashlib.sha256()
-        with open(filepath, "rb") as f:
-            for chunk in iter(lambda: f.read(1024 * 1024), b""):
-                h.update(chunk)
-        sha256 = h.hexdigest()
-    except Exception as e:
-        logger.warning(f"计算文件哈希失败: {e}")
+    # 源文件 SHA-256（证据溯源）——统一走 utils.helpers，避免重复实现
+    sha256 = calculate_file_sha256(filepath)
 
     parser = PcapParser()
     # P0-1: 流式解析+流式分析（GB 级大文件不落全量内存，内存 O(活跃流+窗口数)）
@@ -755,7 +767,7 @@ def _analyze_pcap_task(filepath: str, enable_ai: bool, baseline_name: str = "") 
             "source_file": os.path.basename(filepath),
             "source_sha256": sha256,
             "analyzed_at": get_timestamp_str(),
-            "rule_version": "2.0.0",
+            "rule_version": settings.version,
         },
     }
 
@@ -1012,8 +1024,13 @@ async def config_status():
                 ss = get_secure_store()
                 secure_available = ss.dpapi_available
                 secure_keys = ss.list_keys()
-        except Exception:
-            pass
+        except Exception as e:
+            # 静默失败会让本接口谎报 "dpapi_available=false / 无已存 Key"，
+            # 使用户误以为加密存储没生效。必须记录原因。
+            logger.warning(
+                f"读取 DPAPI 安全存储状态失败，本响应中的 dpapi_available/secure_keys "
+                f"可能不准确: {e}"
+            )
         return {
             "api_key_configured": has_key,
             "api_key_masked": (settings.llm_api_key[:6] + "..." + settings.llm_api_key[-4:])
@@ -1075,8 +1092,11 @@ async def config_save_secure(api_key: str = Form(...), base_url: str = Form(""),
         try:
             from src.ai.llm_client import reset_llm_client
             reset_llm_client()
-        except Exception:
-            pass
+        except Exception as e:
+            # 静默失败会让旧 Key 继续生效，而接口却返回"已保存成功" —— 属于谎报
+            logger.error(
+                f"⚠️ 重置 LLM 客户端失败，新配置可能不会立即生效（需重启应用）: {e}"
+            )
         return {"status": "success", "message": "已保存到 DPAPI 加密存储",
                 "dpapi_encrypted": ss.is_encrypted("LLM_API_KEY")}
     except HTTPException:
@@ -1217,7 +1237,9 @@ def _render_app_header() -> str:
                 with open(p, 'rb') as f:
                     logo_b64 = 'data:image/png;base64,' + base64.b64encode(f.read()).decode('utf-8')
                     break
-        except Exception:
+        except Exception as e:
+            # 仅影响界面 logo（纯装饰），失败时回退到内置图标；留痕便于排查资源问题
+            logger.debug(f"加载界面 logo 失败，已回退内置图标: {p} ({type(e).__name__}: {e})")
             continue
     if logo_b64:
         logo_html = '<img class="hero-logo" src="' + logo_b64 + '" alt="logo"/>'
@@ -1395,42 +1417,21 @@ def create_gradio_interface():
                             yield ("❌ PCAP文件解析失败", "PCAP文件解析失败", "", "", None,
                                    gr.update(value=_history_table_value()), gr.update(value=None), False)
                             return
+                        # 取出监督模型窗口内留存的样本包（供 AI 研判使用）。
+                        # 注意：不可用 parser.to_dict_list()——iter_packets 流式解析
+                        # 从不填充 parser.captured_packets，那样会得到空列表。
+                        _raw_samples = report.pop("_samples", []) or []
+                        _samples_dict = []
+                        if _raw_samples:
+                            from src.capture.packet_parser import PacketParser as _PP
+                            _pp = _PP()
+                            _pp.captured_packets = _raw_samples
+                            _samples_dict = _pp.to_dict_list()
 
                         report_json = json.dumps(report, ensure_ascii=False, indent=2, default=str)
-                        summary = f"""📊 流量分析概览
-━━━━━━━━━━━━━━━━━━━━
-📦 总数据包数: {report['summary']['total_packets']}
-🔀 网络流数量: {report['summary']['total_flows']}
-📈 总流量: {format_bytes(report['summary']['total_bytes'])}
-⏰ 时间范围: {report['summary']['time_range']['start']} ~ {report['summary']['time_range']['end']}
-
-📡 协议分布:
-"""
-                        for proto, count in report['protocol_distribution'].items():
-                            summary += f"  • {proto}: {count} 包 ({count/report['summary']['total_packets']*100:.1f}%)\n"
-
-                        # 主引擎（监督学习）判定
-                        sup = report.get('supervised_detection')
-                        if sup and sup.get('available'):
-                            verdict = "🔴 攻击" if sup.get('is_attack') else "🟢 正常"
-                            summary += f"\n🎯 主引擎判定（HistGradientBoosting，F1=0.9487）: {verdict}\n"
-                            summary += f"  • 置信度: {sup.get('confidence', 0):.2f}\n"
-                            summary += f"  • 攻击流: {sup.get('attack_flows', 0)}/{sup.get('total_flows', 0)} "
-                            summary += f"({sup.get('attack_flow_ratio', 0)*100:.1f}%)\n"
-                            if sup.get('category_distribution'):
-                                cats = ', '.join(f'{k}({v})' for k, v in sup['category_distribution'].items())
-                                summary += f"  • 攻击类别: {cats}\n"
-                            agg = sup.get('aggregate_alert', {})
-                            if agg.get('triggered'):
-                                agg_types = ', '.join(a['type'] for a in agg.get('alerts', []))
-                                summary += f"  • 聚合检测: {agg_types}\n"
-                        elif sup and not sup.get('available'):
-                            summary += f"\n🎯 主引擎判定: 不可用（{sup.get('reason', '未知')}）\n"
-
-                        summary += f"\n🚨 异常检测: 共 {report['anomaly_detection']['total_alerts']} 条告警\n"
-                        for sev, count in report['anomaly_detection']['severity_summary'].items():
-                            if count > 0:
-                                summary += f"  • {sev}: {count} 条\n"
+                        # 摘要文本由 src/report/summary_formatter.py 组装（纯函数、可单测），
+                        # 不再内联在回调闭包里
+                        summary = format_analysis_summary(report)
 
                         # 阶段 2-3：AI 威胁研判（RAG 检索 + LLM 流式输出）
                         ai_threat = ""
@@ -1445,7 +1446,7 @@ def create_gradio_interface():
                                 ai_threat = ""
                                 for chunk in threat_analyzer.analyze_threats_stream(
                                         report["anomaly_detection"],
-                                        packet_samples=parser.to_dict_list()[:50]):
+                                        packet_samples=_samples_dict):
                                     ai_threat += chunk
                                     yield ("🧠 阶段 3/4：AI 威胁研判中（流式输出）...",
                                            summary, ai_threat, report_json, None,
@@ -1460,24 +1461,12 @@ def create_gradio_interface():
                             hallucination_result = run_hallucination_control(
                                 ai_threat or "",
                                 report.get("anomaly_detection", {}),
-                                report.get("supervised_detection"),
+                                report.get("stacking_fusion"),
                                 report.get("baseline_profile"),
                             )
-                            # 在威胁分析末尾附加幻觉控制结果
+                            # 在威胁分析末尾附加幻觉控制结果（格式化逻辑见 summary_formatter）
                             if hallucination_result:
-                                hv = hallucination_result
-                                ai_threat += f"\n\n━━━━━━━━━━━━━━━━━━━━\n"
-                                ai_threat += f"🛡️ 幻觉控制校验\n"
-                                ai_threat += f"  • 输出校验分: {hv['output_validation']['score']} ({hv['output_validation']['level']})\n"
-                                ai_threat += f"  • 多引擎共识: {hv['cross_validation']['consensus']} "
-                                ai_threat += f"(一致性 {hv['cross_validation']['agreement']:.0%})\n"
-                                ai_threat += f"  • 幻觉风险: {hv['hallucination_risk']}\n"
-                                if hv['review_marker']['needs_review']:
-                                    ai_threat += f"  • ⚠️ 需人工复核: {hv['review_marker']['priority']}优先级\n"
-                                    for reason in hv['review_marker']['reasons'][:3]:
-                                        ai_threat += f"    - {reason}\n"
-                                if hv['output_validation']['issues']:
-                                    ai_threat += f"  • 校验问题: {len(hv['output_validation']['issues'])} 项\n"
+                                ai_threat += "\n\n" + format_hallucination_block(hallucination_result)
                         except Exception as e:
                             logger.warning(f"幻觉控制失败（不影响主流程）: {e}")
 
@@ -1492,7 +1481,7 @@ def create_gradio_interface():
                                 "source_file": os.path.basename(file.name),
                                 "source_sha256": file_sha256,
                                 "analyzed_at": get_timestamp_str(),
-                                "rule_version": "2.0.0",
+                                "rule_version": settings.version,
                             }
                             # 使用PCAP文件SHA256作为报告case_id，相同PCAP反复分析覆盖旧报告（一一映射）
                             report_cid = f"PCAP-{file_sha256[:16]}" if file_sha256 else None
@@ -1531,8 +1520,8 @@ def create_gradio_interface():
                                 "bytes": report["summary"]["total_bytes"],
                                 "alerts": report["anomaly_detection"]["total_alerts"],
                                 "severity": report["anomaly_detection"]["severity_summary"],
-                                "supervised_verdict": (report.get("supervised_detection") or {}).get("is_attack", False),
-                                "supervised_confidence": (report.get("supervised_detection") or {}).get("confidence", 0),
+                                "stacking_verdict": (report.get("stacking_fusion") or {}).get("is_attack", False),
+                                "stacking_confidence": (report.get("stacking_fusion") or {}).get("confidence", 0),
                                 "hallucination_risk": hallucination_result.get("hallucination_risk", "unknown") if hallucination_result else "unknown",
                                 "needs_review": hallucination_result.get("review_marker", {}).get("needs_review", False) if hallucination_result else False,
                                 "summary_text": summary,
@@ -1620,28 +1609,30 @@ def create_gradio_interface():
                         samples_dir = data_dir("samples")
                         if _os.path.isdir(samples_dir):
                             search_dirs.append(samples_dir)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning(f"定位 samples 目录失败，该路径不参与 PCAP 搜索: {e}")
                     # 2. 桌面
                     try:
                         desktop = _os.path.join(_os.path.expanduser("~"), "Desktop")
                         if _os.path.isdir(desktop):
                             search_dirs.append(desktop)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning(f"定位桌面目录失败，该路径不参与 PCAP 搜索: {e}")
                     # 3. 下载目录
                     try:
                         downloads = _os.path.join(_os.path.expanduser("~"), "Downloads")
                         if _os.path.isdir(downloads):
                             search_dirs.append(downloads)
-                    except Exception:
-                        pass
-                    # 4. 项目根目录
-                    try:
-                        project_root = _os.getcwd()
-                        search_dirs.append(project_root)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning(f"定位下载目录失败，该路径不参与 PCAP 搜索: {e}")
+                    # 4. 项目根目录（纯内存操作，不包 try —— 原先的 except 是空保护，
+                    #    会造成"这里可能失败"的误解）
+                    search_dirs.append(_os.getcwd())
+                    if len(search_dirs) <= 1:
+                        logger.warning(
+                            "PCAP 搜索路径几乎为空（仅当前工作目录），"
+                            "旧记录的源文件可能无法被定位"
+                        )
                     
                     # 在所有目录（含子目录）中搜索
                     for base_dir in search_dirs:
@@ -1726,8 +1717,9 @@ def create_gradio_interface():
                             if str(r.get("id", "")) == str(record_id):
                                 h = r
                                 break
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        # 静默失败会让用户看到"未找到该记录"，而真实原因是读取异常 —— 会误导排查方向
+                        logger.error(f"读取历史记录失败（记录 id={record_id}）: {e}")
                     
                     if not h:
                         yield "❌ 未找到该记录", gr.update(visible=False), gr.update(value="", visible=False)
@@ -1747,8 +1739,9 @@ def create_gradio_interface():
                             # 更新历史记录中的 file_path
                             try:
                                 get_history_store().update_analysis(record_id, {"file_path": file_path})
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                # 回写失败会导致下次仍需重新搜索，但不影响本次分析
+                                logger.warning(f"回写 file_path 到历史记录失败（本次分析不受影响）: {e}")
                         else:
                             logger.warning(f"未找到PCAP文件: {fname}")
                     
@@ -1780,23 +1773,30 @@ def create_gradio_interface():
                         # 更新历史记录中的报告路径
                         try:
                             get_history_store().update_analysis(record_id, {"html_report": html_path})
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            # 回写失败会让历史记录里的报告路径与实际不符（打开旧报告）
+                            logger.warning(
+                                f"回写报告路径到历史记录失败（报告已生成，但历史记录可能仍指向旧路径）: {e}"
+                            )
                         
                         yield "", gr.update(visible=False), gr.update(value=f"✅ 报告已生成，正在打开...（阶段3/3）", visible=True)
                         
                         # 打开报告
+                        _opened = True
                         try:
                             os.startfile(html_path)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            # 原先静默忽略，界面却仍显示"报告已打开" —— 属谎报
+                            _opened = False
+                            logger.warning(f"自动打开报告失败（报告文件已生成，可手动打开）: {e}")
                         
-                        final_msg = (f"✅ **重新分析完成，报告已打开**\n"
+                        final_msg = (f"✅ **重新分析完成，报告{'已打开' if _opened else '已生成'}**\n"
                                f"📋 记录：{fname}\n"
                                f"📦 包数：{result.get('packet_count', 0)}\n"
                                f"⏱ 耗时：{elapsed:.1f}秒\n"
-                               f"📂 报告：`{os.path.basename(html_path)}`\n\n"
-                               f"💡 重新分析在后台执行，Tab1的PCAP分析页面不受影响")
+                               f"📂 报告：`{os.path.basename(html_path)}`\n"
+                               + ("" if _opened else "     （自动打开失败，请手动打开上述文件）\n")
+                               + f"\n💡 重新分析在后台执行，Tab1的PCAP分析页面不受影响")
                         yield "", gr.update(visible=False), gr.update(value=final_msg, visible=True)
                         
                     except Exception as e:
@@ -1816,8 +1816,11 @@ def create_gradio_interface():
                     row = idx[0] if isinstance(idx, (list, tuple)) else idx
                     try:
                         hs = get_history_store().list_analysis()
-                    except Exception:
-                        hs = []
+                    except Exception as e:
+                        # 静默降级为空列表会让界面提示"记录已不存在或已被清空"，
+                        # 而真实原因是存储读取异常 —— 会误导用户去清空历史。
+                        logger.error(f"读取历史记录列表失败: {e}")
+                        return (f"❌ 读取历史记录失败：{type(e).__name__}: {e}", "", "", "", None)
                     if row is None or not hs or row >= len(hs):
                         return ("⚠️ 记录已不存在或已被清空", "", "", "", None)
                     h = hs[row]
@@ -2124,8 +2127,10 @@ def create_gradio_interface():
                 def clear_chat_ui():
                     try:
                         get_history_store().clear_chat()
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        # 静默失败会让界面清空，但数据库里对话仍在 —— 刷新后又出现，
+                        # 用户会以为是"没清干净"的诡异 bug
+                        logger.error(f"清空对话历史失败（界面已清空，但存储中的数据可能仍存在）: {e}")
                     return []
 
                 def chat_and_clear(message, history):
@@ -2287,8 +2292,9 @@ def create_gradio_interface():
                             chart = _build_baseline_profile_svg(b.get("profile"), b["name"])
                             if chart:
                                 return b["profile"], f"✅ 已加载基线「{b['name']}」画像图表", b, chart
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        # 静默失败会显示"暂无基线"，而真实原因可能是基线损坏或渲染异常
+                        logger.warning(f"加载默认基线画像图表失败（界面将显示为「暂无基线」）: {e}")
                     return {}, "💡 暂无基线，下方学习一份即可看到图表示例", None, ""
                 
                 baseline_selected = gr.State(None)
@@ -2390,15 +2396,19 @@ def create_gradio_interface():
 
                 def refresh_baselines_ui():
                     # 强制重新从数据库读取（不使用缓存）
+                    db_ok = True
                     try:
                         from src.storage.database import Database
                         db = Database()
                         # 触发一次查询，确保连接是新的
                         db.list_baselines()
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        # 静默失败会让界面声称"数据来源：SQLite数据库"，实际可能是旧数据
+                        db_ok = False
+                        logger.warning(f"刷新时连接 SQLite 失败，列表可能不是最新数据: {e}")
                     rows = _baseline_table_value()
-                    return gr.update(value=rows), f"🔄 列表已刷新（{len(rows)} 条基线）—— 数据来源：SQLite数据库"
+                    src = "SQLite数据库" if db_ok else "本地缓存（数据库读取失败）"
+                    return gr.update(value=rows), f"🔄 列表已刷新（{len(rows)} 条基线）—— 数据来源：{src}"
 
                 learn_btn.click(learn_baseline_ui, inputs=[baseline_file, baseline_name_input],
                                 outputs=[learn_feedback, learn_output, baseline_table, baseline_dropdown])
@@ -2500,9 +2510,18 @@ def create_gradio_interface():
                             settings.llm_api_key = key.strip()
                             settings.llm_base_url = url.strip()
                             settings.llm_model = model.strip()
-                        except Exception:
-                            pass
-                        return f"✅ 已保存并生效\n{secure_msg}📄 .env: {env}\n\n服务商: {url.strip()}\n模型: {model.strip()}"
+                            _applied = True
+                        except Exception as e:
+                            # 静默失败会让界面宣称"已保存并生效"，而实际仍是旧配置
+                            _applied = False
+                            logger.error(
+                                f"⚠️ 配置已写入 .env，但热生效失败（新配置需重启应用才生效）: {e}"
+                            )
+                        if _applied:
+                            return f"✅ 已保存并生效\n{secure_msg}📄 .env: {env}\n\n服务商: {url.strip()}\n模型: {model.strip()}"
+                        return (f"⚠️ 已保存但未能热生效\n{secure_msg}📄 .env: {env}\n"
+                                f"服务商: {url.strip()}\n模型: {model.strip()}\n\n"
+                                f"💡 新配置已落盘，但内存中的客户端未刷新成功，请重启应用以确保生效")
                     except Exception as e:
                         return f"❌ 保存失败: {e}"
 
@@ -2560,19 +2579,28 @@ if GRADIO_AVAILABLE:
         gradio_app = create_gradio_interface()
         try:
             gradio_app.queue()
-        except Exception:
-            pass
+        except Exception as e:
+            # 排队失败会导致并发行为退化（默认单并发），必须可见
+            logger.warning(f"Gradio queue() 启用失败，并发处理可能退化为串行: {e}")
         _mount_kwargs = _UI_KWARGS if _GRADIO_MAJOR >= 6 else {}
         try:
             # Gradio 6.x 文件下载路由需白名单（修复 DownloadButton 下载失效）
             from src.utils.paths import data_dir
             _mount_kwargs["allowed_paths"] = [data_dir("reports"), data_dir("uploads"), data_dir("history")]
-        except Exception:
-            pass
+        except Exception as e:
+            # 白名单缺失会导致报告下载按钮失效（用户可感知的功能缺失）
+            logger.warning(f"Gradio allowed_paths 设置失败，报告/上传文件下载可能失效: {e}")
         app = gr.mount_gradio_app(app, gradio_app, path="/", **_mount_kwargs)
         logger.info("Gradio Web UI 已挂载到 /")
     except Exception as e:
-        logger.warning(f"Gradio UI 挂载失败（不影响API使用）: {e}")
+        # 【重要】此前这里只记 warning 并提示"不影响API使用"，但实际上
+        # create_gradio_interface() 失败会让应用变成 0 路由 0 UI 的空壳
+        # （/ 与 /api/health 全部 404），却让日志读起来像"一切正常"。
+        # 现改为 error 级别并明确说明实际后果。
+        logger.error(
+            f"❌ Gradio UI 挂载失败，应用将以「无界面」状态启动："
+            f"/ 与所有界面功能不可用，仅 /api/* 路由可访问。原因: {e}"
+        )
 else:
     logger.info("gradio 未安装，仅启动API服务（可通过 /docs 查看API文档）")
 

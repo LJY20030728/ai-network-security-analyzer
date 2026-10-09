@@ -6,16 +6,14 @@
 - 存储引擎：SQLite（默认），启动时自动从旧 JSON 导入（向后兼容）
 线程安全（SQLite 连接池 + 锁）
 """
-import json
 import os
 import threading
-import uuid
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
 
 from src.utils.paths import data_dir
-from src.utils.helpers import ensure_dir, get_timestamp_str
+from src.utils.helpers import ensure_dir
 from src.storage.database import Database
 
 MAX_ANALYSIS = 60          # 分析历史最多保留 60 条
@@ -60,8 +58,12 @@ class HistoryStore:
                                 try:
                                     os.rename(path, backup)
                                     logger.info(f"旧 JSON 已备份: {backup}")
-                                except Exception:
-                                    pass
+                                except Exception as e:
+                                    # 备份失败不影响迁移结果（数据已入库），
+                                    # 但需留痕：文件仍留在原处，下次启动会再次尝试
+                                    logger.warning(
+                                        f"旧 JSON 备份失败（数据已迁移入库，原文件保留在 {path}）: {e}"
+                                    )
             except Exception as e:
                 logger.warning(f"历史数据自动迁移失败: {e}")
             finally:
@@ -96,6 +98,18 @@ class HistoryStore:
         """获取单条分析历史"""
         with self._lock:
             return self._db.get_analysis(aid)
+
+    def update_analysis(self, aid: str, updates: Dict[str, Any]) -> bool:
+        """
+        局部更新一条分析历史（报告重新分析后回写 PCAP 路径 / 报告路径）。
+
+        此前该方法缺失，但 gradio_app 的"确认重新分析"流程会调用它，
+        异常被 except 静默吞掉 → 重新分析的结果从未落库。此处补齐。
+        """
+        if not aid:
+            return False
+        with self._lock:
+            return self._db.update_analysis(aid, updates)
 
     def clear_analysis(self) -> int:
         """清空分析历史，返回删除数量"""

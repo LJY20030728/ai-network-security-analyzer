@@ -13,7 +13,7 @@ import os
 import sqlite3
 import threading
 import uuid
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from loguru import logger
 
@@ -68,8 +68,8 @@ class Database:
                 bytes INTEGER DEFAULT 0,
                 alerts INTEGER DEFAULT 0,
                 severity TEXT DEFAULT '{}',
-                supervised_verdict INTEGER DEFAULT 0,
-                supervised_confidence REAL DEFAULT 0.0,
+                stacking_verdict INTEGER DEFAULT 0,
+                stacking_confidence REAL DEFAULT 0.0,
                 hallucination_risk TEXT DEFAULT 'unknown',
                 needs_review INTEGER DEFAULT 0,
                 summary_text TEXT,
@@ -110,6 +110,45 @@ class Database:
             CREATE INDEX IF NOT EXISTS idx_baselines_name ON baselines(name);
         """)
         conn.commit()
+        self._migrate_columns(conn)
+
+    def _migrate_columns(self, conn) -> None:
+        """
+        轻量 schema 迁移（幂等）。
+
+        3.3.0 移除了监督模型引擎，融合判定改由三引擎 Stacking 产出，
+        因此历史表列名由 supervised_* 更名为 stacking_*。
+        对已存在的旧库执行 ALTER TABLE RENAME COLUMN，保留历史数据。
+        """
+        try:
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(analysis_history)").fetchall()}
+        except Exception as e:
+            logger.warning(f"读取 analysis_history 表结构失败，跳过迁移: {e}")
+            return
+
+        renames = [
+            ("stacking_verdict", "stacking_verdict"),
+            ("stacking_confidence", "stacking_confidence"),
+        ]
+        for old, new in renames:
+            if old in cols and new not in cols:
+                try:
+                    conn.execute(f"ALTER TABLE analysis_history RENAME COLUMN {old} TO {new}")
+                    conn.commit()
+                    logger.info(f"数据库迁移：analysis_history.{old} → {new}")
+                except Exception as e:
+                    logger.warning(f"列重命名失败 {old} → {new}: {e}")
+        # 新库直接建表时也确保列存在（旧库可能两列都没有）
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(analysis_history)").fetchall()}
+        for col, ddl in (("stacking_verdict", "INTEGER DEFAULT 0"),
+                         ("stacking_confidence", "REAL DEFAULT 0.0")):
+            if col not in cols:
+                try:
+                    conn.execute(f"ALTER TABLE analysis_history ADD COLUMN {col} {ddl}")
+                    conn.commit()
+                    logger.info(f"数据库迁移：新增列 analysis_history.{col}")
+                except Exception as e:
+                    logger.warning(f"新增列失败 {col}: {e}")
 
     # ---------- 分析历史 ----------
 
@@ -124,7 +163,7 @@ class Database:
         conn.execute("""
             INSERT OR REPLACE INTO analysis_history
             (id, ts, file, packets, flows, bytes, alerts, severity,
-             supervised_verdict, supervised_confidence, hallucination_risk, needs_review,
+             stacking_verdict, stacking_confidence, hallucination_risk, needs_review,
              summary_text, ai_summary, html_report, raw_json)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
@@ -132,8 +171,8 @@ class Database:
             rec.get("file", ""), rec.get("packets", 0), rec.get("flows", 0),
             rec.get("bytes", 0), rec.get("alerts", 0),
             json.dumps(rec.get("severity", {}), ensure_ascii=False),
-            1 if rec.get("supervised_verdict") else 0,
-            rec.get("supervised_confidence", 0.0),
+            1 if rec.get("stacking_verdict") else 0,
+            rec.get("stacking_confidence", 0.0),
             rec.get("hallucination_risk", "unknown"),
             1 if rec.get("needs_review") else 0,
             rec.get("summary_text", ""), rec.get("ai_summary", ""),
@@ -143,12 +182,72 @@ class Database:
         conn.commit()
         return rec
 
+    # 允许通过 update_analysis 更新的列（白名单，防止 SQL 拼接被注入）
+    _UPDATABLE_COLUMNS = (
+        "file", "packets", "flows", "bytes", "alerts", "severity",
+        "stacking_verdict", "stacking_confidence", "hallucination_risk",
+        "needs_review", "summary_text", "ai_summary", "html_report", "raw_json",
+    )
+
+    def update_analysis(self, analysis_id: str, updates: Dict[str, Any]) -> bool:
+        """
+        局部更新一条分析历史（白名单列 + 参数化占位符）。
+
+        用途：报告文件被删除后"重新分析"时，回写新的 PCAP 路径与报告路径，
+        避免整行重写导致 ts/summary 等信息丢失。
+
+        :param analysis_id: 记录 id
+        :param updates: 待更新字段（键必须在白名单内，未知键忽略）
+        :return: 是否至少更新了一行
+        """
+        if not analysis_id or not updates:
+            return False
+
+        sets = []
+        params: List[Any] = []
+        for key, value in updates.items():
+            col = key if key in self._UPDATABLE_COLUMNS else {
+                "raw": "raw_json", "severity_json": "severity",
+            }.get(key)
+            if col is None or col not in self._UPDATABLE_COLUMNS:
+                logger.debug(f"update_analysis 忽略未知字段: {key}")
+                continue
+            # 类型规整（与 add_analysis 保持一致）
+            if col in ("severity", "raw_json"):
+                value = value if isinstance(value, str) else json.dumps(
+                    value if value is not None else {}, ensure_ascii=False, default=str)
+            elif col in ("stacking_verdict", "needs_review"):
+                value = 1 if value else 0
+            elif col in ("packets", "flows", "bytes", "alerts"):
+                value = int(value or 0)
+            elif col == "stacking_confidence":
+                value = float(value or 0.0)
+            sets.append(f"{col} = ?")
+            params.append(value)
+
+        if not sets:
+            return False
+
+        conn = self._get_conn()
+        params.append(analysis_id)
+        cur = conn.execute(
+            f"UPDATE analysis_history SET {', '.join(sets)} WHERE id = ?",  # noqa: S608 (列名来自白名单)
+            tuple(params),
+        )
+        conn.commit()
+        updated = cur.rowcount > 0
+        if updated:
+            logger.info(f"分析历史已更新: {analysis_id} | 字段={[s.split(' = ')[0] for s in sets]}")
+        else:
+            logger.warning(f"分析历史更新未命中记录: {analysis_id}")
+        return updated
+
     def list_analysis(self, limit: int = 60, offset: int = 0) -> List[Dict[str, Any]]:
         """列出分析历史"""
         conn = self._get_conn()
         rows = conn.execute("""
             SELECT id, ts, file, packets, flows, bytes, alerts, severity,
-                   supervised_verdict, supervised_confidence, hallucination_risk, needs_review,
+                   stacking_verdict, stacking_confidence, hallucination_risk, needs_review,
                    summary_text, ai_summary, html_report
             FROM analysis_history
             ORDER BY ts DESC
@@ -158,7 +257,7 @@ class Database:
         for row in rows:
             d = dict(row)
             d["severity"] = json.loads(d.get("severity", "{}"))
-            d["supervised_verdict"] = bool(d.get("supervised_verdict", 0))
+            d["stacking_verdict"] = bool(d.get("stacking_verdict", 0))
             d["needs_review"] = bool(d.get("needs_review", 0))
             result.append(d)
         return result
@@ -172,7 +271,7 @@ class Database:
         d = dict(row)
         d["severity"] = json.loads(d.get("severity", "{}"))
         d["raw"] = json.loads(d.get("raw_json", "{}"))
-        d["supervised_verdict"] = bool(d.get("supervised_verdict", 0))
+        d["stacking_verdict"] = bool(d.get("stacking_verdict", 0))
         d["needs_review"] = bool(d.get("needs_review", 0))
         return d
 

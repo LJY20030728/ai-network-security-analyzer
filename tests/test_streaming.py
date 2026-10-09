@@ -2,7 +2,6 @@
 """P0-1 流式解析/流式分析一致性测试"""
 import os
 import sys
-from collections import Counter
 
 import pytest
 

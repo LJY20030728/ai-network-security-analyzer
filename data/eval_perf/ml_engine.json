@@ -6,7 +6,7 @@
   "baseline": {
     "engine": "ewma-median-mad",
     "fpr": 0.0,
-    "tpr": 0.2857,
+    "tpr": 0.4286,
     "per_sample": [
       {
         "sample": "synflood",
@@ -40,15 +40,15 @@
       },
       {
         "sample": "burst",
-        "windows": 482,
-        "anomaly_windows": 184,
+        "windows": 488,
+        "anomaly_windows": 375,
         "detected": true
       },
       {
         "sample": "lightscan",
-        "windows": 260,
-        "anomaly_windows": 0,
-        "detected": false
+        "windows": 262,
+        "anomaly_windows": 400,
+        "detected": true
       }
     ]
   },
@@ -91,13 +91,13 @@
       },
       {
         "sample": "burst",
-        "windows": 482,
-        "anomaly_windows": 252,
+        "windows": 488,
+        "anomaly_windows": 261,
         "detected": true
       },
       {
         "sample": "lightscan",
-        "windows": 260,
+        "windows": 262,
         "anomaly_windows": 13,
         "detected": true
       }

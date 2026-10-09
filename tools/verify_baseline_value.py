@@ -18,6 +18,19 @@
 输出：
     对比结果 + 追加写入 data/samples/regression_result.json 的 baseline_value 字段
 """
+
+# 受限环境（权限收紧的终端 / CI 沙箱）下 joblib 无法创建多进程命名管道，
+# 会直接 PermissionError: [WinError 5]。所有评测脚本强制走线程后端，
+# 保证结果可在任意环境复现（算法本身不变）。
+import os as _os
+_os.environ.setdefault("JOBLIB_MULTIPROCESSING", "0")
+_os.environ.setdefault("LOKY_MAX_CPU_COUNT", "1")
+try:
+    import joblib as _joblib
+    _joblib.parallel_backend("threading", n_jobs=1).__enter__()
+except Exception:
+    pass
+
 import json
 import os
 import random
@@ -31,6 +44,14 @@ from src.capture.pcap_parser import PcapParser
 from src.analysis.flow_extractor import TrafficAnalyzer
 from src.analysis.baseline import TrafficBaseline
 from loguru import logger
+
+# Windows 控制台默认 GBK，直接打印中文/emoji 会抛 UnicodeEncodeError
+try:
+    from src.utils.helpers import force_utf8_stdout
+    force_utf8_stdout()
+except Exception:
+    pass
+
 logger.remove()
 
 SERVER_IP = "10.0.0.1"
@@ -141,9 +162,30 @@ def main():
     print("=" * 70)
 
     parser = PcapParser()
-    baseline = TrafficBaseline.load("data/baselines/default.json")
-    print(f"基线: {baseline.name} | 包数 {baseline.packets_used} | "
-          f"中位数 {baseline.profile['window_packets']['median']}/{baseline.profile['window_dports']['median']}\n")
+
+    # 基线来源：优先加载仓库基线文件；不存在则在本地现场学习一份。
+    # （原实现硬编码 data/baselines/default.json，但该文件被 .gitignore 忽略、
+    #   仓库中并不存在，导致 fresh clone 上必然 AttributeError: 'NoneType'）
+    baseline = None
+    candidate = os.path.join("data", "baselines", "default.json")
+    if os.path.exists(candidate):
+        baseline = TrafficBaseline.load(candidate)
+        if baseline is not None:
+            print(f"基线来源: 文件 {candidate}")
+
+    if baseline is None:
+        print(f"基线来源: 现场学习（{candidate} 不存在，改由正常流量生成）")
+        from src.capture.packet_parser import PacketParser
+        normal_pkts = _normal_background()
+        baseline = TrafficBaseline()
+        baseline.learn(PacketParser().parse_list(normal_pkts))
+        if not baseline.learned:
+            print("❌ 基线学习失败，无法继续（正常流量窗口不足）")
+            sys.exit(1)
+
+    print(f"基线: 包数 {getattr(baseline, 'packets_used', '?')} | "
+          f"中位数 包数={baseline.profile['window_packets']['median']} "
+          f"目的端口数={baseline.profile['window_dports']['median']}\n")
 
     results = {}
     cases = {
@@ -167,8 +209,16 @@ def main():
         print(f"  纯规则    : {n_rule} 条告警")
         print(f"  规则+基线  : {n_dual} 条告警（其中基线引擎 {len(baseline_alerts)} 条）")
         for a in baseline_alerts[:3]:
-            print(f"    → {a['severity']} | {a['type']} | z={a.get('z_score')} | "
-                  f"值={a.get('value')} 基线中位={a.get('baseline_median')}")
+            # 两类基线告警的证据字段名不同，必须分别处理：
+            #   BASELINE_DEVIATION  : z_score / value / baseline_median
+            #   BASELINE_MULTI_DIM  : max_z_score / dimensions / dimension_count
+            if a.get("type") == "BASELINE_MULTI_DIM":
+                print(f"    → {a['severity']} | {a['type']} | "
+                      f"max_z={a.get('max_z_score')} | 维度数={a.get('dimension_count')} "
+                      f"| 维度={a.get('dimensions')}")
+            else:
+                print(f"    → {a['severity']} | {a['type']} | z={a.get('z_score')} | "
+                      f"值={a.get('value')} 基线中位={a.get('baseline_median')}")
         results[name] = {
             "description": desc,
             "packets": len(packets),
@@ -176,7 +226,9 @@ def main():
             "dual_engine_alerts": n_dual,
             "baseline_only_alerts": len(baseline_alerts),
             "baseline_alerts_detail": [
-                {k: a.get(k) for k in ("severity", "type", "z_score", "value", "baseline_median", "dimension")}
+                {k: a.get(k) for k in ("severity", "type", "z_score", "value",
+                                       "baseline_median", "max_z_score",
+                                       "dimension_count", "dimensions", "dimension")}
                 for a in baseline_alerts[:3]
             ],
             "conclusion": "基线引擎检出纯规则漏检的轻度异常" if (n_rule == 0 and len(baseline_alerts) > 0) else "需人工复核",

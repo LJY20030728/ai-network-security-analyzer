@@ -10,7 +10,7 @@ import hashlib
 import json
 import os
 from collections import Counter, defaultdict
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from loguru import logger
 
@@ -55,8 +55,13 @@ class ForensicKnowledgeBase:
                 if raw.get("file_hash") == file_hash:
                     logger.info(f"命中分析缓存: {os.path.basename(filepath)} (id={row['id']})")
                     return raw
-            except Exception:
-                pass
+            except Exception as e:
+                # 静默失败会让缓存"看起来没命中"，实际是这条记录的 raw_json 已损坏。
+                # 留痕以便区分"没有缓存"与"缓存坏了"。
+                logger.warning(
+                    f"分析缓存记录解析失败（该条目的 raw_json 可能已损坏，本次将重新分析）"
+                    f"| id={row['id']}: {type(e).__name__}: {e}"
+                )
         return None
 
     def cache_analysis(self, filepath: str, analysis_result: Dict[str, Any]) -> bool:
@@ -85,7 +90,7 @@ class ForensicKnowledgeBase:
 
         target_alerts = target.get("alerts", 0)
         target_severity = target.get("severity", {})
-        target_supervised = target.get("supervised_verdict", False)
+        target_stacking = target.get("stacking_verdict", False)
 
         for rec in all_records:
             if rec["id"] == analysis_id:
@@ -94,7 +99,7 @@ class ForensicKnowledgeBase:
             reasons = []
 
             # 相同监督模型判定
-            if rec.get("supervised_verdict") == target_supervised:
+            if rec.get("stacking_verdict") == target_stacking:
                 score += 0.3
                 reasons.append("相同主引擎判定")
 
@@ -121,8 +126,13 @@ class ForensicKnowledgeBase:
                 if abs((target_ts - rec_ts).days) <= 7:
                     score += 0.2
                     reasons.append("时间相近(7天内)")
-            except Exception:
-                pass
+            except Exception as e:
+                # 时间戳解析失败会静默丢掉"时间相近"这一项打分，
+                # 使跨样本关联的相似度排序被悄悄改变。
+                logger.warning(
+                    f"时间戳解析失败，本次关联打分跳过「时间相近」维度 "
+                    f"| target.ts={target.get('ts')!r} rec.ts={rec.get('ts')!r}: {e}"
+                )
 
             if score > 0.3:
                 related.append({
@@ -151,7 +161,7 @@ class ForensicKnowledgeBase:
         # 按日统计
         daily_stats = defaultdict(lambda: {"total": 0, "attack": 0, "normal": 0, "alerts": 0})
         severity_trend = defaultdict(lambda: defaultdict(int))
-        supervised_trend = defaultdict(lambda: {"attack": 0, "normal": 0})
+        verdict_trend = defaultdict(lambda: {"attack": 0, "normal": 0})
 
         for rec in records:
             try:
@@ -169,12 +179,12 @@ class ForensicKnowledgeBase:
             daily_stats[day]["total"] += 1
             daily_stats[day]["alerts"] += rec.get("alerts", 0)
 
-            if rec.get("supervised_verdict"):
+            if rec.get("stacking_verdict"):
                 daily_stats[day]["attack"] += 1
-                supervised_trend[day]["attack"] += 1
+                verdict_trend[day]["attack"] += 1
             else:
                 daily_stats[day]["normal"] += 1
-                supervised_trend[day]["normal"] += 1
+                verdict_trend[day]["normal"] += 1
 
             for sev, cnt in (rec.get("severity") or {}).items():
                 severity_trend[day][sev] += cnt
@@ -191,7 +201,7 @@ class ForensicKnowledgeBase:
 
         # 汇总统计
         total = len(records)
-        attack_count = sum(1 for r in records if r.get("supervised_verdict"))
+        attack_count = sum(1 for r in records if r.get("stacking_verdict"))
         total_alerts = sum(r.get("alerts", 0) for r in records)
 
         return {
@@ -203,7 +213,7 @@ class ForensicKnowledgeBase:
             "avg_alerts_per_record": round(total_alerts / total, 2) if total > 0 else 0,
             "daily_stats": dict(sorted(daily_stats.items())[-days:]),
             "severity_trend": {k: dict(v) for k, v in sorted(severity_trend.items())[-days:]},
-            "supervised_trend": {k: dict(v) for k, v in sorted(supervised_trend.items())[-days:]},
+            "verdict_trend": {k: dict(v) for k, v in sorted(verdict_trend.items())[-days:]},
             "top_attack_types": attack_types.most_common(10),
             "needs_review_count": sum(1 for r in records if r.get("needs_review")),
             "high_risk_count": sum(1 for r in records if r.get("hallucination_risk") == "high"),

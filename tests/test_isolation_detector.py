@@ -2,7 +2,6 @@
 """L2 孤立森林检测引擎单元测试：学习/检测/接口/同口径"""
 import os
 import sys
-import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 

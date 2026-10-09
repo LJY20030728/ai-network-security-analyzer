@@ -11,8 +11,7 @@ P0-3 LLM 幻觉控制三件套
 - 所有校验结果可追溯，写入报告
 """
 import re
-from typing import Dict, List, Any, Optional, Tuple
-from loguru import logger
+from typing import Dict, List, Any, Optional
 
 
 class OutputValidator:
@@ -115,21 +114,31 @@ class OutputValidator:
         issues = []
         output_lower = output.lower()
 
-        # 监督模型判定为正常，但 LLM 说有攻击
-        sup = evidence.get("supervised", {})
-        if sup and not sup.get("is_attack", True) and sup.get("confidence", 0) > 0.8:
+        # 三引擎融合判定为正常，但 LLM 说有攻击
+        fus = evidence.get("stacking") or {}
+        if fus and not fus.get("is_attack", True) and fus.get("confidence", 0) > 0.8:
             attack_keywords = ["攻击", "恶意", "入侵", "威胁", "attack", "malicious", "intrusion"]
             if any(k in output_lower for k in attack_keywords):
-                issues.append("监督模型判定为正常（高置信度），但 LLM 输出暗示存在攻击，结论矛盾")
+                issues.append("三引擎融合判定为正常（高置信度），但 LLM 输出暗示存在攻击，结论矛盾")
 
-        # 规则引擎无告警，但 LLM 说有具体攻击类型
-        rules = evidence.get("rules", {})
+        # 规则引擎无告警，但 LLM 明确断言了具体攻击类型
+        # （原实现在此处是空分支 `pass`，从未生效；现改为真实检测：
+        #   仅当 LLM 以确定性措辞断言攻击类型、且规则引擎零告警时标记）
+        rules = evidence.get("rules") or {}
         if rules and rules.get("total_alerts", 0) == 0:
-            specific_attacks = ["SYN Flood", "端口扫描", "DNS 隧道", "RST 风暴"]
+            specific_attacks = ["SYN Flood", "SYN洪水", "端口扫描", "DNS 隧道", "DNS隧道", "RST 风暴", "RST风暴"]
+            hedges = ["可能", "疑似", "或许", "不排除", "may", "might", "possibly"]
             for atk in specific_attacks:
-                if atk in output and atk not in output.split("可能")[0] if "可能" in output else atk in output:
-                    # 只在 LLM 明确断言时标记
-                    pass
+                if atk not in output:
+                    continue
+                # 取该攻击类型首次出现位置之前 12 个字符作为措辞窗口
+                idx = output.find(atk)
+                window = output[max(0, idx - 12):idx]
+                if not any(h in window for h in hedges):
+                    issues.append(
+                        f"规则引擎零告警，但 LLM 以确定性措辞断言「{atk}」，缺乏证据支撑"
+                    )
+                    break
 
         return issues
 
@@ -153,14 +162,17 @@ class OutputValidator:
 
 
 class ConfidenceCrossValidator:
-    """置信度交叉验证器：LLM 结论 vs 规则引擎 vs 监督模型"""
+    """置信度交叉验证器：LLM 结论 vs 规则引擎 vs 三引擎 Stacking 融合"""
 
     @staticmethod
     def cross_validate(llm_conclusion: str, rule_result: Dict,
-                       supervised_result: Optional[Dict],
+                       stacking_result: Optional[Dict] = None,
                        baseline_result: Optional[Dict] = None) -> Dict[str, Any]:
         """
         交叉验证多引擎结论一致性
+
+        :param stacking_result: 三引擎 Stacking 融合结果
+                                （report["stacking_fusion"]，含 is_attack / confidence）
         :return: 交叉验证结果
         """
         # 解析 LLM 结论倾向（攻击/正常/不确定）
@@ -171,9 +183,9 @@ class ConfidenceCrossValidator:
         rule_severity = "high" if any(
             a.get("severity") == "critical" for a in rule_result.get("alerts", [])) else "medium"
 
-        # 监督模型判定
-        sup_attack = supervised_result.get("is_attack", False) if supervised_result else None
-        sup_confidence = supervised_result.get("confidence", 0) if supervised_result else 0
+        # 三引擎融合判定（信号来自规则 + 基线 + 孤立森林）
+        fus_attack = stacking_result.get("is_attack") if stacking_result else None
+        fus_confidence = stacking_result.get("confidence", 0) if stacking_result else 0
 
         # 收集各引擎判定
         engines = []
@@ -181,9 +193,10 @@ class ConfidenceCrossValidator:
             engines.append({"engine": "LLM", "verdict": llm_verdict, "confidence": None})
         engines.append({"engine": "规则引擎", "verdict": "attack" if rule_attack else "normal",
                         "confidence": None, "alerts": rule_result.get("total_alerts", 0)})
-        if sup_attack is not None:
-            engines.append({"engine": "监督模型", "verdict": "attack" if sup_attack else "normal",
-                            "confidence": round(sup_confidence, 3)})
+        if fus_attack is not None:
+            engines.append({"engine": "三引擎融合",
+                            "verdict": "attack" if fus_attack else "normal",
+                            "confidence": round(fus_confidence, 3)})
 
         # 统计一致性
         attack_votes = sum(1 for e in engines if e["verdict"] == "attack")
@@ -195,12 +208,12 @@ class ConfidenceCrossValidator:
 
         # 矛盾检测
         contradictions = []
-        if llm_verdict == "attack" and sup_attack is False and sup_confidence > 0.8:
-            contradictions.append("LLM 判定攻击，但监督模型高置信度判定正常")
+        if llm_verdict == "attack" and fus_attack is False and fus_confidence > 0.8:
+            contradictions.append("LLM 判定攻击，但三引擎融合高置信度判定正常")
         if llm_verdict == "normal" and rule_attack and rule_severity == "high":
             contradictions.append("LLM 判定正常，但规则引擎有高危告警")
-        if sup_attack and not rule_attack and sup_confidence > 0.9:
-            contradictions.append("监督模型高置信度判定攻击，但规则引擎无告警（可能是未知攻击）")
+        if fus_attack and not rule_attack and fus_confidence > 0.9:
+            contradictions.append("三引擎融合高置信度判定攻击，但规则引擎无告警（可能是未知攻击）")
 
         overall_confidence = round(agreement * (1.0 - 0.3 * len(contradictions)), 3)
 
@@ -287,21 +300,23 @@ class ReviewMarker:
 
 
 def run_hallucination_control(llm_output: str, rule_result: Dict,
-                               supervised_result: Optional[Dict] = None,
+                               stacking_result: Optional[Dict] = None,
                                baseline_result: Optional[Dict] = None) -> Dict[str, Any]:
     """
     运行完整的幻觉控制三件套
+
+    :param stacking_result: 三引擎 Stacking 融合结果（report["stacking_fusion"]）
     :return: 包含校验、交叉验证、复核标记的完整结果
     """
     evidence = {
-        "supervised": supervised_result,
+        "stacking": stacking_result,
         "rules": rule_result,
         "baseline": baseline_result,
     }
 
     validation = OutputValidator.validate(llm_output, evidence)
     cross_val = ConfidenceCrossValidator.cross_validate(
-        llm_output, rule_result, supervised_result, baseline_result)
+        llm_output, rule_result, stacking_result, baseline_result)
     review = ReviewMarker.mark_for_review(validation, cross_val, rule_result)
 
     return {

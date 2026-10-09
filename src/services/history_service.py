@@ -8,7 +8,7 @@
 """
 
 import logging
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional
 
 from src.core.exceptions import (
     HistoryError,
@@ -47,8 +47,12 @@ class HistoryService:
                 return record
         raise HistoryNotFoundError(message=f"历史记录不存在: {record_id}")
     
-    def add_analysis(self, record: Dict[str, Any]) -> str:
-        """添加分析记录，返回记录ID"""
+    def add_analysis(self, record: Dict[str, Any]) -> Dict[str, Any]:
+        """添加分析记录，返回落库后的完整记录（含 id）
+
+        注意：返回类型是 dict 而非 str —— 底层 HistoryStore.add_analysis
+        返回带 id 的记录字典（与 src/storage/database.py 的签名保持一致）。
+        """
         try:
             return self._get_store().add_analysis(record)
         except Exception as e:
@@ -74,42 +78,46 @@ class HistoryService:
     def get_table_rows(self) -> List[List[Any]]:
         """
         获取历史记录表格行数据（用于UI展示）
-        
+
         Returns:
             表格行列表，每行：[时间, 文件名, 包数, 流数, 告警数, 严重度, 摘要]
+
+        字段名必须与 src/storage/database.py 的 list_analysis 返回列一致
+        （ts / file / packets / flows / alerts / severity / summary_text），
+        否则表格单元格会全部为空。
         """
         try:
             records = self.list_analysis()
             rows = []
             for r in records:
                 rows.append([
-                    r.get("timestamp", ""),
-                    r.get("filename", ""),
-                    r.get("packet_count", 0),
-                    r.get("flow_count", 0),
-                    r.get("alert_count", 0),
-                    r.get("max_severity", ""),
-                    (r.get("summary", "") or "")[:50],
+                    r.get("ts", ""),
+                    r.get("file", ""),
+                    r.get("packets", 0),
+                    r.get("flows", 0),
+                    r.get("alerts", 0),
+                    r.get("severity", ""),
+                    (r.get("summary_text", "") or "")[:50],
                 ])
             return rows
         except Exception as e:
             logger.error(f"格式化历史表格失败: {e}")
             return []
-    
+
     def get_dropdown_choices(self) -> List[str]:
         """获取历史记录下拉框选项"""
         try:
             records = self.list_analysis()
-            return [f"{r.get('timestamp', '')} | {r.get('filename', '')}" for r in records]
+            return [f"{r.get('ts', '')} | {r.get('file', '')}" for r in records]
         except Exception as e:
             logger.error(f"获取历史下拉选项失败: {e}")
             return []
-    
+
     def get_record_by_dropdown_label(self, label: str) -> Optional[Dict[str, Any]]:
         """根据下拉框标签获取记录"""
         records = self.list_analysis()
         for r in records:
-            choice = f"{r.get('timestamp', '')} | {r.get('filename', '')}"
+            choice = f"{r.get('ts', '')} | {r.get('file', '')}"
             if choice == label:
                 return r
         return None

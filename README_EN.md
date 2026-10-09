@@ -1,4 +1,4 @@
-﻿# AI Network Security Analyzer
+# AI Network Security Analyzer
 
 > AI-Assisted Network Forensics System — PCAP Offline Analysis + Four-Engine Integrated Detection + LLM Threat Assessment + RAG Security Knowledge Q&A
 
@@ -6,7 +6,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110-green.svg)](https://fastapi.tiangolo.com/)
 [![Gradio](https://img.shields.io/badge/Gradio-6.x-orange.svg)](https://www.gradio.app/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-148%20passed-brightgreen.svg)](#testing)
+[![Tests](https://img.shields.io/badge/tests-163%20passed-brightgreen.svg)](#testing)
 
 **[中文版 README](README.md) | English Version**
 
@@ -33,7 +33,7 @@
 Traditional network forensics relies on security analysts manually inspecting PCAP files packet-by-packet with Wireshark — extremely inefficient and highly dependent on individual experience. While rule engines automate detection, they suffer from severe false negatives for unknown attacks (rule-engine attack recall on UNSW-NB15 is only 0.0001).
 
 This project is an **AI-assisted offline network forensics analysis tool** that implements:
-- **Four-Engine Integrated Detection**: Supervised model (HistGradientBoosting) as primary engine + Rule engine + EWMA time-series baseline + Isolation Forest, with weighted voting to reduce false positives/negatives
+- **Four-Engine Integrated Detection**: Rule engine + EWMA time-series baseline + Isolation Forest + Supervised model (HistGradientBoosting). Each engine produces its own verdict with an **explicitly labelled confidence source** — a heuristic prior is never presented as a model output.
 - **LLM Threat Assessment**: Large language model translates technical alerts into human-readable threat analysis, with hallucination control trilogy
 - **RAG Security Knowledge Q&A**: Local vector store (BGE ONNX + ChromaDB), hybrid retrieval + reranking
 - **Full-Process Closed Loop**: Detection → Analysis → Forensic Report (five elements) → Historical Knowledge Base (cross-sample correlation / trend analysis)
@@ -44,7 +44,7 @@ This project is an **AI-assisted offline network forensics analysis tool** that 
 |-----------|-------------|
 | **Algorithm Depth** | 76-dim CICFlowMeter feature extraction, four-engine ensemble voting, adaptive threshold, STL time-series decomposition |
 | **AI Engineering** | Hallucination control trilogy, RAG hybrid retrieval + reranking, local vector inference |
-| **Engineering Quality** | 148 unit tests, FastAPI + Pydantic, SQLite WAL, DPAPI encryption, global exception handling |
+| **Engineering Quality** | 163 unit tests, FastAPI + Pydantic, SQLite WAL, DPAPI encryption, global exception handling |
 | **Lightweight & Portable** | Average memory peak 23MB, local inference no external service dependency, Windows .exe packaging |
 | **Verifiable** | All metrics have evaluation scripts and result files — no "guesstimates" |
 
@@ -54,12 +54,23 @@ This project is an **AI-assisted offline network forensics analysis tool** that 
 
 ### 🔍 Four-Engine Integrated Detection
 
-| Engine | Type | Weight | Description |
-|--------|------|--------|-------------|
-| **Supervised Model** | HistGradientBoosting | 0.5 | Flow-level prediction + PCAP-level aggregation; UNSW-NB15 (194-dim) F1=0.9704, UNSW-CIC Re-extracted (76-dim) F1=0.9487 |
-| **Rule Engine** | Threshold rules | 0.2 | 10+ configurable rules (SYN flood / port scan / DNS tunnel / RST storm, etc.) |
-| **Time-Series Baseline** | EWMA + Median/MAD | 0.15 | 4-dimension joint detection, multi-dimension simultaneous deviation triggers CRITICAL |
-| **Isolation Forest** | Unsupervised anomaly | 0.15 | Suitable for low-dimensional tabular data, detects unknown anomalies |
+> **⚠️ Scope note (3.2.0)**: all four engines are implemented, but the **supervised model is
+> disabled by default** (`SUPERVISED_ENGINE_ENABLED=false`). It was verified to add **zero
+> measurable benefit** on this repository's own test samples while producing false positives and
+> raising streaming peak memory by 174%. It remains available and is genuinely effective
+> **within its training domain** (UNSW-NB15 F1=0.9487, reproducible via
+> `tools/eval_supervised_baseline.py`). See `docs/监督模型增量价值验证.md`.
+
+| Engine | Type | Role | Description |
+|--------|------|------|-------------|
+| **Rule Engine** | Threshold rules | Active | 5 configurable rules (SYN flood / port scan / DNS tunnel / large transfer / RST storm); thresholds from `config/settings.py`, overridable via `.env` |
+| **Time-Series Baseline** | EWMA + Median/MAD | Active | 4-dimension joint detection (window packets / bytes / SYN / dst ports), with drift detection |
+| **Isolation Forest** | Unsupervised anomaly | Opt-in (`ML_ENGINE_ENABLED=false`) | Same window input as baseline; detects multi-dimensional coupling anomalies |
+| **Supervised Model** | HistGradientBoosting | **Default off** | 76-dim CICFlowMeter features; F1=0.9487 in-domain. In streaming mode it only evaluates a bounded packet window, reported honestly via `scope.coverage_ratio` / `scope.window_capped` |
+
+**Confidence integrity**: every confidence value discloses its provenance via `confidence_source` —
+`model` (from `predict_proba` only), `aggregate_heuristic` (a hand-set prior, **not** a model
+output), or `model+aggregate`. The runtime never presents a rule prior as a model confidence.
 
 - **Adaptive Threshold**: Dynamically adjusted based on input traffic P95 percentile, adapts to different network environments
 - **STL Advanced Mode**: Zero-dependency lightweight time-series decomposition (trend + seasonality + residual), captures periodic deviations
@@ -145,7 +156,7 @@ This project is an **AI-assisted offline network forensics analysis tool** that 
 | **Storage** | SQLite | 3.x | WAL mode, three tables + indexes |
 | **Security** | DPAPI (ctypes) | - | Windows built-in encryption |
 | **Logging** | loguru | 0.7+ | Structured logging |
-| **Testing** | pytest | 8.x+ | 148 passed / 19 skipped |
+| **Testing** | pytest | 8.x+ | 163 passed / 0 skipped |
 
 ---
 
@@ -379,7 +390,7 @@ Streaming cuts memory peak by **162.8x** with identical alerts (`data/eval_perf/
 
 | Metric | Value |
 |--------|-------|
-| Result | **148 passed / 19 skipped / 0 failed** |
+| Result | **163 passed / 0 skipped / 0 failed** |
 | Test files | 17 |
 | Covered modules | Detection algorithms / API routes / Storage / Security / Services / Utils |
 
@@ -555,7 +566,7 @@ ai-network-security-analyzer/
 │   ├── baselines/             # Baseline files (JSON compatible backup)
 │   ├── eval_perf/             # Evaluation results
 │   └── ...                    # (db/history/chroma_db generated at runtime)
-├── tests/                     # Tests (148)
+├── tests/                     # Tests (163)
 ├── tools/                     # Reproducible experiment scripts
 │   ├── init_resources.py      # Resource initialization (download BGE + MITRE)
 │   ├── train_unsw_supervised.py  # UNSW model training (stratified random)

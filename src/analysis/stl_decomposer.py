@@ -10,7 +10,7 @@ P2-3: 轻量级时序分解（STL 思想，零依赖实现）
 检测周期性异常：例如工作时间流量高、凌晨流量低，如果凌晨出现高流量则标记异常。
 """
 import math
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List
 
 from loguru import logger
 

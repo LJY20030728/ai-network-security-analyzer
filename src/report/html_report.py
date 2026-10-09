@@ -17,6 +17,8 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 from loguru import logger
 
+from config.settings import settings
+
 
 SEVERITY_COLORS = {
     "CRITICAL": "#B23A3C",
@@ -297,7 +299,7 @@ def save_html_report(analysis: Dict[str, Any],
     full_evidence.setdefault("source_file", "历史记录重新生成")
     full_evidence.setdefault("source_sha256", "N/A")
     full_evidence.setdefault("analyzed_at", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-    full_evidence.setdefault("rule_version", "2.0.0")
+    full_evidence.setdefault("rule_version", settings.version)
     html_content = build_html_report(analysis, full_evidence, ai_analysis, ai_traffic_summary,
                                      structured_report=structured_report, case_id=cid)
     with open(filepath, "w", encoding="utf-8") as f:

@@ -1,4 +1,4 @@
-﻿"""
+"""
 RAG知识库引擎
 基于 ChromaDB 原生API实现安全知识的检索增强生成
 不依赖langchain_community，更轻量更稳定

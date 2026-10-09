@@ -1,4 +1,4 @@
-﻿; ============================================================
+; ============================================================
 ; AI网络安全智能分析系统 - Inno Setup 安装脚本
 ; 功能：
 ;   1. 标准安装向导（中文/英文），无需管理员权限（per-user 安装）
@@ -6,27 +6,34 @@
 ;   3. 安装时可选填写大模型 API Key（写入 .env，不写死进程序）
 ;   4. 创建开始菜单/桌面快捷方式，安装完成后可立即启动
 ; 编译：ISCC.exe installer.iss
+;
+; 依赖说明（3.3.0）：
+;   · WebView2 Runtime —— 界面渲染所需，本脚本会自动安装
+;   · .NET Framework 4.7.2+ —— pywebview 的 pythonnet 依赖它在**独立桌面窗口**模式
+;     下加载 Python.Runtime.dll。缺失时程序仍可正常使用，
+;     只是自动降级为浏览器界面（desktop_app.py 已实现优雅降级）。
+;     因此本脚本不做强制校验，只在 Readme 页提示。
 ; ============================================================
 
 [Setup]
 AppId={{8A2B9C31-4E7D-4F3A-9C21-5D6E7F8A9B0C}
 AppName=AI网络安全智能分析系统
-AppVersion=3.1.1
-AppVerName=AI网络安全智能分析系统 3.1.1
+AppVersion=3.3.0
+AppVerName=AI网络安全智能分析系统 3.3.0
 AppPublisher=AI Network Security Analyzer
-DefaultDirName={autopf}\AI网络安全分析系统
+DefaultDirName={autopf}\AI网络安全智能分析系统
 DefaultGroupName=AI网络安全智能分析系统
 DisableProgramGroupPage=no
 DisableDirPage=no
 PrivilegesRequired=lowest
 OutputDir=installer_output
-OutputBaseFilename=AI网络安全智能分析系统_Setup_3.1.1
+OutputBaseFilename=AI网络安全智能分析系统_Setup_3.3.0
 Compression=lzma2/ultra
 SolidCompression=yes
 WizardStyle=modern
 SetupIconFile=assets\app_icon.ico
 UninstallDisplayIcon={app}\AI网络安全分析系统.exe
-VersionInfoVersion=3.1.1
+VersionInfoVersion=3.3.0.0
 VersionInfoDescription=AI网络安全智能分析系统 安装程序
 ArchitecturesInstallIn64BitMode=x64compatible
 
@@ -38,7 +45,13 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-Source: "dist\AI网络安全分析系统\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; 打包产物（onedir）。排除运行时会自动生成的目录，避免把开发机上的
+; 数据库 / 日志 / 缓存打进安装包：
+;   data\  —— 首次启动由 seed_assets() 从 _internal 迁移生成
+;   logs\  —— 首次启动自动创建
+Source: "dist\AI网络安全分析系统\*"; DestDir: "{app}"; \
+    Excludes: "\data\*,\logs\*"; \
+    Flags: ignoreversion recursesubdirs createallsubdirs
 ; WebView2 微软官方在线安装器（仅安装时临时释放，不写入安装目录；约 2MB）
 Source: "assets\MicrosoftEdgeWebView2Setup.exe"; Flags: dontcopy
 ; 注意：.env 不在打包产物中（API Key 绝不写死），由安装流程或应用内设置引导生成
@@ -134,7 +147,7 @@ begin
     '大模型 API 配置（可选）',
     '填写你的大模型 API Key，用于 AI 威胁研判与安全问答',
     '该配置将保存到安装目录下的 .env 文件，不会写入程序本体，可随时修改。' + #13#10 +
-    '留空可跳过，核心检测（规则/监督模型/时序基线/孤立森林）无需 Key 即可运行。' + #13#10 + #13#10 +
+    '留空可跳过，核心检测（规则 / 时序基线 / 孤立森林 / 三引擎 Stacking 融合）无需 Key 即可运行。' + #13#10 + #13#10 +
     '常用服务商：' + #13#10 +
     '  智谱AI          https://open.bigmodel.cn/api/paas/v4   glm-4.5-air' + #13#10 +
     '  DeepSeek        https://api.deepseek.com              deepseek-chat' + #13#10 +

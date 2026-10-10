@@ -392,7 +392,7 @@ docker compose up -d --build
 
 | 评测 | 脚本 | 产出 |
 |---|---|---|
-| 黄金样本回归（攻击命中 5/5；**正常告警 5 条，阈值 ≤3 未达成**） | `tools/verify_golden.py` | 终端输出 + data/samples/golden/regression_result.json |
+| 黄金样本回归（攻击命中 5/5；正常告警 1 条，阈值 ≤3 通过） | `tools/verify_golden.py` | 终端输出 + data/samples/golden/regression_result.json |
 | 孤立森林 vs EWMA 基线（FPR / TPR） | `tools/eval_ml_engine.py` | data/eval_perf/ml_engine.json |
 | 基线窗口/σ 敏感性网格 | `tools/eval_window_sensitivity.py` | data/eval_perf/window_sensitivity.json |
 | 基线引擎增量价值（纯规则 vs 规则+基线） | `tools/verify_baseline_value.py` | 终端输出 |
@@ -454,9 +454,20 @@ docker compose up -d --build
 
 | 验证 | 命令 | 结果 |
 |------|------|------|
-| 黄金样本回归 | `python tools/verify_golden.py` | 攻击命中 **5/5**；**normal 告警 5 条（阈值 ≤3）→ exit 1** |
+| 黄金样本回归 | `python tools/verify_golden.py` | 攻击命中 **5/5**；正常告警 **1 条（阈值 ≤3）→ exit 0** |
 | 压测告警一致性 | `python tools/bench_stream.py` | 全量 15 条 / 流式 15 条 → **PASS** |
 | 同文件交替对照 | 见下文说明 | 三份样本告警数**逐一相同**（49/49、0/0、0/0） |
+
+> **已修复（此前为已知待办）**：`verify_golden.py` 曾以 5 条正常流量误报 exit 1。
+> 根因不是参数没调好，而是**语义错配**：孤立森林是**双向**统计异常检测，
+> 而安全威胁是**单向**的（资源耗尽 / 扫描 / 外传，即**高于**基线）。5 条里有 4 条
+> 是「流量比基线安静」的窗口，本不构成威胁。现在**只有高侧偏差升级为告警**，
+> 低侧偏差单独记入 `behavioral_observations` 且不带威胁级别。剩余 1 条是真实的
+> 高侧异常（目的端口数高于基线）。
+>
+> 另外，生成 golden 样本的工具此前**每次运行都会覆盖
+> `data/samples/golden/*.pcap`**，静默改写了回归测试的输入数据；现在默认写入
+> `data/samples/generated/`，仅在显式传 `--update-golden` 时才改动 golden。
 
 同文件交替对照的实测增量（预热后，排除 sklearn 首次导入的一次性开销）：
 

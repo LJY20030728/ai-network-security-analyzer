@@ -137,8 +137,23 @@ def gen_burst():
     return pkts
 
 
-def _save(pkts, name):
-    path = os.path.join("data", "samples", "golden", f"{name}.pcap")
+def _save(pkts, name, update_golden: bool = False):
+    """保存生成的样本。
+
+    **默认写入临时目录**，不改动 data/samples/golden/ 下的受控样本。
+    此前本函数无条件删除并重建 golden 样本，导致「跑一次评测脚本就静默改写了
+    回归测试的输入数据」——回归验证的可复现性因此失效（同一命令在不同时间
+    得到不同基线）。需要刷新 golden 样本时必须显式传 update_golden=True
+    （命令行 --update-golden）。
+    """
+    if update_golden:
+        base = os.path.join("data", "samples", "golden")
+    else:
+        # 不放系统临时目录：本项目的沙箱/受限终端下 tempfile.gettempdir() 可能
+        # 解析回仓库根目录，反而会在仓库里留垃圾。固定写到 data/ 下的生成目录，
+        # 该路径已在 .gitignore 中排除。
+        base = os.path.join("data", "samples", "generated")
+    path = os.path.join(base, f"{name}.pcap")
     os.makedirs(os.path.dirname(path), exist_ok=True)
     if os.path.exists(path):
         os.remove(path)  # 覆盖写，避免重复追加污染样本
@@ -160,6 +175,14 @@ def main():
     print("=" * 70)
     print("基线引擎增量价值验证（纯规则 vs 规则+基线）")
     print("=" * 70)
+
+    # 默认不改动 data/samples/golden 下的受控样本；需要刷新时显式 --update-golden
+    update_golden = "--update-golden" in sys.argv
+    if update_golden:
+        print("⚠️  --update-golden：本次会覆盖 data/samples/golden/ 下的样本文件")
+    else:
+        print("ℹ️  生成样本写入临时目录（不改动 golden 样本）；"
+              "如需刷新请加 --update-golden")
 
     parser = PcapParser()
 
@@ -195,7 +218,7 @@ def main():
 
     for name, (gen, desc) in cases.items():
         pkts = gen()
-        path = _save(pkts, name)
+        path = _save(pkts, name, update_golden=update_golden)
         packets = parser.parse_file(path)
         print(f"[样本] {name} | {desc} | {len(packets)} 包")
 

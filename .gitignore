@@ -132,3 +132,6 @@ data/samples/regression_result.json
 data/samples/analyzed/
 
 build_log*.txt
+
+# 评测脚本生成的临时样本（verify_baseline_value.py 默认写这里，不改动 golden）
+data/samples/generated/

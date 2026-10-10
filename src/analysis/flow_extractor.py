@@ -576,6 +576,8 @@ class TrafficAnalyzer:
                 "MEDIUM": sum(1 for a in alerts if a["severity"] == "MEDIUM"),
                 "LOW": sum(1 for a in alerts if a["severity"] == "LOW"),
             },
+            # 行为观测（非告警）：低侧统计偏差，不构成威胁，仅供画像参考
+            "behavioral_observations": [],
         }
 
         # ---------- 基线偏差（增量窗口） ----------
@@ -746,32 +748,61 @@ class TrafficAnalyzer:
 
     def _merge_ml_anomalies(self, anomalies: Dict[str, Any],
                               ml_result: Dict[str, Any]) -> Dict[str, Any]:
-        """将孤立森林异常窗口合并进告警列表（最多 5 条，按异常分取最异常）"""
+        """把孤立森林异常分成两类处理（这是关键的安全语义修正）：
+
+        - **高侧**（包数/字节/SYN/端口数高于基线）→ 计入告警。这才是威胁信号
+          （扫描、洪泛、外传）。
+        - **低侧**（流量比基线安静）→ 只计入 `behavioral_observations`，**不报警**。
+          孤立森林是双向的统计异常检测器，而"流量变少"在安全语境下不是威胁；
+          此前低侧异常与高侧同等计入告警，是正常流量误报的主要来源。
+
+        两类都保留在 `ml_profile` 中供 Stacking 元学习器使用（其 `anomaly_windows`
+        字段仍为全部异常窗口数），因此**融合层的输入语义未改变**。
+        """
         anoms = ml_result.get("anomalies", [])
+        anomalies.setdefault("behavioral_observations", [])
         if not anoms:
+            anomalies["ml_anomalies_added"] = 0
             return anomalies
+
         alerts = anomalies["alerts"]
         added = 0
+        observed = 0
+        # 按异常分排序（负值越小越异常），各取最异常的前若干条
         for d in sorted(anoms, key=lambda x: x["anomaly_score"])[:5]:
-            alerts.append({
+            direction = d.get("direction", "high")
+            record = {
                 "type": "ML_ANOMALY",
-                "severity": d["severity"],
                 "src_ip": "",
                 "dimension": d["dimension"],
+                "direction": direction,
                 "anomaly_score": d["anomaly_score"],
                 "score_threshold": d["score_threshold"],
                 "window_index": d["window_index"],
                 "detector": "isolation-forest-unsupervised",
-                "description": (f"机器学习异常检测：窗口{d['dimension']}异常，"
-                                f"异常分={d['anomaly_score']}（阈值 {d['score_threshold']}），"
-                                f"孤立森林对多维窗口特征联合建模捕获耦合异常"),
-            })
-            added += 1
+            }
+            if direction == "high":
+                record["severity"] = d["severity"]
+                record["description"] = (
+                    f"机器学习异常检测：窗口{d['dimension']}高于基线（资源偏高），"
+                    f"异常分={d['anomaly_score']}（阈值 {d['score_threshold']}），"
+                    f"孤立森林对多维窗口特征联合建模捕获耦合异常")
+                alerts.append(record)
+                added += 1
+            else:
+                record["severity"] = "INFO"
+                record["description"] = (
+                    f"行为观测（非告警）：窗口{d['dimension']}低于基线（流量更安静），"
+                    f"异常分={d['anomaly_score']}。低侧偏差不构成威胁，仅作画像参考")
+                anomalies["behavioral_observations"].append(record)
+                observed += 1
+
         anomalies["alerts"] = self._sort_alerts(alerts)
         anomalies["total_alerts"] = len(alerts)
         for sev in anomalies["severity_summary"]:
             anomalies["severity_summary"][sev] = sum(1 for a in alerts if a["severity"] == sev)
         anomalies["ml_anomalies_added"] = added
+        anomalies["ml_observations_added"] = observed
         return anomalies
 
     # ------------------------------------------------------------------
@@ -1099,4 +1130,6 @@ class TrafficAnalyzer:
                 "MEDIUM": sum(1 for a in alerts if a["severity"] == "MEDIUM"),
                 "LOW": sum(1 for a in alerts if a["severity"] == "LOW"),
             },
+            # 行为观测（非告警）：低侧统计偏差，不构成威胁，仅供画像参考
+            "behavioral_observations": [],
         }

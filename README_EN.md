@@ -315,15 +315,25 @@ list.
 
 | Verification | Command | Result |
 |---|---|---|
-| Golden-sample regression | `python tools/verify_golden.py` | Attack hits **5/5**; **5 normal-traffic alerts (threshold ≤3) → exit 1** |
+| Golden-sample regression | `python tools/verify_golden.py` | Attack hits **5/5**; normal-traffic alerts **1 (threshold ≤3) → exit 0** |
 | Stress-test alert consistency | `python tools/bench_stream.py` | Full-load 15 / streaming 15 → **PASS** |
 | Engine independence | `python tools/eval_ml_engine.py` | Isolation Forest FPR=0.04 / TPR=0.857; EWMA baseline FPR=0 / TPR=0.4286 |
 
-> **Known open issue.** `verify_golden.py` currently exits non-zero: 5 false
-> positives on normal traffic, all of them `ML_ANOMALY` alerts from the Isolation
-> Forest. The cause is the contamination setting combined with training and scoring
-> on the same capture. It is documented here rather than hidden by widening the
-> threshold. The earlier "0 false positives / exit 0" claim predates this state.
+> **Fixed (previously an open issue).** `verify_golden.py` used to exit non-zero
+> with 5 false positives on normal traffic, all `ML_ANOMALY` alerts. The root cause
+> was a **semantics mismatch, not a tuning problem**: Isolation Forest is a
+> *bidirectional* statistical outlier detector, while a security threat is
+> *one-directional* (resource exhaustion, scanning, exfiltration — i.e. traffic
+> *above* baseline). Four of the five alerts were windows that were quieter than
+> baseline, which is not a threat. High-side deviations are now the only ones
+> promoted to alerts; low-side deviations are recorded separately as
+> `behavioral_observations` and carry no severity. The remaining single alert is a
+> genuine high-side outlier (destination-port count above baseline).
+>
+> The tooling that generated the golden samples also used to overwrite
+> `data/samples/golden/*.pcap` on every run, silently mutating the regression
+> inputs; it now writes to `data/samples/generated/` unless `--update-golden` is
+> passed explicitly.
 
 ### Test Coverage
 

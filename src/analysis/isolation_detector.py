@@ -136,11 +136,17 @@ class IsolationDetector:
             s = float(s)
             if s < self._score_threshold:
                 top_dim, top_ratio = self._top_contributing_dimension(w)
+                direction = self._deviation_direction(w, top_dim)
                 z_ratio = top_ratio
-                severity = "HIGH" if s < self._score_threshold - 0.05 else "MEDIUM"
+                # 严重度只看高侧：低侧异常（流量变安静）不构成威胁
+                if direction == "high":
+                    severity = "HIGH" if s < self._score_threshold - 0.05 else "MEDIUM"
+                else:
+                    severity = "INFO"
                 anomalies.append({
                     "window_index": idx,
                     "dimension": top_dim,
+                    "direction": direction,
                     "anomaly_score": round(s, 4),
                     "score_threshold": round(self._score_threshold, 4),
                     "top_dim_ratio": round(z_ratio, 2),   # 该维度相对中位数的倍数
@@ -160,6 +166,20 @@ class IsolationDetector:
             if abs(ratio) > abs(best_ratio):
                 best_dim, best_ratio = d, ratio
         return best_dim, abs(best_ratio)
+
+    def _deviation_direction(self, w: Dict[str, float], dim: str) -> str:
+        """判断该维度相对训练中位数是偏高还是偏低。
+
+        安全语义下二者并不等价：**资源偏高**（包数/字节/SYN/端口数激增）才是
+        威胁信号（扫描、洪泛、外传）；**资源偏低**只是流量变安静，不构成威胁。
+        孤立森林本身是双向的，必须由本方法补上方向语义。
+        """
+        med = self._medians.get(dim, 0.0)
+        v = float(w.get(dim, 0.0))
+        if med > 0:
+            return "high" if v >= med else "low"
+        # 中位数为 0（如 window_syn 常态为 0）：任何正值即为偏高
+        return "high" if v > 0 else "low"
 
     # ---------- 持久化 ----------
 

@@ -1,14 +1,15 @@
 {
   "generated_at": "golden regression",
-  "normal_alerts": 0,
+  "normal_alerts": 1,
   "attack_hits": [
     {
       "sample": "synflood",
       "packets": 200,
-      "alerts": 13,
+      "alerts": 18,
       "hit": [
         "BASELINE_DEVIATION",
         "BASELINE_MULTI_DIM",
+        "ML_ANOMALY",
         "SYN_FLOOD_SUSPECTED"
       ],
       "missing": [],
@@ -17,10 +18,11 @@
     {
       "sample": "portscan",
       "packets": 50,
-      "alerts": 13,
+      "alerts": 18,
       "hit": [
         "BASELINE_DEVIATION",
         "BASELINE_MULTI_DIM",
+        "ML_ANOMALY",
         "PORT_SCAN_SUSPECTED"
       ],
       "missing": [],
@@ -39,11 +41,12 @@
     {
       "sample": "largeflow",
       "packets": 8239,
-      "alerts": 4,
+      "alerts": 5,
       "hit": [
         "BASELINE_DEVIATION",
         "BASELINE_MULTI_DIM",
-        "LARGE_DATA_TRANSFER"
+        "LARGE_DATA_TRANSFER",
+        "ML_ANOMALY"
       ],
       "missing": [],
       "pass": true
@@ -51,8 +54,9 @@
     {
       "sample": "rststorm",
       "packets": 80,
-      "alerts": 1,
+      "alerts": 3,
       "hit": [
+        "ML_ANOMALY",
         "RST_STORM"
       ],
       "missing": [],

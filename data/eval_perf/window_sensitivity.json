@@ -30,7 +30,7 @@
       "largeflow": 4,
       "rststorm": 0,
       "lightscan": 0,
-      "burst": 1
+      "burst": 5
     }
   },
   {
@@ -38,8 +38,8 @@
     "sigma": 4.0,
     "normal_windows": 231,
     "fpr": 0.0,
-    "tpr": 0.2857,
-    "hit_samples": 2,
+    "tpr": 0.4286,
+    "hit_samples": 3,
     "per_sample": {
       "synflood": 12,
       "portscan": 0,
@@ -47,7 +47,7 @@
       "largeflow": 4,
       "rststorm": 0,
       "lightscan": 0,
-      "burst": 0
+      "burst": 1
     }
   },
   {
@@ -63,8 +63,8 @@
       "dnstunnel": 0,
       "largeflow": 2,
       "rststorm": 6,
-      "lightscan": 7,
-      "burst": 53
+      "lightscan": 6,
+      "burst": 58
     }
   },
   {
@@ -81,7 +81,7 @@
       "largeflow": 2,
       "rststorm": 0,
       "lightscan": 4,
-      "burst": 10
+      "burst": 11
     }
   },
   {
@@ -131,7 +131,7 @@
       "dnstunnel": 0,
       "largeflow": 2,
       "rststorm": 2,
-      "lightscan": 3,
+      "lightscan": 2,
       "burst": 20
     }
   },

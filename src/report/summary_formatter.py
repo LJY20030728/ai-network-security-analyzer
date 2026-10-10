@@ -101,8 +101,21 @@ def format_hallucination_block(hv: Dict[str, Any]) -> str:
     """
     if not hv:
         return ""
-    text = "\n━━━━━━━━━━━━━━━━━━━━\n🛡️ 幻觉控制校验\n"
     ov = hv.get("output_validation") or {}
+
+    # 【关键】AI 不可用时不得展示校验分与风险等级——那些数字在「没有输出」时
+    # 没有意义。此前会把 API 报错渲染成「校验分 1.0 (pass) / 幻觉风险 low」，
+    # 与同页的报错信息自相矛盾。
+    if ov.get("level") == "unavailable" or hv.get("available") is False:
+        reason = (hv.get("unavailable_reason")
+                  or ov.get("unavailable_reason") or "未知原因")
+        text = "\n━━━━━━━━━━━━━━━━━━━━\n🛡️ AI 分析状态\n"
+        text += f"  • ⚠️ **AI 分析不可用**：{reason}\n"
+        text += "  • 本次未生成有效的 AI 研判内容，因此不提供输出校验分与幻觉风险评级；\n"
+        text += "    检测结论仍由规则 / 时序基线 / 孤立森林三引擎独立给出，未受此影响。\n"
+        return text
+
+    text = "\n━━━━━━━━━━━━━━━━━━━━\n🛡️ 幻觉控制校验\n"
     text += f"  • 输出校验分: {ov.get('score')} ({ov.get('level')})\n"
     cv = hv.get("cross_validation") or {}
     text += (f"  • 多引擎共识: {cv.get('consensus')} "

@@ -21,13 +21,27 @@ class OutputValidator:
     MIN_LENGTH = 20
     MAX_LENGTH = 10000
 
+    # 【关键】LLM 调用失败时 llm_client 返回的是**哨兵字符串**而非抛异常。
+    # 此前校验器对它一视同仁地打分——任何 ≥20 字符的串都拿 1.0 分，
+    # 结果是「API 报 401」在报告里被认证为「校验通过 / 幻觉风险低」。
+    # 交付物因此自相矛盾：一张报错截图旁边写着质量合格。
+    #
+    # 与 src/ai/llm_client.py 的返回值严格对应（chat() 与 stream() 两条路径）。
+    FAILURE_MARKERS = (
+        "[大模型调用失败]",
+        "[错误]",
+        "[LLM",
+    )
+
     # 幻觉特征词（无证据支撑的绝对化表述）
     HALLUCINATION_PATTERNS = [
         r"毫无疑问", r"绝对是", r"100%", r"完全确定", r"铁证如山",
-        r"毫无疑问是", r"肯定是", r"必然是",
+        r"肯定是", r"必然是",
     ]
 
     # 已知攻击技术名称（用于校验 LLM 提到的技术是否存在）
+    # 注：不含 Analysis / Generic / DoS / Exploit / 利用 / Recon 等泛词——
+    # 它们不是具体攻击技术，混进来会让「未识别技术」校验形同虚设。
     KNOWN_ATTACK_TECHNIQUES = {
         "SYN Flood", "SYN flood", "端口扫描", "Port Scan", "port scan",
         "DNS 隧道", "DNS Tunneling", "RST 风暴", "RST Storm",
@@ -35,26 +49,60 @@ class OutputValidator:
         "XSS", "跨站脚本", "DDoS", "勒索软件", "Ransomware",
         "钓鱼", "Phishing", "中间人攻击", "MITM", "零日漏洞", "0day",
         "木马", "Trojan", "后门", "Backdoor", "蠕虫", "Worm",
-        "Exploit", "利用", "Fuzzing", "模糊测试", "Recon", "侦察",
-        "Generic", "Shellcode", "Analysis", "DoS",
+        "Shellcode",
     }
+
+    @classmethod
+    def detect_llm_failure(cls, output: str) -> Optional[str]:
+        """检出 LLM 调用失败哨兵；未失败返回 None。
+
+        只匹配**开头**的哨兵标记，避免把正文中偶然引用的同样字串误判为失败。
+        """
+        if not output:
+            return "输出为空"
+        head = output.lstrip()[:60]
+        for marker in cls.FAILURE_MARKERS:
+            if head.startswith(marker):
+                # 去掉哨兵本身，保留剩余原因（便于报告展示）
+                reason = output.lstrip()[len(marker):].strip()
+                return reason or "大模型调用失败"
+        return None
+
+    @classmethod
+    def unavailable(cls, reason: str, output: str = "") -> Dict[str, Any]:
+        """LLM 不可用时的校验结果。
+
+        `level="unavailable"` 与 `hallucination_risk="unavailable"` 是给下游
+        （报告 / UI / 历史记录）的明确信号：**这次没有可评估的 AI 输出**，
+        因此不得展示校验分与风险等级——那些数字在无输出时没有意义。
+        """
+        return {
+            "valid": False,
+            "score": 0.0,
+            "issues": [f"AI 分析不可用：{reason}"],
+            "level": "unavailable",
+            "summary": f"AI 分析不可用（{reason}），未执行输出校验",
+            "length": len(output or ""),
+            "mentioned_techniques": [],
+            "unavailable_reason": reason,
+        }
 
     @classmethod
     def validate(cls, output: str, evidence: Optional[Dict] = None) -> Dict[str, Any]:
         """
         校验 LLM 输出
         :param output: LLM 输出文本
-        :param evidence: 证据数据（规则告警、监督模型结果等）
-        :return: 校验结果字典
+        :param evidence: 证据数据（规则告警、融合判定等）
+        :return: 校验结果字典（level ∈ pass / warning / fail / error / unavailable）
         """
         if not output:
-            return {
-                "valid": False,
-                "score": 0.0,
-                "issues": ["输出为空"],
-                "level": "error",
-                "summary": "输出为空，校验失败",
-            }
+            return cls.unavailable("输出为空", output)
+
+        # 0. 调用失败检测必须最先做：失败串既不是合格输出，也不是"低质量输出"，
+        #    后续所有打分（长度/措辞/技术名）对它都没有意义。
+        failure_reason = cls.detect_llm_failure(output)
+        if failure_reason is not None:
+            return cls.unavailable(failure_reason, output)
 
         issues = []
         score = 1.0
@@ -144,11 +192,18 @@ class OutputValidator:
 
     @staticmethod
     def _extract_mentioned_techniques(text: str) -> List[str]:
-        """从文本中提取提到的攻击技术名称"""
+        """从文本中提取提到的攻击技术名称。
+
+        对 LLM 失败哨兵直接返回空列表：`[大模型调用失败] Error code: 401 -
+        Authentication Fails` 此前会把 "Authentication Fails" 当成一种攻击技术
+        提出来（它只是报错信息）。
+        """
+        if not text or OutputValidator.detect_llm_failure(text) is not None:
+            return []
         techs = []
-        # 简单提取：匹配大写开头的技术名
+        # 匹配多词技术名（形如 "SQL Injection"）；不匹配报错文本形态
         patterns = [
-            r"([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)",  # 多词技术名
+            r"([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)",
             r"(SYN Flood|DNS Tunneling|RST Storm|Port Scan|Brute Force|SQL Injection)",
         ]
         for p in patterns:
@@ -232,20 +287,63 @@ class ConfidenceCrossValidator:
 
     @staticmethod
     def _parse_llm_verdict(text: str) -> str:
-        """从 LLM 输出中解析判定倾向"""
+        """从 LLM 输出中解析判定倾向（attack / normal / unknown）。
+
+        此前实现有两个真实缺陷：
+        1. **否定词反向计分**：`"未发现"` 本身包含子串 `"发现"`，而后者在攻击
+           信号表里——一句「未发现攻击，流量正常」会同时给攻击票和正常票，互相
+           抵消后返回 unknown。
+        2. **攻击偏置**：`"检测到"`、`"发现"` 是中性动词，几乎出现在任何分析
+           文本里（包括「检测到 3 条告警，均为误报」），把它们算作攻击信号会让
+           判定系统性偏向 attack。
+
+        修复方式：先消解否定式，再匹配**倾向性**词汇，且中性动词不计分。
+        """
         if not text:
             return "unknown"
         text_lower = text.lower()
-        attack_signals = ["攻击", "恶意", "入侵", "威胁", "可疑", "attack", "malicious",
-                          "intrusion", "suspicious", "检测到", "发现"]
-        normal_signals = ["正常", "无异常", "未发现", " benign", "normal", "no anomaly"]
 
-        attack_score = sum(1 for s in attack_signals if s in text_lower)
-        normal_score = sum(1 for s in normal_signals if s in text_lower)
+        # 1. 否定式优先：出现这些短语即视为正常倾向的证据（并阻止其内部子串
+        #    再被当作攻击信号）。中英文都要覆盖——此前只看攻击/正常两类词表，
+        #    「无可疑活动」会因为「可疑」命中攻击词而报出倾向不明。
+        negation_phrases = [
+            # 中文
+            "未发现", "未检测到", "未观察到", "未见", "未能发现",
+            "没有发现", "没有检测到", "无异常", "无可疑", "无恶意",
+            "不存在攻击", "不构成攻击", "并非攻击", "非攻击",
+            # 英文
+            "no anomaly", "no anomalies", "not detected", "no evidence",
+            "no suspicious", "no malicious", "nothing malicious",
+        ]
+        normal_signals = ["正常", "无异常", "误报", "benign", "normal",
+                          "no anomaly", "not detected", "false positive"]
+        attack_signals = ["攻击", "恶意", "入侵", "威胁", "可疑", "attack",
+                          "malicious", "intrusion", "suspicious", "exploit"]
 
-        if attack_score > normal_score + 1:
+        # 按小句处理**否定辖域**：全局关键词计数无法表达
+        # 「未检测到任何恶意流量」这类句子——其中「恶意」是被否定的对象，
+        # 不是断言，但全局计数会把它算作攻击信号，导致倾向不明。
+        # 因此先切分小句；含否定式的小句只计正常票，其内部攻击词不再计分。
+        # 分句符覆盖中英文标点（英文句点后可能跟空格）。
+        clauses = [c for c in re.split(r"[。；;，,！!？?]|\.\s*|\n", text_lower) if c.strip()]
+
+        attack_score = 0.0
+        normal_score = 0.0
+        for clause in clauses:
+            if any(p in clause for p in negation_phrases):
+                # 否定辖域：整句为正常倾向，其内部攻击词不再计分。
+                # 权重 0.5 而非 1：否定的证据强度弱于明确断言——
+                # 「未发现异常。但确认存在攻击。」里前者应被后者推翻。
+                normal_score += 0.5
+                continue
+            if any(s in clause for s in attack_signals):
+                attack_score += 1.0
+            if any(s in clause for s in normal_signals):
+                normal_score += 1.0
+
+        if attack_score > normal_score:
             return "attack"
-        elif normal_score > attack_score + 1:
+        elif normal_score > attack_score:
             return "normal"
         return "unknown"
 
@@ -315,19 +413,54 @@ def run_hallucination_control(llm_output: str, rule_result: Dict,
     }
 
     validation = OutputValidator.validate(llm_output, evidence)
+
+    # 【关键】LLM 不可用时不得编造交叉验证分与风险等级。
+    # 此前失败串会走完整套流程并得到「校验分=1.0 / 风险=low」，
+    # 与同页的 API 报错自相矛盾。这里直接短路为 unavailable。
+    if validation.get("level") == "unavailable":
+        reason = validation.get("unavailable_reason", "未知原因")
+        return {
+            "output_validation": validation,
+            "cross_validation": {
+                "consensus": "unavailable",
+                "agreement": 0.0,
+                "overall_confidence": 0.0,
+                "engines": [],
+                "attack_votes": 0,
+                "normal_votes": 0,
+                "contradictions": [],
+                "needs_review": True,
+                "summary": "AI 输出不可用，未执行多引擎共识校验",
+            },
+            "review_marker": {
+                "needs_review": True,
+                "priority": "high",
+                "reasons": [f"AI 分析不可用：{reason}"],
+                "review_status": "pending",
+                "summary": "AI 分析不可用，需人工研判",
+            },
+            "overall_score": 0.0,
+            "hallucination_risk": "unavailable",
+            "available": False,
+            "unavailable_reason": reason,
+            "summary": f"幻觉控制: AI 分析不可用（{reason}）",
+        }
+
     cross_val = ConfidenceCrossValidator.cross_validate(
         llm_output, rule_result, stacking_result, baseline_result)
     review = ReviewMarker.mark_for_review(validation, cross_val, rule_result)
+
+    overall = (validation["score"] * 0.4 + cross_val["overall_confidence"] * 0.4
+               + (0.0 if review["needs_review"] else 0.2))
 
     return {
         "output_validation": validation,
         "cross_validation": cross_val,
         "review_marker": review,
-        "overall_score": round(
-            (validation["score"] * 0.4 + cross_val["overall_confidence"] * 0.4
-             + (0.0 if review["needs_review"] else 0.2)), 3),
+        "overall_score": round(overall, 3),
         "hallucination_risk": "high" if review["priority"] == "high"
         else "medium" if review["priority"] == "medium" else "low",
+        "available": True,
         "summary": f"幻觉控制: 校验分={validation['score']}, "
                    f"共识={cross_val['consensus']}, "
                    f"风险={review['priority'] if review['needs_review'] else '低'}",

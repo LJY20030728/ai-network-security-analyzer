@@ -56,39 +56,42 @@ class RAGEngine:
             logger.info("ChromaDB客户端初始化完成")
 
     def _init_collection(self):
-        """初始化或获取集合"""
+        """初始化或获取集合。
+
+        不再提供"降级为无向量模式"的回退：该回退**本身就是坏的**——
+        集合没有 embedding function 时，`add_texts` 与 `search` 都会用
+        `query_texts=[文本]` 调用，而 ChromaDB 在无 EF 时会直接报错。
+        与其保留一个会抛错的静默降级，不如在此明确失败，让上层展示
+        "RAG 不可用（BGE 模型缺失或校验失败）"。
+        """
         if self.collection is None:
             self._init_client()
-            # Embedding 选型：优先 BGE 中文模型（针对中文安全知识库），失败降级默认英文模型
+            # 仅使用本地 BGE 中文模型（不降级为 chromadb 默认 EF，避免静默联网）
             self.embedding_function = self._create_embedding_function()
-            try:
-                self.collection = self.client.get_or_create_collection(
-                    name=self.collection_name,
-                    embedding_function=self.embedding_function,
-                    metadata={"hnsw:space": "cosine"}
-                )
-                logger.info(f"集合初始化完成 | 名称: {self.collection_name} | "
-                            f"Embedding: {type(self.embedding_function).__name__}")
-            except Exception as e:
-                logger.warning(f"Embedding初始化失败，使用无向量模式: {e}")
-                self.collection = self.client.get_or_create_collection(
-                    name=self.collection_name,
-                    metadata={"hnsw:space": "cosine"}
-                )
+            self.collection = self.client.get_or_create_collection(
+                name=self.collection_name,
+                embedding_function=self.embedding_function,
+                metadata={"hnsw:space": "cosine"}
+            )
+            logger.info(f"集合初始化完成 | 名称: {self.collection_name} | "
+                        f"Embedding: {type(self.embedding_function).__name__}")
 
     @staticmethod
     def _create_embedding_function():
-        """创建 Embedding 函数：BGE 中文（优先）→ 默认英文（降级）"""
-        try:
-            from src.ai.embeddings.bge_onnx import BGEOnnxEmbeddingFunction
-            bge = BGEOnnxEmbeddingFunction()
-            # 预触发加载，验证模型可用；失败则降级
-            bge._ensure_loaded()
-            return bge
-        except Exception as e:
-            logger.warning(f"BGE 中文 Embedding 不可用（{e}），降级为默认英文 Embedding")
-            from chromadb.utils import embedding_functions
-            return embedding_functions.DefaultEmbeddingFunction()
+        """创建 Embedding 函数：仅使用本地 BGE 中文模型（不再静默降级）。
+
+        【安全】原实现在 BGE 不可用时会降级为 chromadb 的
+        `DefaultEmbeddingFunction()`——**那会从 AWS S3 自动下载
+        all-MiniLM-L6-v2**。也就是说：一个声称"离线"的安全产品，在用户不知情的
+        情况下会静默拉取并执行第二个第三方模型。
+        现改为直接失败：调用方会得到明确异常，RAG 功能显示为不可用，
+        而不是悄悄联网换了模型（换了模型还会导致向量空间不一致、检索结果错乱）。
+        """
+        from src.ai.embeddings.bge_onnx import BGEOnnxEmbeddingFunction
+        bge = BGEOnnxEmbeddingFunction()
+        # 预触发加载：模型缺失/校验失败会在此抛出，由调用方处理
+        bge._ensure_loaded()
+        return bge
 
     def add_texts(self, texts: List[str], metadatas: Optional[List[Dict[str, Any]]] = None,
                   source: str = "manual") -> int:

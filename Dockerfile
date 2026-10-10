@@ -1,10 +1,17 @@
 # AI网络安全智能分析系统 - Docker 部署
 # 构建: docker build -t ai-nsa:2.1.0 .
-# 运行: docker compose up -d  （自动映射 8080 端口 + 挂载数据目录）
+# 运行: docker compose up -d  （映射 8080 端口 + 挂载数据目录）
+#
+# 【安全】本次修正三处：
+#   1. 入口文件：原先 COPY/CMD 引用 run_dev.py——该文件在仓库中**不存在**，
+#      构建必然失败。现改为仓库真实入口 run.py。
+#   2. 监听地址：原先 main() 硬编码 127.0.0.1，使 HOST=0.0.0.0 从未生效，
+#      容器端口映射实际不可达。现已支持 HOST 环境变量（主程序侧修复）。
+#   3. 运行用户：原先以 root 运行。现创建非 root 用户 nsa 并切换。
 FROM python:3.11-slim
 
 LABEL maintainer="nsa-project" \
-      description="AI网络安全智能分析系统（PCAP离线分析 + 四引擎集成检测 + LLM威胁研判 + RAG安全知识问答）" \
+      description="AI网络安全智能分析系统（PCAP离线分析 + 三引擎 Stacking 融合检测 + LLM威胁研判 + RAG安全知识问答）" \
       version="2.1.0"
 
 ENV PYTHONUNBUFFERED=1 \
@@ -31,7 +38,7 @@ COPY config ./config
 COPY src ./src
 COPY tools ./tools
 COPY models ./models
-COPY run_dev.py ./
+COPY run.py ./
 COPY .env.example ./.env.example
 
 # 知识文档（攻击类型知识库，RAG初始化用）
@@ -47,5 +54,10 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
     CMD python -c "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8080/api/health', timeout=3)" || exit 1
 
+# 【安全】非 root 运行：容器被攻破时限制影响面
+RUN useradd --create-home --shell /bin/bash nsa \
+    && chown -R nsa:nsa /app
+USER nsa
+
 # 启动：uvicorn 单进程（内嵌 Gradio 同进程挂载）
-CMD ["python", "run_dev.py"]
+CMD ["python", "run.py"]

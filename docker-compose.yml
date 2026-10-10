@@ -6,14 +6,19 @@ services:
     image: ai-nsa:1.1.0
     container_name: ai-nsa
     ports:
-      - "8080:8080"
+      # 默认只绑本机回环：对外暴露需显式改为 "8080:8080" 并同时设置 API_AUTH_TOKEN
+      - "127.0.0.1:8080:8080"
     environment:
       # 运行时注入（不在镜像中写死密钥）
       - LLM_API_KEY=${LLM_API_KEY:-}
       - LLM_BASE_URL=${LLM_BASE_URL:-https://open.bigmodel.cn/api/paas/v4}
       - LLM_MODEL=${LLM_MODEL:-glm-4-flash}
       - EMBEDDING_MODEL=${EMBEDDING_MODEL:-BAAI/bge-small-zh-v1.5}
-      - API_AUTH_TOKEN=${API_AUTH_TOKEN:-changeme}
+      # 【安全】不再提供弱默认值。容器内请求来自网桥地址（非回环），
+      # 因此 UI 与 /api/* 都要求携带此 token；留空会导致访问被拒（fail closed），
+      # 这是刻意的——比默认 "changeme" 被人直接接管要好。
+      # 生成方式：python -c "import secrets;print(secrets.token_urlsafe(24))"
+      - API_AUTH_TOKEN=${API_AUTH_TOKEN:?请在 .env 中设置 API_AUTH_TOKEN（不得为空）}
     volumes:
       - ./data:/app/data          # 基线/知识库/审计/报告持久化
     restart: unless-stopped

@@ -46,6 +46,68 @@ MODEL_DOWNLOAD_URLS = {
     "model.onnx": f"{MODEL_DOWNLOAD_BASE}/onnx/model.onnx",
 }
 
+# 【安全】期望的 sha256。
+#
+# 背景：本项目是**安全分析工具**，而原实现会从第三方镜像（hf-mirror.com）自动
+# 下载 ~91MB 的 onnx 模型、**不做任何完整性校验**就交给 onnxruntime 执行——
+# 只校验了"文件大小下限"。一个安全产品静默拉取并执行未验证的第三方二进制，
+# 是最不该出现的行为。
+#
+# 下列哈希由随仓库分发的模型文件实测得出，作为下载/就绪判定的白名单。
+# 若上游模型更新导致校验失败，请显式更新本表（而不是删掉校验）——
+# 更新前应先人工核对文件来源。
+#
+# 可通过环境变量 `AI_NSA_MODEL_SHA256_<文件名大写>` 覆盖（便于离线分发自有副本）：
+#   例：AI_NSA_MODEL_SHA256_MODEL_ONNX=<hex>
+MODEL_SHA256 = {
+    "tokenizer.json": "48cea5d44424912a6fd1ea647bf4fe50b55ab8b1e5879c3275f80e339e8fae26",
+    "model.onnx": "69a0b846f4f116b5e6aabf9546ea6754d02264f3211a13a1bd69b31b8040749a",
+}
+
+# 设为 "0"/"false" 可完全禁用自动下载（离线/受限环境）。
+# 禁用后模型缺失会直接报错，而不是联网拉取。
+MODEL_AUTO_DOWNLOAD_ENV = "AI_NSA_MODEL_AUTO_DOWNLOAD"
+
+
+def expected_sha256(fname: str) -> str:
+    """取某文件的期望哈希（允许环境变量覆盖，便于私有镜像分发）"""
+    override = os.environ.get(f"AI_NSA_MODEL_SHA256_{fname.replace('.', '_').upper()}")
+    return (override or MODEL_SHA256.get(fname, "")).strip().lower()
+
+
+def auto_download_enabled() -> bool:
+    """自动下载是否启用（默认启用；显式设为 0/false/no 则禁用）"""
+    return os.environ.get(MODEL_AUTO_DOWNLOAD_ENV, "1").strip().lower() not in (
+        "0", "false", "no", "off")
+
+
+def sha256_of(path: str, chunk: int = 1024 * 1024) -> str:
+    """流式计算文件 sha256（91MB 模型也不吃内存）"""
+    import hashlib
+
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(chunk), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def file_is_valid(path: str, fname: str, verify_hash: bool = True) -> bool:
+    """文件是否可用：存在 + 达到最小大小 + （可选）sha256 匹配。
+
+    :param verify_hash: 只对缺少期望哈希的文件跳过校验；有期望值就必须匹配。
+    """
+    if not os.path.isfile(path):
+        return False
+    if os.path.getsize(path) < MODEL_MIN_BYTES.get(fname, 1000):
+        return False
+    if not verify_hash:
+        return True
+    want = expected_sha256(fname)
+    if not want:
+        return True
+    return sha256_of(path) == want
+
 
 def _candidate_dirs() -> List[str]:
     """
@@ -85,12 +147,14 @@ def _candidate_dirs() -> List[str]:
 
 
 def _dir_complete(model_dir: str) -> bool:
-    """目录内模型文件是否完整且大小合法"""
+    """目录内模型文件是否完整：存在 + 大小合法 + sha256 匹配期望值。
+
+    哈希校验是必需的：本函数决定是否直接加载模型交给 onnxruntime 执行，
+    仅凭"文件够大"无法排除被替换/损坏的模型。
+    """
     for fn in MODEL_FILES:
         fp = os.path.join(model_dir, fn)
-        if not os.path.exists(fp):
-            return False
-        if os.path.getsize(fp) < MODEL_MIN_BYTES.get(fn, 1000):
+        if not file_is_valid(fp, fn):
             return False
     return True
 
@@ -148,13 +212,20 @@ class BGEOnnxEmbeddingFunction(EmbeddingFunction):
         logger.info(f"BGE 中文 Embedding 就绪 | 模型目录: {model_dir}")
 
     def _prepare_model_dir(self) -> str:
-        """确保模型文件就绪：优先使用已有目录，缺失则自动下载；失败抛异常（上层降级）"""
-        # 1. 已有完整模型目录
+        """确保模型文件就绪：优先使用已有目录，缺失则在允许时下载；失败抛异常"""
+        # 1. 已有完整模型目录（含 sha256 校验）
         existing = self.model_dir or find_model_dir()
         if existing and _dir_complete(existing):
             return existing
 
-        # 2. 自动下载到第一个候选目录
+        # 2. 自动下载（受 AI_NSA_MODEL_AUTO_DOWNLOAD 开关控制）
+        if not auto_download_enabled():
+            raise FileNotFoundError(
+                f"BGE 模型文件缺失或校验失败，且自动下载已被禁用"
+                f"（{MODEL_AUTO_DOWNLOAD_ENV}=0）。请手动将 "
+                f"models/{MODEL_DIR_NAME}/（tokenizer.json + model.onnx）放到程序目录。"
+            )
+
         for cand in _candidate_dirs():
             try:
                 self._auto_download(cand)
@@ -164,19 +235,24 @@ class BGEOnnxEmbeddingFunction(EmbeddingFunction):
                 continue
 
         raise FileNotFoundError(
-            "BGE 模型文件缺失且自动下载失败，请检查网络后将 models/bge-small-zh-v1.5/ "
-            "（tokenizer.json + model.onnx）放置到程序目录，或等待自动降级为默认 Embedding"
+            f"BGE 模型文件缺失且自动下载/校验失败，请将 models/{MODEL_DIR_NAME}/ "
+            "（tokenizer.json + model.onnx）手动放到程序目录。"
         )
 
     def _auto_download(self, model_dir: str) -> None:
-        """下载缺失的模型文件（联网，带进度日志与半文件防护）"""
+        """下载缺失的模型文件（联网，带进度日志、半文件防护与 sha256 校验）"""
         import urllib.request
 
         os.makedirs(model_dir, exist_ok=True)
         for fname, url in MODEL_DOWNLOAD_URLS.items():
             target = os.path.join(model_dir, fname)
-            if os.path.exists(target) and os.path.getsize(target) >= MODEL_MIN_BYTES.get(fname, 1000):
-                continue  # 已就绪
+            if file_is_valid(target, fname):
+                continue  # 已就绪且哈希匹配
+            if os.path.exists(target):
+                # 存在但哈希不符：说明文件损坏或被替换，必须重下
+                logger.warning(
+                    f"BGE {fname} 已存在但 sha256 校验未通过，将重新下载"
+                    f"（期望 {expected_sha256(fname)[:16]}…）")
             tmp = target + ".part"
             logger.warning(f"BGE 模型文件缺失: {fname}，自动下载中（首次启动需联网）: {url}")
             try:
@@ -195,11 +271,26 @@ class BGEOnnxEmbeddingFunction(EmbeddingFunction):
                         if done - last_log >= 10 * 1024 * 1024:
                             last_log = done
                             logger.info(f"  BGE {fname} 下载中 {done / 1048576:.0f}/{total / 1048576:.0f} MB")
+                # 【安全】落盘前必须校验 sha256：下载内容来自第三方镜像，
+                # 未经校验就交给 onnxruntime 执行等同于信任任意远端代码。
+                want = expected_sha256(fname)
+                actual = sha256_of(tmp)
+                if want and actual != want:
+                    os.remove(tmp)
+                    raise FileNotFoundError(
+                        f"BGE {fname} sha256 校验失败，已删除下载文件。"
+                        f"期望 {want[:16]}…，实际 {actual[:16]}…。"
+                        f"可能是镜像内容变更或传输损坏；请勿直接使用，"
+                        f"如需更新请人工核对来源后修改 MODEL_SHA256。"
+                    )
                 os.replace(tmp, target)
-                logger.info(f"BGE {fname} 下载完成: {os.path.getsize(target) / 1048576:.1f} MB")
+                logger.info(f"BGE {fname} 下载完成并通过 sha256 校验: "
+                            f"{os.path.getsize(target) / 1048576:.1f} MB")
             except Exception as e:
                 if os.path.exists(tmp):
                     os.remove(tmp)
+                if isinstance(e, FileNotFoundError):
+                    raise
                 raise FileNotFoundError(f"BGE 模型自动下载失败（{fname}）: {e}")
 
     def __call__(self, input: Documents) -> Embeddings:

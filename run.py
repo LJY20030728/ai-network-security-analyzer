@@ -78,11 +78,13 @@ def main():
     # 导入并启动服务
     try:
         from src.api.main import main as api_main
+        _port = os.getenv("PORT", "8080")
+        _host = os.getenv("HOST", "127.0.0.1")
         logger.info("\n" + "=" * 60)
         logger.info("🚀 启动 AI网络安全智能分析系统")
         logger.info("=" * 60)
-        logger.info("Web UI:   http://localhost:8000")
-        logger.info("API文档:  http://localhost:8000/docs")
+        logger.info(f"Web UI:   http://{_host}:{_port}")
+        logger.info(f"API文档:  http://{_host}:{_port}/docs")
         logger.info("按 Ctrl+C 停止服务")
         logger.info("=" * 60 + "\n")
 

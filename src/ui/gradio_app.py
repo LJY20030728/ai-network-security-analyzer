@@ -215,6 +215,147 @@ def get_audit_logger() -> AuditLogger:
     return _audit_logger
 
 
+def _is_loopback_host(host: str) -> bool:
+    """主机名/IP 是否为回环地址"""
+    import ipaddress
+
+    h = (host or "").strip().lower()
+    if not h:
+        return False
+    if h in ("localhost", "::1", "[::1]"):
+        return True
+    try:
+        return ipaddress.ip_address(h.strip("[]")).is_loopback
+    except ValueError:
+        return False
+
+
+def _request_is_local(request: Request) -> bool:
+    """请求是否来自本机（回环）。
+
+    同时检查客户端地址与 Host 头：Docker 端口映射下，局域网请求的客户端 IP 会是
+    网桥地址（非回环），但如果只看客户端 IP，某些反代/宿主场景会误判为本地；
+    反向检查 Host 头能兜住这种情况——真正的本机访问 Host 一定是 127.0.0.1/localhost。
+
+    设计依据：项目默认绑定 127.0.0.1（desktop_app.py 与本机 API 启动方式），
+    此时局域网本就无法访问，回环访问无需 token 以保证桌面版与浏览器直访体验；
+    而 Docker / 显式绑 0.0.0.0 的场景必须携带 token。
+    """
+    client_host = request.client.host if request.client else ""
+    host_header = request.headers.get("host", "")
+    # 用 urlsplit 解析 Host 头，正确处理 "127.0.0.1:8080" 与 "[::1]:8080"
+    # （不能用 host_header.count(":") == 1，IPv6 字面量含多个冒号）
+    from urllib.parse import urlsplit
+
+    try:
+        host_only = urlsplit(f"//{host_header}").hostname or ""
+    except ValueError:
+        host_only = ""
+    return _is_loopback_host(client_host) and _is_loopback_host(host_only)
+
+
+def require_token_for_external_access(request: Request) -> Optional[str]:
+    """Gradio `auth_dependency`：非回环访问必须携带正确 token。
+
+    【Gradio 6 约定】该依赖必须 **返回用户 ID 字符串** 表示认证通过、
+    返回 `None` 表示未通过（Gradio 自己会抛 401 "Not authenticated"）。
+    此处**不能**自己抛 HTTPException——那会被 Gradio 视为依赖异常。
+
+    【安全背景】此前的 token 中间件只覆盖 `/api/*`，而 Gradio UI 挂载在 `/`，
+    于是 UI 的全部事件回调（打开文件、写配置、触发分析）在对外暴露时均可被
+    无鉴权调用。本依赖挂在 Gradio 挂载点上，覆盖 UI 整体。
+
+    - 回环访问：返回 "local"（桌面版 pywebview 与本机浏览器无需 token）。
+    - 非回环：校验 X-API-Token 头（或 ?token= 查询参数），通过则返回用户标识。
+    """
+    if _request_is_local(request):
+        return "local"
+
+    token = settings.api_auth_token
+    if not token:
+        # 未配置 token 却对外暴露：fail closed（拒绝而非放行）
+        logger.error("服务对外暴露但未配置 API_AUTH_TOKEN，已拒绝非回环 UI 访问")
+        return None
+
+    provided = request.headers.get("x-api-token") or request.query_params.get("token") or ""
+    # 常量时间比较，避免逐字节时间侧信道
+    import hmac
+
+    if not hmac.compare_digest(str(provided), str(token)):
+        try:
+            get_audit_logger().log(
+                method=request.method, path=request.url.path, status_code=401,
+                duration_ms=0.0,
+                client_ip=request.client.host if request.client else "",
+                user_agent=request.headers.get("user-agent", "")[:200],
+                note="unauthorized UI access attempt")
+        except Exception as e:
+            logger.error(f"⚠️ 审计日志写入失败（UI 鉴权拒绝未能留痕）: {e}")
+        return None
+    return "api-token"
+
+
+# 供 mount_gradio_app(auth_dependency=...) 使用（与上面的包装保持同一实现）
+_require_token_for_external_access = require_token_for_external_access
+
+
+def _open_path_with_shell(path: str) -> tuple:
+    """用系统默认程序打开文件/目录——**默认禁用**，需显式开启。
+
+    【安全】`os.startfile()` 会以当前用户身份用 shell 打开任意路径。此前它在
+    4 个 UI 回调中被无条件调用，而这些回调在应用对外暴露时可能被无鉴权触发；
+    再叠加"递归搜索文件系统找文件再打开"的逻辑，等于把本机 shell 的执行入口
+    交给了调用方。安全工具不应自带这种能力。
+
+    现在：
+      · 默认**拒绝**执行，只返回路径与提示，由 UI 展示「复制路径」供用户自行打开；
+      · 仅当设置 `AI_NSA_ALLOW_OPEN_PATH=1` 时才真正调用 startfile；
+      · 无论如何都校验路径必须位于本程序的数据目录（data/reports 等）之内，
+        避免被诱导打开任意文件。
+
+    :return: (是否已打开, 给用户的提示文本)
+    """
+    import os as _os
+
+    try:
+        real = _os.path.realpath(path)
+    except Exception as e:
+        return False, f"❌ 路径无效：{e}"
+
+    # 路径必须落在项目 data/ 目录内
+    try:
+        data_root = _os.path.realpath(data_dir(""))
+        if _os.path.commonpath([real, data_root]) != data_root:
+            logger.warning(f"拒绝打开 data 目录之外的路径: {real}")
+            return False, f"❌ 出于安全考虑，仅允许打开程序数据目录内的文件：`{real}`"
+    except Exception as e:
+        return False, f"❌ 路径校验失败：{e}"
+
+    if not _os.path.exists(real):
+        return False, f"❌ 文件不存在：`{real}`"
+
+    if _os.environ.get("AI_NSA_ALLOW_OPEN_PATH", "").strip().lower() not in ("1", "true", "yes"):
+        # 默认路径：不执行，只给出可复制的路径
+        return False, (
+            f"ℹ️ 已跳过自动打开（默认禁用，设置 `AI_NSA_ALLOW_OPEN_PATH=1` 可启用）。\n"
+            f"📌 路径：`{real}`"
+        )
+
+    try:
+        if hasattr(_os, "startfile"):        # Windows
+            _os.startfile(real)
+        elif sys.platform == "darwin":        # macOS
+            import subprocess
+            subprocess.Popen(["open", real])
+        else:                                 # Linux
+            import subprocess
+            subprocess.Popen(["xdg-open", real])
+        return True, f"✅ 已用系统默认程序打开：`{real}`"
+    except Exception as e:
+        logger.warning(f"打开路径失败: {e}")
+        return False, f"❌ 打开失败：{e}\n📌 路径：`{real}`"
+
+
 @app.middleware("http")
 async def api_token_middleware(request: Request, call_next):
     """鉴权 + API 审计日志（健康检查豁免鉴权与审计噪声；请求体不落库）"""
@@ -936,15 +1077,82 @@ async def config_status():
         raise HTTPException(status_code=500, detail=f"获取配置状态失败: {e}")
 
 
+def _assert_safe_llm_base_url(base_url: str) -> str:
+    """校验 LLM Base URL，拒绝 SSRF 目标，返回规范化后的 URL。
+
+    【安全】原实现直接把用户传入的 `base_url` 拼上 `/chat/completions` 发请求，
+    并把 `Authorization: Bearer <用户的真实 API Key>` 一同送出，仅检查了"非空"。
+    这意味着任意能调用该接口的人都可以：
+      · 让服务器向内网/云元数据地址发起请求（SSRF）；
+      · 把用户的真实 LLM Key 外带到自己的服务器（凭据泄露）。
+
+    本函数只允许 https、禁止回环/私网/链路本地/保留地址、禁止非标准端口，
+    并拒绝明显的内网主机名。
+    """
+    import ipaddress
+    import socket
+    from urllib.parse import urlparse
+
+    raw = (base_url or "").strip()
+    if not raw:
+        raise HTTPException(status_code=400, detail="base_url 不能为空")
+
+    parsed = urlparse(raw)
+    if parsed.scheme != "https":
+        raise HTTPException(
+            status_code=400,
+            detail="仅允许 https:// 的 Base URL（拒绝 http/其他协议，避免明文传输 API Key）",
+        )
+    host = (parsed.hostname or "").strip().lower()
+    if not host:
+        raise HTTPException(status_code=400, detail="Base URL 缺少主机名")
+
+    # 主机名黑名单（内网常用名与云元数据别名）
+    if host in {"localhost", "metadata", "metadata.google.internal"} or \
+            host.endswith((".local", ".internal", ".localhost")):
+        raise HTTPException(status_code=400, detail=f"Base URL 主机名不被允许: {host}")
+
+    # 端口：仅允许标准 HTTPS 端口
+    if parsed.port not in (None, 443):
+        raise HTTPException(status_code=400,
+                            detail=f"仅允许 443 端口（当前 {parsed.port}）")
+
+    # 解析主机名并检查所有解析结果，阻断内网 / 回环 / 链路本地 / 保留地址
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Base URL 主机名无法解析: {e}") from e
+
+    for info in infos:
+        addr = info[4][0]
+        try:
+            ip = ipaddress.ip_address(addr)
+        except ValueError:
+            continue
+        if (ip.is_private or ip.is_loopback or ip.is_link_local
+                or ip.is_reserved or ip.is_multicast or ip.is_unspecified):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Base URL 解析到内网/保留地址（{ip}），已拒绝以避免 SSRF",
+            )
+
+    return raw.rstrip("/")
+
+
 @app.post("/api/config/validate")
 async def config_validate(api_key: str = Form(...), base_url: str = Form(""),
                            model: str = Form("")):
-    """校验 API Key 有效性（发送一个简单的测试请求）"""
+    """校验 API Key 有效性（发送一个简单的测试请求）
+
+    【安全】base_url 必须通过 SSRF 校验；且**不回显上游响应正文**——
+    原实现会把响应体前 200 字符返回给调用方，等于把探测结果当作回显通道。
+    """
     if not api_key or "xxxx" in api_key:
         return {"valid": False, "message": "API Key 为空或仍是占位符"}
     try:
         import httpx
-        url = base_url.rstrip("/") + "/chat/completions"
+        safe_base = _assert_safe_llm_base_url(base_url or "")
+        url = safe_base + "/chat/completions"
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
@@ -954,13 +1162,25 @@ async def config_validate(api_key: str = Form(...), base_url: str = Form(""),
             "messages": [{"role": "user", "content": "hi"}],
             "max_tokens": 5,
         }
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=False) as client:
             resp = await client.post(url, headers=headers, json=payload)
             if resp.status_code == 200:
                 return {"valid": True, "message": "API Key 校验通过", "status_code": 200}
-            else:
-                return {"valid": False, "message": f"校验失败: HTTP {resp.status_code}",
-                        "status_code": resp.status_code, "detail": resp.text[:200]}
+            # 不回显响应正文（可能含上游内部信息），只给状态码与截断原因
+            reason = ""
+            try:
+                body = resp.json()
+                if isinstance(body, dict):
+                    err = body.get("error") or {}
+                    reason = str(err.get("message") or err.get("type") or "")[:120]
+            except Exception:
+                reason = ""
+            return {"valid": False,
+                    "message": f"校验失败: HTTP {resp.status_code}"
+                               + (f"（{reason}）" if reason else ""),
+                    "status_code": resp.status_code}
+    except HTTPException as e:
+        return {"valid": False, "message": f"配置被拒绝: {e.detail}"}
     except Exception as e:
         return {"valid": False, "message": f"校验异常: {e}"}
 
@@ -1518,52 +1738,39 @@ def create_gradio_interface():
                 # 下拉框选择记录（更可靠，不依赖表格点击的状态同步）
 
                 def _search_pcap_file(filename):
-                    """在常见目录搜索同名PCAP文件，返回找到的完整路径或None"""
+                    """在**项目数据目录内**搜索同名 PCAP，返回完整路径或 None。
+
+                    【安全】原实现会把 `~/Desktop`、`~/Downloads` 与当前工作目录
+                    一并递归遍历。这有两个问题：
+                      1. 越权访问用户个人目录（用户从未授权本程序读取桌面）；
+                      2. 遍历结果最终会被交给 `os.startfile()` 打开——即
+                         "在文件系统里找一个文件然后用 shell 打开它"，
+                         这是典型的危险组合（可被诱导打开非预期文件）。
+                    现仅搜索本程序自己管理的 `data/samples`（PCAP 持久化目录）。
+                    """
                     if not filename:
                         return None
                     import os as _os
-                    search_dirs = []
-                    # 1. 项目内的 samples 目录（含子目录）
+
+                    # 文件名必须是纯文件名（拒绝任何路径分隔符与上跳）
+                    if _os.path.basename(filename) != filename or filename in (".", ".."):
+                        logger.warning(f"拒绝搜索含路径成分的文件名: {filename!r}")
+                        return None
+
                     try:
                         samples_dir = data_dir("samples")
-                        if _os.path.isdir(samples_dir):
-                            search_dirs.append(samples_dir)
                     except Exception as e:
-                        logger.warning(f"定位 samples 目录失败，该路径不参与 PCAP 搜索: {e}")
-                    # 2. 桌面
-                    try:
-                        desktop = _os.path.join(_os.path.expanduser("~"), "Desktop")
-                        if _os.path.isdir(desktop):
-                            search_dirs.append(desktop)
-                    except Exception as e:
-                        logger.warning(f"定位桌面目录失败，该路径不参与 PCAP 搜索: {e}")
-                    # 3. 下载目录
-                    try:
-                        downloads = _os.path.join(_os.path.expanduser("~"), "Downloads")
-                        if _os.path.isdir(downloads):
-                            search_dirs.append(downloads)
-                    except Exception as e:
-                        logger.warning(f"定位下载目录失败，该路径不参与 PCAP 搜索: {e}")
-                    # 4. 项目根目录（纯内存操作，不包 try —— 原先的 except 是空保护，
-                    #    会造成"这里可能失败"的误解）
-                    search_dirs.append(_os.getcwd())
-                    if len(search_dirs) <= 1:
-                        logger.warning(
-                            "PCAP 搜索路径几乎为空（仅当前工作目录），"
-                            "旧记录的源文件可能无法被定位"
-                        )
-                    
-                    # 在所有目录（含子目录）中搜索
-                    for base_dir in search_dirs:
-                        try:
-                            for root, dirs, files in _os.walk(base_dir):
-                                # 跳过 .git、venv、node_modules 等大目录
-                                dirs[:] = [d for d in dirs if d not in ('.git', 'venv', 'node_modules', '__pycache__', '.chroma')]
-                                for f in files:
-                                    if f.lower() == filename.lower():
-                                        return _os.path.join(root, f)
-                        except Exception:
-                            continue
+                        logger.warning(f"定位 samples 目录失败，无法搜索 PCAP: {e}")
+                        return None
+                    if not _os.path.isdir(samples_dir):
+                        return None
+
+                    for root, dirs, files in _os.walk(samples_dir):
+                        dirs[:] = [d for d in dirs
+                                   if d not in ('.git', 'venv', 'node_modules', '__pycache__')]
+                        for f in files:
+                            if f.lower() == filename.lower():
+                                return _os.path.join(root, f)
                     return None
                 
                 def _history_dropdown_choices():
@@ -1700,14 +1907,10 @@ def create_gradio_interface():
                         
                         yield "", gr.update(visible=False), gr.update(value=f"✅ 报告已生成，正在打开...（阶段3/3）", visible=True)
                         
-                        # 打开报告
-                        _opened = True
-                        try:
-                            os.startfile(html_path)
-                        except Exception as e:
-                            # 原先静默忽略，界面却仍显示"报告已打开" —— 属谎报
-                            _opened = False
-                            logger.warning(f"自动打开报告失败（报告文件已生成，可手动打开）: {e}")
+                        # 打开报告（默认禁用，见 _open_path_with_shell 的安全说明）
+                        _opened, _open_msg = _open_path_with_shell(html_path)
+                        if not _opened:
+                            logger.info(f"未自动打开报告：{_open_msg}")
                         
                         final_msg = (f"✅ **重新分析完成，报告{'已打开' if _opened else '已生成'}**\n"
                                f"📋 记录：{fname}\n"
@@ -1875,17 +2078,13 @@ def create_gradio_interface():
                                            f"💡 建议：切换到Tab1重新上传该PCAP文件进行分析")
                         return (confirm_msg, gr.update(visible=True), gr.update(value="", visible=False), actual_id)
                     else:
-                        # 报告存在，直接打开
-                        try:
-                            logger.info(f"正在打开报告文件: {rp} (大小: {os.path.getsize(rp) if os.path.exists(rp) else 'N/A'} bytes)")
-                            os.startfile(rp)
-                            return (f"✅ **已在浏览器打开报告**：`{os.path.basename(rp)}`\n"
-                                    f"📌 对应记录：{fname} | {ts}\n"
-                                    f"📂 保存位置：`{rp}`",
-                                    gr.update(visible=False), gr.update(value="", visible=False), None)
-                        except Exception as e:
-                            return (f"❌ 打开报告失败：{e}\n\n📂 报告路径：`{rp}`",
-                                    gr.update(visible=False), gr.update(value="", visible=False), None)
+                        # 报告存在，尝试打开（默认禁用，仅返回可复制路径）
+                        logger.info(f"报告文件: {rp} (大小: {os.path.getsize(rp) if os.path.exists(rp) else 'N/A'} bytes)")
+                        _ok, _msg = _open_path_with_shell(rp)
+                        return (f"{_msg}\n"
+                                f"📌 对应记录：{fname} | {ts}\n"
+                                f"📂 报告路径：`{rp}`",
+                                gr.update(visible=False), gr.update(value="", visible=False), None)
 
                 def clear_history_ui():
                     n = get_history_store().clear_analysis()
@@ -1919,21 +2118,21 @@ def create_gradio_interface():
                     try:
                         d = data_dir("reports")
                         os.makedirs(d, exist_ok=True)
-                        os.startfile(d)
-                        return "✅ 已打开报告目录: " + d
+                        _ok, _msg = _open_path_with_shell(d)
+                        return _msg
                     except Exception as e:
                         return f"❌ 打开失败: {e}"
 
                 def open_report_file_ui():
-                    """打开最新生成的报告文件"""
+                    """打开最新生成的报告文件（默认禁用自动打开，仅返回路径）"""
                     try:
                         d = data_dir("reports")
                         fs = [os.path.join(d, f) for f in os.listdir(d) if f.endswith(".html")] if os.path.isdir(d) else []
                         if not fs:
                             return "❌ 尚无报告文件，请先完成一次PCAP分析"
                         newest = max(fs, key=os.path.getmtime)
-                        os.startfile(newest)
-                        return f"✅ 已打开报告: {os.path.basename(newest)}"
+                        _ok, _msg = _open_path_with_shell(newest)
+                        return _msg
                     except Exception as e:
                         return f"❌ 打开失败: {e}"
 
@@ -2397,88 +2596,149 @@ def create_gradio_interface():
                 kb_paths_md = gr.Markdown("")
 
                 def load_api_config_ui():
-                    """读取 .env 当前配置，用于预填"""
+                    """读取当前配置用于预填。
+
+                    【安全】**绝不回显真实 API Key**。此前该函数把 `.env` 里的明文
+                    Key 直接返回并填入密码框，而它由 `demo.load(...)` 在**每次页面
+                    加载**时调用——等于把密钥反复推送到浏览器（任何能加载页面的人
+                    都能从网络响应里读到它）。
+
+                    现改为：Key 输入框保持为空，仅通过 placeholder 提示"已配置"。
+                    用户只有在想更换时才需重新输入。
+                    """
+                    vals = {"LLM_BASE_URL": "", "LLM_MODEL": ""}
                     try:
                         env = find_env_file()
-                        vals = {"LLM_API_KEY": "", "LLM_BASE_URL": "", "LLM_MODEL": ""}
                         if os.path.exists(env):
                             with open(env, encoding="utf-8") as f:
                                 for line in f:
                                     st = line.strip()
                                     if st and not st.startswith("#") and "=" in st:
                                         k, v = st.split("=", 1)
-                                        if k.strip() in vals:
+                                        if k.strip() in vals and v.strip():
                                             vals[k.strip()] = v.strip()
-                        return vals["LLM_API_KEY"], vals["LLM_BASE_URL"], vals["LLM_MODEL"]
+                    except Exception as e:
+                        logger.debug(f"读取 .env 失败（不影响预填基础 URL/模型）: {e}")
+
+                    # 已配置的 Key 只以掩码形式提示，不回传明文
+                    key_display = ""
+                    try:
+                        current = settings.llm_api_key or ""
+                        if current and "xxxx" not in current:
+                            key_display = (current[:4] + "…" + current[-4:]) \
+                                if len(current) > 10 else "已配置"
                     except Exception:
-                        return "", "", ""
+                        pass
+                    return key_display, vals["LLM_BASE_URL"], vals["LLM_MODEL"]
 
                 def save_api_config_ui(key, url, model):
-                    """保存 API 配置到 .env + DPAPI 加密存储（P1-3）并重置 LLM 客户端"""
+                    """保存 API 配置：Windows 仅写 DPAPI；其他平台写 .env 并明确告知未加密。
+
+                    【安全】此前无论 DPAPI 是否可用，都会把**明文 Key 再写一份到
+                    `.env`**，使加密存储沦为冗余副本（两者同目录、同 ACL）。
+                    现改为：
+                      · Windows：Key 只进 DPAPI；`.env` 中不再保留明文 Key；
+                      · 其他平台（Docker/Linux 无 DPAPI）：写 `.env` 但明确提示未加密。
+                    """
                     if not key:
                         return "⚠️ API Key 不能为空"
                     if "xxxx" in key:
                         return "⚠️ API Key 仍是占位符（sk-xxxx），请填写真实 Key"
                     try:
-                        # P1-3: 同时保存到 DPAPI 加密存储（Windows）
+                        import sys as _sys
+
+                        key_val = key.strip()
+                        url_val = url.strip()
+                        model_val = model.strip()
+                        dpapi_ok = False
                         secure_msg = ""
-                        try:
-                            import sys
-                            if sys.platform == "win32":
+
+                        # 1) Windows：DPAPI 加密存储（唯一持有明文 Key 的地方）
+                        if _sys.platform == "win32":
+                            try:
                                 from src.security.secure_store import get_secure_store
                                 ss = get_secure_store()
-                                ss.set("LLM_API_KEY", key.strip())
-                                ss.set("LLM_BASE_URL", url.strip())
-                                ss.set("LLM_MODEL", model.strip())
-                                secure_msg = "🔒 已加密存储（DPAPI）\n"
-                        except Exception as se:
-                            secure_msg = f"⚠️ 加密存储失败（不影响 .env 保存）: {se}\n"
+                                ss.set("LLM_API_KEY", key_val)
+                                ss.set("LLM_BASE_URL", url_val)
+                                ss.set("LLM_MODEL", model_val)
+                                dpapi_ok = bool(ss.is_encrypted("LLM_API_KEY"))
+                                secure_msg = ("🔒 Key 已加密存储（DPAPI），未写入 .env 明文\n"
+                                              if dpapi_ok else
+                                              "⚠️ DPAPI 加密失败，Key 未能安全保存\n")
+                            except Exception as se:
+                                secure_msg = f"⚠️ DPAPI 加密存储失败: {se}\n"
 
-                        # 保存到 .env（兼容备份）
+                        # 2) 非 Windows 或 DPAPI 不可用：写 .env（并明确告知未加密）
                         env = find_env_file()
+                        write_env_key = (not dpapi_ok)
+                        new_entries = {
+                            "LLM_BASE_URL": url_val,
+                            "LLM_MODEL": model_val,
+                        }
+                        if write_env_key:
+                            new_entries["LLM_API_KEY"] = key_val
+
                         lines = []
                         if os.path.exists(env):
                             with open(env, encoding="utf-8") as f:
                                 lines = f.readlines()
-                        new_entries = {
-                            "LLM_API_KEY": key.strip(),
-                            "LLM_BASE_URL": url.strip(),
-                            "LLM_MODEL": model.strip(),
-                        }
-                        updated = set()
-                        for i, line in enumerate(lines):
+
+                        if write_env_key:
+                            for i, line in enumerate(lines):
+                                st = line.strip()
+                                if st and not st.startswith("#") and "=" in st:
+                                    k = st.split("=", 1)[0].strip()
+                                    if k in new_entries:
+                                        lines[i] = f"{k}={new_entries[k]}\n"
+                        else:
+                            # 已由 DPAPI 保存：把 .env 中的明文 Key 清除，避免明文残留
+                            kept = []
+                            for line in lines:
+                                st = line.strip()
+                                if st and not st.startswith("#") and "=" in st \
+                                        and st.split("=", 1)[0].strip() == "LLM_API_KEY":
+                                    kept.append("# LLM_API_KEY 已迁移到 DPAPI 加密存储"
+                                                "（本行留空以避免明文泄露）\n")
+                                    continue
+                                kept.append(line)
+                            lines = kept
+                            for i, line in enumerate(lines):
+                                st = line.strip()
+                                if st and not st.startswith("#") and "=" in st:
+                                    k = st.split("=", 1)[0].strip()
+                                    if k in new_entries:
+                                        lines[i] = f"{k}={new_entries[k]}\n"
+
+                        present = set()
+                        for line in lines:
                             st = line.strip()
                             if st and not st.startswith("#") and "=" in st:
-                                k = st.split("=", 1)[0].strip()
-                                if k in new_entries:
-                                    lines[i] = f"{k}={new_entries[k]}\n"
-                                    updated.add(k)
+                                present.add(st.split("=", 1)[0].strip())
                         for k, v in new_entries.items():
-                            if k not in updated:
+                            if k not in present:
                                 lines.append(f"{k}={v}\n")
                         with open(env, "w", encoding="utf-8") as f:
                             f.writelines(lines)
-                        # 重置 LLM 单例，下次分析立即用新配置
+
+                        env_msg = ("📄 .env：已写入 Base URL / 模型"
+                                   + ("（Key 未入明文）" if not write_env_key
+                                      else "；⚠️ 当前平台无 DPAPI，Key 以明文保存，请自行保护该文件"))
+                        if not write_env_key:
+                            env_msg += f"\n📂 配置文件: {env}"
+
+                        # 3) 热生效
                         try:
                             from src.ai.llm_client import reset_llm_client
                             reset_llm_client()
-                            # 关键：同步更新 settings 内存值（否则重建 LLMClient 仍读启动时的旧占位符）
-                            from config.settings import settings
-                            settings.llm_api_key = key.strip()
-                            settings.llm_base_url = url.strip()
-                            settings.llm_model = model.strip()
-                            _applied = True
+                            settings.llm_api_key = key_val
+                            settings.llm_base_url = url_val
+                            settings.llm_model = model_val
+                            return (f"✅ 已保存并生效\n{secure_msg}{env_msg}\n\n"
+                                    f"服务商: {url_val}\n模型: {model_val}")
                         except Exception as e:
-                            # 静默失败会让界面宣称"已保存并生效"，而实际仍是旧配置
-                            _applied = False
-                            logger.error(
-                                f"⚠️ 配置已写入 .env，但热生效失败（新配置需重启应用才生效）: {e}"
-                            )
-                        if _applied:
-                            return f"✅ 已保存并生效\n{secure_msg}📄 .env: {env}\n\n服务商: {url.strip()}\n模型: {model.strip()}"
-                        return (f"⚠️ 已保存但未能热生效\n{secure_msg}📄 .env: {env}\n"
-                                f"服务商: {url.strip()}\n模型: {model.strip()}\n\n"
-                                f"💡 新配置已落盘，但内存中的客户端未刷新成功，请重启应用以确保生效")
+                            logger.error(f"⚠️ 配置已保存，但热生效失败（需重启应用）: {e}")
+                            return (f"⚠️ 配置已保存，但热生效失败（需重启应用）\n"
+                                    f"{secure_msg}{env_msg}\n\n错误: {e}")
                     except Exception as e:
                         return f"❌ 保存失败: {e}"
 
@@ -2670,15 +2930,23 @@ if GRADIO_AVAILABLE:
             # 排队失败会导致并发行为退化（默认单并发），必须可见
             logger.warning(f"Gradio queue() 启用失败，并发处理可能退化为串行: {e}")
         _mount_kwargs = _UI_KWARGS if _GRADIO_MAJOR >= 6 else {}
-        try:
-            # Gradio 6.x 文件下载路由需白名单（修复 DownloadButton 下载失效）
-            from src.utils.paths import data_dir
-            _mount_kwargs["allowed_paths"] = [data_dir("reports"), data_dir("uploads"), data_dir("history")]
-        except Exception as e:
-            # 白名单缺失会导致报告下载按钮失效（用户可感知的功能缺失）
-            logger.warning(f"Gradio allowed_paths 设置失败，报告/上传文件下载可能失效: {e}")
+
+        # 【安全】此前把 data/reports、data/uploads、data/history 放进
+        # `allowed_paths`：Gradio 的 `/gradio_api/file=<绝对路径>` 会直接把这些
+        # 目录下的文件**无鉴权**送出（报告含源/目的 IP、载荷、证据哈希与 AI 研判）。
+        # 现由 Gradio 自身的缓存目录机制承担上传文件服务（上传时 Gradio 会把文件
+        # 复制到 tempfile 下的 gradio 缓存），这三个业务目录不再对外暴露。
+        #
+        # 代价：报告下载需走会话内路径（已改为 report_path_state）而非任意路径读取，
+        # 这正是我们想要的行为——文件服务必须受控，不能靠目录白名单。
+        logger.info("Gradio allowed_paths 未暴露业务数据目录（reports/uploads/history 不对外服务）")
+
+        # 全 app 鉴权：回环访问免 token（桌面版/本机浏览器），非回环强制 token。
+        # 仅守 /api/* 是不够的——UI 回调（如打开文件、写配置）同样具备副作用。
+        _mount_kwargs["auth_dependency"] = _require_token_for_external_access
+
         app = gr.mount_gradio_app(app, gradio_app, path="/", **_mount_kwargs)
-        logger.info("Gradio Web UI 已挂载到 /")
+        logger.info("Gradio Web UI 已挂载到 /（已启用全 app 鉴权：非回环访问需 X-API-Token）")
     except Exception as e:
         # 【重要】此前这里只记 warning 并提示"不影响API使用"，但实际上
         # create_gradio_interface() 失败会让应用变成 0 路由 0 UI 的空壳
@@ -2693,12 +2961,27 @@ else:
 
 
 def main():
-    """启动服务"""
+    """启动服务。
+
+    绑定地址取自 `HOST` 环境变量，**默认 127.0.0.1**：
+      · 本机/桌面场景：默认回环，局域网无法访问（安全默认）；
+      · 容器/服务器场景：Dockerfile 设置 HOST=0.0.0.0 才会对外监听——
+        此时必须同时配置 API_AUTH_TOKEN，否则非回环请求会被鉴权层拒绝（fail closed）。
+
+    此前该函数硬编码 host="127.0.0.1"，导致 Docker 的 HOST=0.0.0.0 从未生效，
+    容器端口映射实际无法访问。
+    """
     import uvicorn
     port = int(os.getenv("PORT", "8080"))
-    logger.info(f"启动服务: http://127.0.0.1:{port}")
-    logger.info(f"API文档: http://127.0.0.1:{port}/docs")
-    uvicorn.run(app, host="127.0.0.1", port=port, log_level="info")
+    host = os.getenv("HOST", "127.0.0.1").strip() or "127.0.0.1"
+    if host not in ("127.0.0.1", "localhost", "::1") and not settings.api_auth_token:
+        logger.error(
+            f"⚠️ 服务将对外监听（HOST={host}）但未配置 API_AUTH_TOKEN。"
+            f"非回环请求会被拒绝；请设置 API_AUTH_TOKEN 后再对外提供服务。"
+        )
+    logger.info(f"启动服务: http://{host}:{port}")
+    logger.info(f"API文档: http://{host}:{port}/docs")
+    uvicorn.run(app, host=host, port=port, log_level="info")
 
 
 if __name__ == "__main__":

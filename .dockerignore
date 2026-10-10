@@ -20,7 +20,11 @@ data/logs/
 data/config/
 data/samples/analyzed/
 data/samples/report_*.json
-data/baselines/*.json
+# 注：data/baselines/*.json 已不再排除。
+#   Dockerfile 需要 data/baselines/ 参与构建（预置默认基线随镜像分发）；
+#   此前排除它会导致 COPY 后目录为空，"预置默认基线"在容器内不存在。
+#   用户在宿主机上自行学习的基线不会被提交（.gitignore 已覆盖），
+#   且 compose 挂载 ./data 后宿主目录会覆盖镜像内层，不会互相污染。
 data/eval_cicids/
 data/eval_real/
 
@@ -44,8 +48,12 @@ _*.log
 # 测试
 tests/
 
-# 大模型文件（90MB，通过数据卷挂载或启动脚本下载，不打包进镜像）
-models/bge-small-zh-v1.5/
+# 注：models/bge-small-zh-v1.5/（BGE ONNX 模型，~91MB）**不排除**。
+#   此前此处注释声称"通过数据卷挂载或启动脚本下载，不打包进镜像"，
+#   但 Dockerfile 明确执行 `COPY models ./models`——被排除会导致构建失败
+#   （COPY 源不存在）。而该模型是 RAG 检索的必需依赖，容器内若能联网也会
+#   走启动下载（增加启动时间与不确定性），因此直接打进镜像。
+#   如需缩小镜像，可改为挂载卷并设置 AI_NSA_MODEL_AUTO_DOWNLOAD=0 手动放置。
 
 # 临时文件
 *.tmp

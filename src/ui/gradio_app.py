@@ -2230,7 +2230,9 @@ def create_gradio_interface():
                                 ev = evt.get("evidence") or []
                                 if ev:
                                     ev_lines = "　".join(
-                                        f"《{e['title']}》(相似度 {e['similarity']})" for e in ev[:3])
+                                        f"《{e['title']}》(相似度 "
+                                        f"{e['similarity'] if e.get('similarity') is not None else '未知'})"
+                                        for e in ev[:3])
                                     more = f"（另有 {len(ev)-3} 条）" if len(ev) > 3 else ""
                                     msgs[-1]["content"] = (
                                         f"🔎 知识库检索到 {len(ev)} 条依据：{ev_lines}{more}\n\n"

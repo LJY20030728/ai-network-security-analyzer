@@ -147,9 +147,15 @@ class ThreatAnalyzer:
     def analyze_threats_structured(self, anomaly_report: Dict,
                                       packet_samples: Optional[List[Dict]] = None,
                                       fallback_text: bool = True,
-                                      use_evidence_match: bool = True) -> Dict:
+                                      use_evidence_match: bool = True,
+                                      temperature: float = 0.2,
+                                      no_cache: bool = False) -> Dict:
         """
         结构化威胁研判：LLM 输出 JSON → Pydantic 校验
+
+        :param temperature: 采样温度。**必须作为参数暴露**——多温度投票依赖它；
+            此前该值被硬编码为 0.2，导致投票记录 3 个温度但实际只用了 1 个。
+        :param no_cache: 跳过 LLM 响应缓存（多温度独立采样必须开启）。
         :return: {"ok": True, "structured": {...}, "raw_text": "..."}
                  校验失败时 ok=False，structured=None，raw_text 保留原文（降级展示）
         """
@@ -193,8 +199,8 @@ class ThreatAnalyzer:
             {"role": "user", "content": user_prompt}
         ]
 
-        logger.info(f"开始结构化威胁研判 | 异常类型: {threat_types}")
-        raw = self.llm.chat(messages, temperature=0.2)
+        logger.info(f"开始结构化威胁研判 | 异常类型: {threat_types} | temperature={temperature}")
+        raw = self.llm.chat(messages, temperature=temperature, no_cache=no_cache)
         parsed = try_parse_structured_report(raw)
         if parsed is not None:
             logger.info("结构化研判解析成功")
@@ -372,8 +378,14 @@ class ThreatAnalyzer:
         evidence = []
         for r in rag_results:
             title = r.get("metadata", {}).get("title", "")
-            sim = r.get("similarity", 0)
-            evidence.append({"title": title or "(未命名条目)", "similarity": round(float(sim), 3)})
+            sim = r.get("similarity")
+            # similarity 可能为 None（该条目仅有 BM25 命中、无真实向量距离）——
+            # 不可用 0 冒充，也不可 float(None) 崩溃
+            evidence.append({
+                "title": title or "(未命名条目)",
+                "similarity": round(float(sim), 3) if sim is not None else None,
+                "distance_source": r.get("distance_source", "unknown"),
+            })
         yield {"stage": "retrieval", "evidence": evidence}
 
         rag_context = self._format_rag_results(rag_results)
@@ -415,9 +427,11 @@ class ThreatAnalyzer:
             return ""
         parts = []
         for i, r in enumerate(results, 1):
-            similarity = r.get("similarity", 0)
+            similarity = r.get("similarity")
+            # 无真实距离时明确标注"未知"，而不是印一个编出来的 0.50
+            sim_txt = f"{similarity:.2f}" if similarity is not None else "未知"
             title = r.get("metadata", {}).get("title", "")
-            parts.append(f"[参考{i} | 相似度:{similarity:.2f} | {title}]\n{r['content'][:500]}")
+            parts.append(f"[参考{i} | 相似度:{sim_txt} | {title}]\n{r['content'][:500]}")
         return "\n\n".join(parts)
 
     ALERT_TYPE_CN = {
@@ -466,9 +480,14 @@ class ThreatAnalyzer:
 
         votes = []
         for i in range(n):
+            # 【关键修复】把该次投票的温度真正传下去，并绕开响应缓存。
+            # 此前两次都没做：温度被 analyze_threats_structured 内部硬编码为 0.2，
+            # 缓存 key 又只含 messages+temp+max_tokens，于是 n 次"独立"采样
+            # 实际只发生 1 次 API 调用、拿到同一份结果 —— 投票恒为全体一致。
             r = self.analyze_threats_structured(
                 anomaly_report, packet_samples,
-                fallback_text=False, use_evidence_match=use_evidence_match)
+                fallback_text=False, use_evidence_match=use_evidence_match,
+                temperature=temps[i], no_cache=True)
             votes.append({
                 "temperature": temps[i],
                 "ok": r.get("ok"),

@@ -35,30 +35,35 @@ class LLMClient:
         return cls._current_language
 
     def _inject_language_instruction(self, messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
-        """根据当前语言设置，在 system prompt 中注入语言指令"""
+        """根据当前语言设置，在 system prompt 中注入语言指令。
+
+        **不修改调用方传入的列表**：原实现在原列表上 `messages[i]['content'] = ...`
+        并 `insert(0, ...)`，会污染调用方的数据（同一 messages 被复用时语言指令会
+        被反复追加）。现返回浅拷贝。
+        """
         lang = self._current_language
         if lang == "zh":
             instruction = "请始终使用简体中文回答。"
         else:
             instruction = "Please always respond in English."
 
+        out = [dict(m) for m in messages]
+
         # 查找 system 消息
         system_idx = None
-        for i, msg in enumerate(messages):
+        for i, msg in enumerate(out):
             if msg.get("role") == "system":
                 system_idx = i
                 break
 
         if system_idx is not None:
-            # 追加到现有 system 消息
-            original = messages[system_idx]["content"]
+            original = out[system_idx].get("content", "") or ""
             if instruction not in original:
-                messages[system_idx]["content"] = original + "\n\n" + instruction
+                out[system_idx]["content"] = original + "\n\n" + instruction
         else:
-            # 没有 system 消息，插入一个
-            messages.insert(0, {"role": "system", "content": instruction})
+            out.insert(0, {"role": "system", "content": instruction})
 
-        return messages
+        return out
 
     def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None,
                  model: Optional[str] = None):
@@ -115,25 +120,30 @@ class LLMClient:
             return len(self._cache)
 
     def chat(self, messages: List[Dict[str, str]], temperature: float = 0.3,
-             max_tokens: int = 2048) -> str:
+             max_tokens: int = 2048,
+             no_cache: bool = False) -> str:
         """
         非流式对话（P1-3 带结果缓存：相同 prompt 秒回，二次分析不重复调用）
         :param messages: 消息列表 [{"role": "system/user/assistant", "content": "..."}]
         :param temperature: 温度，0=确定性，1=创造性
         :param max_tokens: 最大生成token数
+        :param no_cache: True 时跳过读写缓存。多温度采样投票必须用它——
+            否则"多次独立采样"会命中同一条缓存而塌缩成一次调用，
+            投票结果恒为全体一致（agreement 恒 1.0），使该功能名存实亡。
         :return: 模型回复文本
         """
         if not self.is_available():
             return "[错误] 未配置大模型API Key，请在.env文件中设置LLM_API_KEY"
 
-        # i18n：注入语言指令
+        # i18n：注入语言指令（返回副本，不改调用方数据）
         messages = self._inject_language_instruction(messages)
 
         key = self._cache_key(messages, temperature, max_tokens)
-        hit = self._cache_get(key)
-        if hit is not None:
-            logger.debug(f"LLM 缓存命中 | key={key[:8]} | 缓存 {self.cache_size()} 条")
-            return hit
+        if not no_cache:
+            hit = self._cache_get(key)
+            if hit is not None:
+                logger.debug(f"LLM 缓存命中 | key={key[:8]} | 缓存 {self.cache_size()} 条")
+                return hit
 
         try:
             response = self.client.chat.completions.create(
@@ -145,7 +155,7 @@ class LLMClient:
             content = response.choices[0].message.content
             logger.debug(f"LLM调用完成 | 输入tokens: {response.usage.prompt_tokens} | "
                         f"输出tokens: {response.usage.completion_tokens}")
-            if content and not content.startswith("[大模型调用失败]"):
+            if content and not content.startswith("[大模型调用失败]") and not no_cache:
                 self._cache_set(key, content)
             return content
         except Exception as e:

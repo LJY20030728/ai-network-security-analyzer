@@ -83,7 +83,10 @@ class EvidenceMatcher:
             content = r.get("content", "")
             meta = r.get("metadata", {}) or {}
             title = meta.get("title", "")
-            similarity = r.get("similarity", 0.0)
+            # similarity 可能为 None（仅 BM25 命中、无真实向量距离）：
+            # 用 0.0 参与评分会让这类条目在相似度分量上被系统性压低，
+            # 故仅在有真实值时计入相似度分量（见下方 score 计算）。
+            similarity = r.get("similarity")
 
             kw_hit = [k for k in expect_kw if k in content]
             kw_rate = len(kw_hit) / len(expect_kw) if expect_kw else 0.0
@@ -98,7 +101,13 @@ class EvidenceMatcher:
             text_shared = sum(1 for tok in self._alert_tokens(alert_text) if tok and tok in content)
             text_rate = min(1.0, text_shared / 3.0)
 
-            score = 0.45 * kw_rate + 0.30 * port_rate + 0.25 * min(1.0, similarity) + 0.10 * text_rate
+            # 相似度分量：无真实距离时不按 0 计（否则仅 BM25 命中的条目被系统性压低），
+            # 而是把该分量权重按比例重分配给其余三项。
+            base = 0.45 * kw_rate + 0.30 * port_rate + 0.10 * text_rate
+            if similarity is None:
+                score = base / 0.85 * 1.0        # 0.45+0.30+0.10 = 0.85 → 归一到 1.0
+            else:
+                score = base + 0.25 * min(1.0, float(similarity))
             score = round(min(1.0, score), 4)
 
             if best is None or score > best["match_score"]:

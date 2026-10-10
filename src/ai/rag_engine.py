@@ -134,6 +134,10 @@ class RAGEngine:
                 # 每批后主动触发垃圾回收，释放内存
                 gc.collect()
             logger.info(f"已添加 {len(all_chunks)} 个文档块到知识库（分批 {BATCH} 条/批）")
+            # 【修复】新增文档后必须让 BM25 索引失效：
+            # 否则 "先导入文档再检索" 的场景下，BM25 只覆盖初始构建时的文档，
+            # 新导入内容永远无法被关键词臂召回（且 clear() 后会出现幽灵结果）。
+            self._invalidate_bm25_index()
 
         return len(all_chunks)
 
@@ -187,9 +191,69 @@ class RAGEngine:
             return []
         return results["ids"][0]
 
+    @staticmethod
+    def distance_to_similarity(dist: float) -> float:
+        """余弦距离 → 相似度的**单调**映射。
+
+        【修复】原实现是两段式：
+            `max(0, 1 - dist) if dist <= 1 else 1 / (1 + dist)`
+        它在 dist=1.0 处产生断崖，且**非单调**：
+            dist=1.0 → 0.0000，而 dist=1.9 → 0.3448
+        即「最不相似的文档」得分反而高于「较相似的文档」，`_rerank` 据此排序会出错。
+
+        改用 `1 - dist/2`：ChromaDB 余弦空间的距离区间为 [0, 2]
+        （0=完全相同，2=完全相反），故该映射在整个区间上严格单调递减，
+        且值域落在 [0, 1]。
+        """
+        d = float(dist)
+        if d < 0:
+            d = 0.0
+        if d > 2:
+            d = 2.0
+        return 1.0 - d / 2.0
+
+    def _query_distances(self, query: str, doc_ids: List[str],
+                         filter_dict: Optional[Dict[str, Any]] = None,
+                         query_embedding: Optional[List[float]] = None,
+                         ) -> Dict[str, float]:
+        """获取指定 doc_ids 对应的**真实**距离。
+
+        【修复】原实现用 `collection.query(query_texts=[query], n_results=len(doc_ids))`
+        去"取 doc_ids 的距离"——但 query 返回的是**该查询最近邻的 id 集合**，
+        与传入的 doc_ids 并不相同。于是 BM25-only 命中拿不到距离，
+        被 `distances.get(doc_id, 0.5)` **凭空赋成 0.5**，
+        换算成 similarity 恰好是 0.500——高于真实检索到的 dist=0.6（→0.40）。
+        这个伪造值会进入排序、UI（"相似度:0.50"）以及喂给 LLM 的 prompt。
+
+        现改为：用**查询向量**在集合内做一次向量查询取回真实距离；
+        只有在确实取不到时才省略该 id（返回字典中不含它），由调用方决定丢弃。
+        """
+        if not doc_ids:
+            return {}
+        try:
+            if query_embedding is None:
+                query_embedding = self.embedding_function([query])[0]
+            res = self.collection.query(
+                query_embeddings=[query_embedding],
+                n_results=max(len(doc_ids), 1) * 4 + 16,   # 扩大候选以便覆盖全部目标 id
+                where=filter_dict)
+            ids = (res.get("ids") or [[]])[0]
+            dists = (res.get("distances") or [[]])[0]
+            got = dict(zip(ids, dists))
+            want = set(doc_ids)
+            return {k: float(v) for k, v in got.items() if k in want}
+        except Exception as e:
+            # 不返回伪造值：宁可缺失，也不能让不存在的数据参与排序
+            logger.warning(f"获取检索距离失败（相关条目将不参与距离排序）: {e}")
+            return {}
+
     def _format_results(self, doc_ids: List[str],
                         distances: Dict[str, float]) -> List[Dict[str, Any]]:
-        """把 doc_id 列表组装为检索结果（content/metadata/similarity）"""
+        """把 doc_id 列表组装为检索结果（content/metadata/similarity）。
+
+        没有真实距离的条目：`distance`/`similarity` 为 None 并标记
+        `distance_source="unavailable"`，**不再用 0.5 之类的假值填充**。
+        """
         if not doc_ids:
             return []
         data = self.collection.get(ids=doc_ids, include=["documents", "metadatas"])
@@ -199,13 +263,21 @@ class RAGEngine:
         for doc_id in doc_ids:
             doc = id2doc.get(doc_id, "")
             meta = id2meta.get(doc_id, {}) or {}
-            dist = distances.get(doc_id, 0.5)
-            similarity = max(0, 1 - dist) if dist <= 1 else 1 / (1 + dist)
+            if doc_id in distances:
+                dist = float(distances[doc_id])
+                sim = self.distance_to_similarity(dist)
+                source = "vector"
+            else:
+                # 真实距离不可得（例如仅由 BM25 召回的条目）
+                dist = None
+                sim = None
+                source = "unavailable"
             out.append({
                 "content": doc,
                 "metadata": meta,
-                "distance": float(dist),
-                "similarity": float(similarity),
+                "distance": dist,
+                "similarity": sim,
+                "distance_source": source,
             })
         return out
 
@@ -256,7 +328,11 @@ class RAGEngine:
                     if len(fused_ids) >= top_k:
                         break
             final_ids = fused_ids[:top_k]
-            dists = self._query_distances(query, final_ids, filter_dict)
+            # 复用同一个查询向量：向量查询与距离取回共用，避免重复编码；
+            # 距离只接受**真实**值，取不到的条目在结果中标记为"未知"
+            q_emb = self.embedding_function([query])[0]
+            dists = self._query_distances(query, final_ids, filter_dict,
+                                          query_embedding=q_emb)
             results = self._format_results(final_ids, dists)
 
             # P1-1: 重排序（基于查询词匹配度+安全术语权重）
@@ -275,20 +351,6 @@ class RAGEngine:
                 return self._format_results(vec_ids, dists)
             except Exception:
                 return []
-
-    def _query_distances(self, query: str, doc_ids: List[str],
-                         filter_dict: Optional[Dict[str, Any]] = None) -> Dict[str, float]:
-        """获取 doc_ids 对应距离（ChromaDB query 需传查询文本）"""
-        if not doc_ids:
-            return {}
-        try:
-            results = self.collection.query(
-                query_texts=[query], n_results=len(doc_ids), where=filter_dict)
-            ids = results.get("ids", [[]])[0] if results else []
-            dists = results.get("distances", [[]])[0] if results else []
-            return dict(zip(ids, dists))
-        except Exception:
-            return {doc_id: 0.5 for doc_id in doc_ids}
 
     # P1-1: 安全术语同义词扩展（针对中文安全查询优化检索召回）
     SECURITY_SYNONYMS = {
@@ -333,23 +395,42 @@ class RAGEngine:
         """
         term-aware 语义重排序（不引入 Cross-Encoder）：
         BGE 语义相似度 + 查询核心词精确命中（标题优先），兼顾语义泛化与关键词精确性。
+
+        对「无真实距离」的结果（仅由 BM25 召回）：不把它当作相似度 0
+        （那会系统性惩罚纯关键词命中），而是把相似度分量在**有真实分数的结果内**
+        做 min-max 归一化后使用；只有一条有分数时给中性值 0.5。
         """
         if not results:
             return results
         cores = self._extract_core_terms(query)
         n_core = max(1, len(cores))
 
+        # 相似度分量归一化（仅针对有真实距离的条目）：用 min-max 映射到 [0,1]，
+        # 无真实分数的条目给中性值 0.5（既不奖励也不惩罚纯关键词命中）。
+        sims = [float(r["similarity"]) for r in results
+                if r.get("similarity") is not None]
+        if sims:
+            lo, hi = min(sims), max(sims)
+            span = hi - lo
+        else:
+            lo, hi, span = 0.0, 0.0, 0.0
+
+        def _norm(r) -> float:
+            s = r.get("similarity")
+            if s is None or span < 1e-9:
+                return 0.5
+            return (float(s) - lo) / span
+
         scored = []
         for r in results:
             title = ((r.get("metadata") or {}).get("title") or "").lower()
             content = (r.get("content") or "").lower()
             metadata = str(r.get("metadata") or "").lower()
-            sim = float(r.get("similarity") or 0.0)
 
             t_hit = sum(1 for c in cores if c in title)
             c_hit = sum(1 for c in cores if c in content)
             m_hit = sum(1 for c in cores if c in metadata)
-            final_score = (sim * 0.45
+            final_score = (_norm(r) * 0.45
                            + (t_hit / n_core) * 0.25
                            + (c_hit / n_core) * 0.15
                            + (m_hit / n_core) * 0.05)
@@ -407,14 +488,34 @@ class RAGEngine:
             return {"error": str(e), "total_documents": 0}
 
     def clear(self):
-        """清空知识库"""
+        """清空知识库。
+
+        【修复】此前只删除 collection 并置 `self.collection = None`，
+        但 **BM25 索引与 `_seeded` 标记都未复位**：
+          · 重新导入文档后（gradio_app 的"重建知识库"正是 clear() → add_knowledge_base()），
+            BM25 仍持有**已不存在的旧 doc_id**，检索会返回内容为空的"幽灵结果"，
+            占用 top-k 名额并作为 `[参考N | 相似度:未知 | ]` 注入 LLM prompt；
+          · `_seeded` 为 True 时不会再自动播种，重建后集合可能长期为空。
+        现一并复位 BM25 索引与播种标记。
+        """
         self._init_client()
         try:
             self.client.delete_collection(name=self.collection_name)
             self.collection = None
-            logger.warning("知识库已清空")
+            # 复位派生的检索状态，避免旧索引残留
+            self._invalidate_bm25_index()
+            self._seeded = False
+            logger.warning("知识库已清空（BM25 索引与播种标记已复位）")
         except Exception as e:
             logger.error(f"清空知识库失败: {e}")
+
+    def _invalidate_bm25_index(self) -> None:
+        """使 BM25 索引失效，下次检索时按当前集合重建"""
+        try:
+            from src.ai.retrieval_hybrid import BM25Index
+            self._bm25 = BM25Index()
+        except Exception as e:
+            logger.warning(f"BM25 索引复位失败（可能导致旧索引残留）: {e}")
 
 
 # 全局单例

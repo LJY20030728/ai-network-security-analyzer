@@ -244,12 +244,19 @@ class Database:
         return updated
 
     def list_analysis(self, limit: int = 60, offset: int = 0) -> List[Dict[str, Any]]:
-        """列出分析历史"""
+        """列出分析历史。
+
+        【修复】此前 SELECT 不含 `raw_json`，而 `forensic_kb` 的统计/趋势依赖
+        `rec["raw"]["anomaly_detection"]["alerts"]` —— 取不到就恒为空，
+        导致「取证知识库攻击类型分布 / 攻击趋势」**永远为空**（且不报错）。
+        现补上 `raw_json` 并解析为 `raw`；同时给 `severity` 的解析加保护
+        （原先一个损坏行就会让整个历史列表抛异常）。
+        """
         conn = self._get_conn()
         rows = conn.execute("""
             SELECT id, ts, file, packets, flows, bytes, alerts, severity,
                    stacking_verdict, stacking_confidence, hallucination_risk, needs_review,
-                   summary_text, ai_summary, html_report
+                   summary_text, ai_summary, html_report, raw_json
             FROM analysis_history
             ORDER BY ts DESC
             LIMIT ? OFFSET ?
@@ -257,11 +264,26 @@ class Database:
         result = []
         for row in rows:
             d = dict(row)
-            d["severity"] = json.loads(d.get("severity", "{}"))
+            d["severity"] = self._safe_json_loads(d.get("severity"), {})
+            # 原始报告（大 JSON）：损坏时降级为空 dict，而不是让整个列表失败
+            d["raw"] = self._safe_json_loads(d.pop("raw_json", None), {})
             d["stacking_verdict"] = bool(d.get("stacking_verdict", 0))
             d["needs_review"] = bool(d.get("needs_review", 0))
             result.append(d)
         return result
+
+    @staticmethod
+    def _safe_json_loads(value: Any, default: Any) -> Any:
+        """容错 JSON 解析：单行数据损坏不应让整批查询失败"""
+        if value is None:
+            return default
+        if isinstance(value, (dict, list)):
+            return value
+        try:
+            return json.loads(value)
+        except (ValueError, TypeError) as e:
+            logger.warning(f"历史记录 JSON 字段解析失败，已降级为默认值: {e}")
+            return default
 
     def get_analysis(self, analysis_id: str) -> Optional[Dict[str, Any]]:
         """获取单条分析历史"""

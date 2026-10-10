@@ -135,6 +135,13 @@ _COMPARE_RE = re.compile(
     r"^(.+?)(?:和|与|及|、)(.+?)(?:的)?(?:区别|对比|差异|不同|有什么关系|有什么不同)"
 )
 
+# 比较问句的「标记」与「实体连接词」拆成两步匹配（见 rewrite_query 的说明）。
+# 标记优先匹配更长的形态，避免 "有什么区别" 只被吃掉 "区别"。
+_COMPARE_MARK_RE = re.compile(
+    r"的?(?:有什么区别|有什么不同|有什么关系|有何区别|有什么区别吗|的区别|的差异|的不同|的对比)"
+)
+_ENTITY_SPLIT_RE = re.compile(r"(?:和|与|及|、|vs\.?|VS\.?)")
+
 # 术语映射表：缩写/简称 → 完整术语
 # 用于把用户查询中的缩写扩展为完整术语，提升召回率
 TERM_SYNONYMS = {
@@ -180,14 +187,44 @@ TERM_SYNONYMS = {
 }
 
 
+def _term_pattern(abbr: str):
+    """为术语构造「独立出现」的匹配正则。
+
+    ASCII 术语用单词边界（避免 `HTTP` 命中 `HTTPS` 内部）；含非 ASCII 的术语
+    （如 `IPsec` 全为 ASCII，`SQLi` 也是）同样适用 `\\b`。中文术语退化为
+    直接匹配（`\\b` 对中文字符不成立）。
+    """
+    if abbr.isascii():
+        return re.compile(rf"(?<![A-Za-z0-9]){re.escape(abbr)}(?![A-Za-z0-9])")
+    return re.compile(re.escape(abbr))
+
+
+# 预编译并按**长度降序**排列：长术语优先匹配，避免短术语吃掉长术语的前缀
+_SYNONYM_PATTERNS = [
+    (abbr, _term_pattern(abbr), full)
+    for abbr, full in sorted(TERM_SYNONYMS.items(), key=lambda kv: -len(kv[0]))
+]
+
+
 def expand_terms(query: str) -> str:
-    """扩展查询中的缩写/简称为完整术语"""
-    expanded = query
-    for abbr, full in TERM_SYNONYMS.items():
-        # 只在缩写独立出现时替换（避免误匹配）
-        if abbr in expanded:
-            expanded = expanded.replace(abbr, full)
-    return expanded
+    """扩展查询中的缩写/简称为完整术语。
+
+    【修复】原实现按 dict 顺序做**朴素子串替换**，而表里同时存在
+    `HTTP`→`HTTP 超文本传输` 与 `HTTPS`→`HTTPS 超文本传输安全`：`HTTP` 先被替换，
+    于是 `HTTPS` 被改写成 `HTTP 超文本传输S`（残留一个孤立的 `S`），
+    这个损坏的字符串随后同时进入向量检索与 BM25 两条臂。
+    原注释声称"只在缩写独立出现时替换"，但 `if abbr in expanded` + `str.replace`
+    并不做任何边界判断。
+
+    现改为：按术语长度降序、用预编译的边界正则做**单次遍历**替换，
+    保证长术语优先且不会命中更长标识符的内部。
+    """
+    if not query:
+        return query
+    out = query
+    for _abbr, pattern, full in _SYNONYM_PATTERNS:
+        out = pattern.sub(full, out)
+    return out
 
 
 def rewrite_query(query: str) -> List[str]:
@@ -198,19 +235,48 @@ def rewrite_query(query: str) -> List[str]:
 
     "DNS放大攻击和DNS投毒的区别，检测上关注什么？"
       -> ["DNS放大攻击，检测上关注什么？", "DNS投毒，检测上关注什么？"]
+    "XSS和CSRF有什么区别" -> ["XSS是什么", "CSRF是什么"]
+
+    【修复】原 `_COMPARE_RE` 的 alternation 里 `区别` 排在 `有什么关系`/`有什么不同`
+    之前，正则引擎优先匹配最短的 `区别`，于是 `tail` 变成 `有什么`，
+    拼接后得到 `CSRF有什么是什么` 这种破损子查询。
+    现改为：先剥离比较问句后缀，再按「有效疑问尾（丢弃纯疑问短语）」重建。
     """
-    m = _COMPARE_RE.match(query.strip())
-    if not m:
+    text = (query or "").strip()
+
+    # 【修复】原实现用单个 `_COMPARE_RE` 一次性切分，但第 2 组 `(.+?)` 会在
+    # 找到匹配的前提下**贪婪地吃掉疑问短语**——"XSS和CSRF有什么区别" 切出的是
+    # ("XSS", "CSRF有什么")，于是子查询变成 `CSRF有什么是什么`（XSS 那条恰好碰巧正确，
+    # 掩盖了缺陷）。根因是"实体边界"与"比较标记"纠缠在同一个正则里。
+    #
+    # 现改为两步，边界清晰：
+    #   1) 先剥离比较标记（有什么区别/有什么不同/的区别…）及其后的疑问尾；
+    #   2) 再在剩余部分里按连接词断开两个实体。
+    m_mark = _COMPARE_MARK_RE.search(text)
+    if not m_mark:
         return [query]
-    head_a = m.group(1).strip()
-    head_b = m.group(2).strip()
-    tail = query[m.end():].strip()
-    # 子查询 = 实体 + 公共疑问尾（若无疑问尾则附加"是什么"保持完整问句）
-    tail_q = tail if tail else "是什么"
-    subs = []
-    for h in (head_a, head_b):
-        if h:
-            subs.append(f"{h}{tail_q}")
+    head_part = text[:m_mark.start()].strip()
+    tail = text[m_mark.end():].strip()
+
+    parts = _ENTITY_SPLIT_RE.split(head_part, maxsplit=1)
+    if len(parts) < 2:
+        return [query]
+    head_a, head_b = parts[0].strip(), parts[1].strip()
+    if not head_a or not head_b:
+        return [query]
+
+    # 剩余部分若只是纯疑问/标点，则统一重建为简洁问句
+    stripped = tail.strip("？?，,。. 　")
+    fillers = {"是什么", "什么意思", "什么", "有何区别", "有哪些区别", ""}
+    if stripped in fillers:
+        tail_q = "是什么"
+    elif re.match(r"^[，,？?。.]", tail):
+        # 已自带标点前缀，原样使用（避免出现 "，，" 这类重复标点）
+        tail_q = tail
+    else:
+        tail_q = "，" + tail
+
+    subs = [f"{h}{tail_q}" for h in (head_a, head_b)]
     return subs if len(subs) >= 2 else [query]
 
 

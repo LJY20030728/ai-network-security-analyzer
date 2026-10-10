@@ -92,13 +92,32 @@ data/eval_real/
 
 # Old packaging files and temporary files
 *.zip
-*.spec
 _err*.png
 _time_ref*.png
 demo_analysis.py
 test_quick.py
 test_zhipu_api.py
-run.py
+# 注：`run.py` 与 `*.spec` 原先在此被忽略，但二者都是构建/运行入口：
+#   - run.py 是 README「方式一」的 API 启动入口
+#   - AI网络安全分析系统.spec 是 PyInstaller 打包配置
+# 被忽略会导致 clone 后缺少入口文件，故已移出忽略列表并纳入版本控制。
+
+# 运行期/构建期残留（此前未忽略，导致仓库内堆积 660MB 垃圾）
+gradio/                      # Gradio 上传与缓存目录
+*.runtimeconfig.json         # pythonnet 运行时配置（生成物）
+.pytest_cache/
+__pycache__/
+.coverage
+htmlcov/
+
+# PyInstaller 中间产物与锁文件（blat 为 4 字节锁）
+*.manifest
+warn-*.txt
+xref-*.html
+/[0-9a-z_]{8}                # pyinstaller 在仓库根留下的 8 字符临时文件
+/tmp*
+/pip-*
+/pytest-of-*
 
 # Temporary files
 *.tmp

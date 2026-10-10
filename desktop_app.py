@@ -16,9 +16,23 @@ API Key 配置策略（重要）：
   把**已经启动成功、可以正常使用**的 Web 服务一并杀掉，用户只看到一个闪退。
 - 现改为：桌面窗口失败 → 提示原因 → 自动用默认浏览器打开 → 进程继续运行，
   用户始终有一个可用的界面（Ctrl+C 或关闭窗口退出）。
+
+Qt 绑定选择（3.4.2 修复，必须在任何 Qt/webview 导入之前设置）：
+- pywebview 通过 qtpy 选择 Qt 绑定，而 qtpy 遵循 `QT_API` 环境变量。
+- 本环境同时装有 PyQt5 与 PyQt6，但 **PyQt5 不可用**：其 `QLibraryInfo`
+  暴露的是枚举式 `PluginsPath`（无 `.path()`/`.location()` 方法），
+  导致 PyInstaller 的 PyQt5 hook 取不到 Qt 路径并在打包时直接失败
+  （`Qt plugin directory ... does not exist!`）。
+- 因此显式固定 `QT_API=pyqt6`：桌面窗口走完好的 PyQt6，
+  同时让 PyQt5 完全不被导入（打包时可安全排除，hook 不再触发）。
+  用户若想改用其他绑定，可在环境中自行覆盖该变量。
 """
 import os
 import sys
+
+# 必须在 import qtpy / webview / PyQt* 之前设置，否则 qtpy 已完成绑定探测
+os.environ.setdefault("QT_API", "pyqt6")
+
 import time
 import threading
 import urllib.request

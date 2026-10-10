@@ -146,13 +146,18 @@ begin
   ApiKeyPage := CreateInputQueryPage(wpSelectTasks,
     '大模型 API 配置（可选）',
     '填写你的大模型 API Key，用于 AI 威胁研判与安全问答',
-    '该配置将保存到安装目录下的 .env 文件，不会写入程序本体，可随时修改。' + #13#10 +
     '留空可跳过，核心检测（规则 / 时序基线 / 孤立森林 / 三引擎 Stacking 融合）无需 Key 即可运行。' + #13#10 + #13#10 +
-    '常用服务商：' + #13#10 +
+    '说明：此处填写的 Key 会先写入安装目录下的 .env 明文文件。' + #13#10 +
+    '程序启动后，在「设置」页重新保存一次即可迁移到 Windows DPAPI 加密存储，' + #13#10 +
+    '届时程序会自动清除 .env 中的明文 Key。' + #13#10 +
+    '（未填写 Key 时，.env 中不会写入任何密钥。）' + #13#10 + #13#10 +
+    '常用服务商（必须为 https 且使用标准 443 端口）：' + #13#10 +
     '  智谱AI          https://open.bigmodel.cn/api/paas/v4   glm-4.5-air' + #13#10 +
     '  DeepSeek        https://api.deepseek.com              deepseek-chat' + #13#10 +
-    '  通义千问        https://dashscope.aliyuncs.com/compatible-mode/v1   qwen-turbo' + #13#10 +
-    '  Ollama 本地模型 http://localhost:11434/v1             qwen2.5:7b（Key 填任意值）');
+    '  通义千问        https://dashscope.aliyuncs.com/compatible-mode/v1   qwen-turbo' + #13#10 + #13#10 +
+    '注意：程序会拒绝 http:// 以及指向本机/内网的地址（防 SSRF 与密钥外泄），' + #13#10 +
+    '因此本地 Ollama 等端点在「设置」页点击「校验」时会提示被拒绝；' + #13#10 +
+    '但**直接保存即可正常使用**（校验仅做安全拦截，不影响实际调用）。');
 
   ApiKeyPage.Add('API Key：', True);
   ApiKeyPage.Add('API 地址 (Base URL)：', False);

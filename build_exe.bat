@@ -22,6 +22,12 @@ if exist "dist\AI网络安全分析系统" rmdir /s /q "dist\AI网络安全分�
 echo [1/1] 开始打包（gradio/chromadb/scapy 体积大，约需 10-30 分钟）...
 echo.
 
+rem 固定使用 PyQt6 作为 Qt 绑定（pywebview 经 qtpy 读取 QT_API）。
+rem 本环境 PyQt5 绑定不完整：其 QLibraryInfo 为枚举式且无 path()/location()，
+rem 会使 PyInstaller 的 PyQt5 hook 取不到 Qt 路径并直接报
+rem "Qt plugin directory ... does not exist!"。故排除 PyQt5 相关模块。
+set "QT_API=pyqt6"
+
 "venv\Scripts\python.exe" -m PyInstaller ^
     --noconfirm ^
     --clean ^
@@ -55,6 +61,13 @@ echo.
     --collect-all groovy ^
     --collect-all tokenizers ^
     --collect-all webview ^
+    --collect-all qtpy ^
+    --exclude-module PyQt5 ^
+    --exclude-module PyQt5.QtCore ^
+    --exclude-module PyQt5.QtWidgets ^
+    --exclude-module PyQt5.sip ^
+    --exclude-module PyQtWebEngine ^
+    --exclude-module PyQtWebEngine.QtWebEngineWidgets ^
     --exclude-module pytest ^
     --exclude-module pydoc ^
     desktop_app.py

@@ -197,6 +197,123 @@ def on_closed():
     os._exit(0)  # 强制退出，终止后台服务线程
 
 
+def _setup_dotnet_runtime():
+    """配置 .NET Core 运行时环境，供 pythonnet 使用
+
+    pythonnet 3.x 默认使用 .NET Framework (netfx)，但在某些系统上加载失败。
+    这里尝试切换到 .NET Core (coreclr) 模式，需要用户级安装的 .NET 运行时。
+
+    检测顺序：
+    1. %USERPROFILE%\.dotnet（用户级安装）
+    2. 系统 PATH 中的 dotnet
+    3. 都找不到则不设置，让 pythonnet 回退到默认行为
+    """
+    import os
+    import sys
+
+    # 已经设置过就跳过
+    if os.environ.get("PYTHONNET_RUNTIME") == "coreclr":
+        return
+
+    dotnet_root = None
+
+    # 1. 优先检查系统级 dotnet（通常包含 Desktop Runtime / WinForms）
+    system_dotnet = r"C:\Program Files\dotnet"
+    if os.path.isfile(os.path.join(system_dotnet, "dotnet.exe")):
+        # 确认有 WindowsDesktop Runtime
+        if os.path.isdir(os.path.join(system_dotnet, "shared", "Microsoft.WindowsDesktop.App")):
+            dotnet_root = system_dotnet
+
+    # 2. 检查用户级 .dotnet 目录
+    if dotnet_root is None:
+        user_dotnet = os.path.join(os.path.expanduser("~"), ".dotnet")
+        if os.path.isfile(os.path.join(user_dotnet, "dotnet.exe")):
+            dotnet_root = user_dotnet
+
+    # 3. 检查系统 PATH 中的 dotnet
+    if dotnet_root is None:
+        for p in os.environ.get("PATH", "").split(os.pathsep):
+            if os.path.isfile(os.path.join(p, "dotnet.exe")):
+                dotnet_root = p
+                break
+
+    if dotnet_root is None:
+        print("提示：未找到 .NET Core 运行时，桌面窗口可能无法启动（浏览器模式仍可用）")
+        return
+
+    # 设置环境变量
+    os.environ["DOTNET_ROOT"] = dotnet_root
+    if dotnet_root not in os.environ.get("PATH", ""):
+        os.environ["PATH"] = dotnet_root + os.pathsep + os.environ.get("PATH", "")
+
+    # runtimeconfig.json 路径（与本脚本同目录）
+    runtime_config = os.path.join(PROJECT_ROOT, "pythonnet.runtimeconfig.json")
+    if os.path.isfile(runtime_config):
+        os.environ["PYTHONNET_RUNTIME"] = "coreclr"
+        os.environ["PYTHONNET_CORECLR_RUNTIME_CONFIG"] = runtime_config
+        print(f".NET Core 运行时已配置: {dotnet_root}")
+    else:
+        print(f"提示：未找到 runtimeconfig.json ({runtime_config})，使用默认 .NET 运行时")
+
+
+def _setup_qt_env():
+    """配置 Qt 运行环境（优先 PyQt6，回退 PyQt5）
+
+    Qt 需要正确的平台插件路径和 DLL 搜索路径才能启动窗口。
+    在虚拟环境中，这些路径不会自动设置，需要手动配置。
+    PyQt6 基于更新的 Chromium，对现代 JavaScript（Gradio 6.x）兼容性更好。
+    """
+    import os
+
+    # 已经设置过就跳过
+    if os.environ.get("QT_QPA_PLATFORM_PLUGIN_PATH"):
+        return
+
+    # 优先查找 PyQt6，回退到 PyQt5
+    qt_base = None
+    for mod_name, qt_dir in [("PyQt6", "Qt6"), ("PyQt5", "Qt5")]:
+        try:
+            mod = __import__(mod_name)
+            candidate = os.path.join(os.path.dirname(mod.__file__), qt_dir)
+            if os.path.isdir(candidate):
+                qt_base = candidate
+                break
+        except ImportError:
+            continue
+
+    if qt_base is None:
+        # 回退到虚拟环境中的常见路径
+        for mod_name, qt_dir in [("PyQt6", "Qt6"), ("PyQt5", "Qt5")]:
+            candidate = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                "venv", "Lib", "site-packages", mod_name, qt_dir
+            )
+            if os.path.isdir(candidate):
+                qt_base = candidate
+                break
+
+    if qt_base is None:
+        return
+
+    plugins_dir = os.path.join(qt_base, "plugins")
+    bin_dir = os.path.join(qt_base, "bin")
+
+    if os.path.isdir(plugins_dir):
+        os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"] = os.path.join(plugins_dir, "platforms")
+        os.environ["QT_PLUGIN_PATH"] = plugins_dir
+
+    if os.path.isdir(bin_dir) and bin_dir not in os.environ.get("PATH", ""):
+        os.environ["PATH"] = bin_dir + os.pathsep + os.environ.get("PATH", "")
+
+    # QtWebEngine 需要明确指定进程路径
+    webengine_process = os.path.join(bin_dir, "QtWebEngineProcess.exe")
+    if os.path.isfile(webengine_process):
+        os.environ["QTWEBENGINEPROCESS_PATH"] = webengine_process
+
+    # 禁用 Qt 的高 DPI 缩放问题（可选）
+    os.environ.setdefault("QT_AUTO_SCREEN_SCALE_FACTOR", "1")
+
+
 def main():
     """主函数：启动服务 -> 等待就绪 -> 打开桌面窗口"""
     port = get_port()
@@ -237,6 +354,12 @@ def main():
     print("正在打开桌面窗口...")
     reason = None
     try:
+        # 配置 PyQt5 运行环境（平台插件路径 + DLL 搜索路径）
+        _setup_qt_env()
+        # 优先使用 PyQt5 后端（不依赖 pythonnet/.NET，兼容性最好）
+        # 必须在 import webview 之前设置，否则 pywebview 会先尝试 winforms 后端
+        import os
+        os.environ['PYWEBVIEW_GUI'] = 'qt'
         import webview
 
         window = webview.create_window(
@@ -254,7 +377,8 @@ def main():
         window.events.closed += on_closed
 
         # 启动 pywebview 事件循环（阻塞，直到窗口关闭）
-        webview.start(debug=False)
+        # 使用 PyQt5 后端（不依赖 pythonnet/.NET，兼容性最好）
+        webview.start(debug=False, gui='qt')
         return  # 窗口正常关闭，on_closed 已退出进程
     except ImportError:
         reason = "pywebview 未安装"

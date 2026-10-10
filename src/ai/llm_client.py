@@ -19,6 +19,47 @@ class LLMClient:
     使用 OpenAI SDK 调用兼容接口（DeepSeek、通义千问等都兼容OpenAI格式）
     """
 
+    # 全局语言设置（i18n）：影响所有 AI 输出的语言
+    _current_language = "zh"  # 默认中文
+
+    @classmethod
+    def set_language(cls, lang: str) -> None:
+        """设置全局 AI 输出语言（zh / en）"""
+        if lang in ("zh", "en"):
+            cls._current_language = lang
+            logger.info(f"LLM 输出语言已设置为: {lang}")
+
+    @classmethod
+    def get_language(cls) -> str:
+        """获取当前 AI 输出语言"""
+        return cls._current_language
+
+    def _inject_language_instruction(self, messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
+        """根据当前语言设置，在 system prompt 中注入语言指令"""
+        lang = self._current_language
+        if lang == "zh":
+            instruction = "请始终使用简体中文回答。"
+        else:
+            instruction = "Please always respond in English."
+
+        # 查找 system 消息
+        system_idx = None
+        for i, msg in enumerate(messages):
+            if msg.get("role") == "system":
+                system_idx = i
+                break
+
+        if system_idx is not None:
+            # 追加到现有 system 消息
+            original = messages[system_idx]["content"]
+            if instruction not in original:
+                messages[system_idx]["content"] = original + "\n\n" + instruction
+        else:
+            # 没有 system 消息，插入一个
+            messages.insert(0, {"role": "system", "content": instruction})
+
+        return messages
+
     def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None,
                  model: Optional[str] = None):
         self.api_key = api_key or settings.llm_api_key
@@ -85,6 +126,9 @@ class LLMClient:
         if not self.is_available():
             return "[错误] 未配置大模型API Key，请在.env文件中设置LLM_API_KEY"
 
+        # i18n：注入语言指令
+        messages = self._inject_language_instruction(messages)
+
         key = self._cache_key(messages, temperature, max_tokens)
         hit = self._cache_get(key)
         if hit is not None:
@@ -117,6 +161,9 @@ class LLMClient:
         if not self.is_available():
             yield "[错误] 未配置大模型API Key，请在.env文件中设置LLM_API_KEY"
             return
+
+        # i18n：注入语言指令
+        messages = self._inject_language_instruction(messages)
 
         try:
             stream = self.client.chat.completions.create(

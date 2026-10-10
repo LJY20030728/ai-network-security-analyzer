@@ -7,7 +7,7 @@
 ;   4. 创建开始菜单/桌面快捷方式，安装完成后可立即启动
 ; 编译：ISCC.exe installer.iss
 ;
-; 依赖说明（3.4.1）：
+; 依赖说明（3.4.2）：
 ;   · WebView2 Runtime —— 界面渲染所需，本脚本会自动安装
 ;   · .NET Framework 4.7.2+ —— pywebview 的 pythonnet 依赖它在**独立桌面窗口**模式
 ;     下加载 Python.Runtime.dll。缺失时程序仍可正常使用，
@@ -18,8 +18,8 @@
 [Setup]
 AppId={{8A2B9C31-4E7D-4F3A-9C21-5D6E7F8A9B0C}
 AppName=AI网络安全智能分析系统
-AppVersion=3.4.1
-AppVerName=AI网络安全智能分析系统 3.4.1
+AppVersion=3.4.2
+AppVerName=AI网络安全智能分析系统 3.4.2
 AppPublisher=AI Network Security Analyzer
 DefaultDirName={autopf}\AI网络安全智能分析系统
 DefaultGroupName=AI网络安全智能分析系统
@@ -27,13 +27,13 @@ DisableProgramGroupPage=no
 DisableDirPage=no
 PrivilegesRequired=lowest
 OutputDir=installer_output
-OutputBaseFilename=AI网络安全智能分析系统_Setup_3.4.1
+OutputBaseFilename=AI网络安全智能分析系统_Setup_3.4.2
 Compression=lzma2/ultra
 SolidCompression=yes
 WizardStyle=modern
 SetupIconFile=assets\app_icon.ico
 UninstallDisplayIcon={app}\AI网络安全分析系统.exe
-VersionInfoVersion=3.4.1.0
+VersionInfoVersion=3.4.2.0
 VersionInfoDescription=AI网络安全智能分析系统 安装程序
 ArchitecturesInstallIn64BitMode=x64compatible
 

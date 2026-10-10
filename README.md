@@ -50,9 +50,9 @@
 |------|------|
 | **算法深度** | 三引擎 Stacking 融合（规则/时序基线/无监督，13维特征）、孤立森林异常分统计+top维度风险、UDP/QUIC完整检测、自适应阈值、STL 时序分解、逐包流式特征聚合 |
 | **AI 工程** | 幻觉控制三件套、RAG 混合检索+重排序、本地向量推理 |
-| **工程质量** | 176 单元测试全绿、FastAPI + Pydantic、SQLite WAL、DPAPI 加密、全局异常处理、CI（含 Windows/DPAPI 专项 job）、依赖锁定 |
+| **工程质量** | 265 单元测试全绿、FastAPI + Pydantic、SQLite WAL、DPAPI 加密、全局异常处理、CI（含 Windows/DPAPI 专项 job）、依赖锁定 |
 | **轻量可移植** | 平均内存峰值 23MB、本地推理不依赖外部服务、Windows .exe 打包 |
-| **可验证** | 所有指标都有评测脚本和结果文件，不是"拍脑袋" |
+| **可验证** | 所列指标均有对应评测脚本与结果文件；无法复现的旧指标已删除而非保留 |
 
 ---
 
@@ -71,7 +71,7 @@
 **融合方式**：三引擎输出被映射为 **13 维特征**，交 `ThreeEngineStacking`（`src/analysis/stacking_fusion.py`）融合：
 
 1. **元学习器（默认路径）**：`models/stacking_meta_learner.joblib` —— LogisticRegression，引擎顺序 `[rule_based, baseline, isolation_forest]`。加载时会**校验引擎顺序**，不匹配则拒绝加载以免给出错误判定。
-   - v3.4.0 训练结果：1732 窗口样本，5 折 CV F1 = **0.7747 ± 0.0129**
+   - 训练结果：1368 窗口样本（去重后），**GroupKFold CV F1 = 0.7425 ± 0.2700**
    - 特征权重前 5：`isolation_mean_score(-3.51)` > `rule_triggered_rules(+2.77)` > `rule_has_alert(+2.38)` > `baseline_multi_dim_triggered(+1.42)` > `isolation_anomaly_ratio(+0.99)`
    - **孤立森林的 `isolation_mean_score` 获得最高绝对权重**，证明 bug 修复后孤立森林真正参与决策（修复前权重为 0）
 2. **固定权重回退**：元学习器缺失或预测异常时，退化为规则 0.4 / 基线 0.3 / 孤立森林 0.3 的人工权重，并通过 `confidence_source="weighted_fallback"` 明确标注「这不是模型输出」。
@@ -349,7 +349,7 @@ docker compose up -d --build
 | 端点 | 方法 | 说明 |
 |------|------|------|
 | `/api/health` | GET | 健康检查 |
-| `/api/analyze` | POST | PCAP 分析（上传文件） |
+| `/api/pcap/analyze` | POST | PCAP 分析（上传文件） |
 | `/api/knowledge/search` | POST | RAG 知识检索 |
 | `/api/chat` | POST | 安全问答 |
 | `/api/baseline/learn` | POST | 学习基线 |
@@ -357,11 +357,11 @@ docker compose up -d --build
 | `/api/baseline/delete` | POST | 删除基线 |
 | `/api/forensic/stats` | GET | 取证知识库统计 |
 | `/api/forensic/trend` | GET | 攻击趋势分析 |
-| `/api/forensic/related/{id}` | GET | 跨样本关联 |
+| `/api/forensic/related/{analysis_id}` | GET | 跨样本关联 |
 | `/api/config/status` | GET | 配置状态 |
 | `/api/config/validate` | POST | API Key 有效性校验 |
 | `/api/config/save_secure` | POST | 保存到 DPAPI 加密存储 |
-| `/api/logs` | GET | 日志查看器 |
+| `/api/audit/logs` | GET | API 审计日志（另有 `/api/logs` 查看器） |
 | `/api/logs/stats` | GET | 日志统计 |
 | `/api/diagnostic` | GET | 一键诊断报告 |
 | `/api/incident/report` | POST | 生成取证报告 |
@@ -374,7 +374,12 @@ docker compose up -d --build
 
 ## 评测结果
 
-> 本节所有数字均为真实运行产物，原始结果保存在 `data/eval_perf/`、`data/eval_rag/`、`data/eval_cicids/`，可通过对应脚本一键复现，非估算或模拟。
+> **口径说明**：本节只保留**脚本仍在仓库内、可一键复跑**的指标，原始结果保存在
+> `data/eval_perf/`、`data/eval_rag/`。3.3.0 移除监督模型时，其配套脚本
+> （`tune_thresholds.py` / `generalization_eval.py` / `fusion_comparison.py` /
+> `feature_importance.py` / `eval_unsw_oot.py`）与数据集已一并删除；**无法复现的
+> 指标及其产物（JSON/CSV/PNG）已同步移除**，以免留下误导性数字。
+> 其余未在此列出的指标均属已弃用实验，不在本项目中主张。
 
 ### 三引擎融合与各引擎独立评测
 
@@ -383,27 +388,34 @@ docker compose up -d --build
 > 而其训练域（UNSW-NB15）与本项目的实际输入分布不一致，属于能力真实但迁移失效。
 > 为避免保留无法复现的指标，相关代码、模型文件、数据集与实验脚本已整体移除。
 
-当前三个引擎均可独立评测（脚本在 	ools/，结果写入 data/eval_perf/）：
+当前三个引擎均可独立评测（脚本在 `tools/`，结果写入 data/eval_perf/）：
 
 | 评测 | 脚本 | 产出 |
 |---|---|---|
-| 黄金样本回归（规则 + 基线命中 5/5、正常误报 0） | 	ools/verify_golden.py | 终端输出 + data/samples/golden/regression_result.json |
-| 孤立森林 vs EWMA 基线（FPR / TPR） | 	ools/eval_ml_engine.py | data/eval_perf/ml_engine.json |
-| 基线窗口/σ 敏感性网格 | 	ools/eval_window_sensitivity.py | data/eval_perf/window_sensitivity.json |
-| 基线引擎增量价值（纯规则 vs 规则+基线） | 	ools/verify_baseline_value.py | 终端输出 |
-| 三引擎 Stacking 元学习器训练 | 	ools/train_stacking.py | models/stacking_meta_learner.joblib + data/eval_perf/stacking_training.json |
+| 黄金样本回归（攻击命中 5/5；**正常告警 5 条，阈值 ≤3 未达成**） | `tools/verify_golden.py` | 终端输出 + data/samples/golden/regression_result.json |
+| 孤立森林 vs EWMA 基线（FPR / TPR） | `tools/eval_ml_engine.py` | data/eval_perf/ml_engine.json |
+| 基线窗口/σ 敏感性网格 | `tools/eval_window_sensitivity.py` | data/eval_perf/window_sensitivity.json |
+| 基线引擎增量价值（纯规则 vs 规则+基线） | `tools/verify_baseline_value.py` | 终端输出 |
+| 三引擎 Stacking 元学习器训练 | `tools/train_stacking.py` | models/stacking_meta_learner.joblib + data/eval_perf/stacking_training.json |
 
-**Stacking 元学习器训练结果**（	ools/train_stacking.py，可一键复跑）：
+**Stacking 元学习器训练结果**（`tools/train_stacking.py`，可一键复跑）：
 
 | 指标 | 数值 |
 |------|------|
-| 训练窗口样本 | 797（攻击 533 / 正常 264） |
+| 训练窗口（去重后唯一） | **1368**（攻击 664 / 正常 704，17 个样本组） |
+| 去重前原始行数 | 1727（移除 359 行逐位重复） |
 | 窗口划分 | 10s |
-| 5 折交叉验证 F1 | **0.7251 ± 0.0231** |
+| **5 折交叉验证 F1（GroupKFold，按源 PCAP 分组，无泄漏）** | **0.7425 ± 0.2700** |
+| 对照·普通分层 CV F1（同一样本窗口跨折，存在泄漏） | 0.9194 ± 0.0148 |
+
+> **口径说明（必读）**：上表两行 CV 的差异就是「样本内泄漏」的量化结果——
+> 同一 PCAP 的窗口若同时落在训练折与验证折，分数会被抬高约 0.18。
+> 主口径必须用 GroupKFold。标准差 **±0.27** 表明模型对训练样本高度敏感，
+> 这是当前数据规模下的真实局限，不应只引用均值。
 
 > **口径局限（必读）**：训练数据来自 10 个**合成** golden 样本，标签由样本级下推到
 > 窗口级（弱标注，存在噪声），因此元学习器权重**不应被解读为生产环境最优融合策略**。
-> 真实部署前请用自有标注流量重新运行 	ools/train_stacking.py。
+> 真实部署前请用自有标注流量重新运行 `ools/train_stacking.py。
 
 ### RAG 检索效果（双口径 Recall@k / MRR）
 
@@ -428,9 +440,9 @@ docker compose up -d --build
 | 模式 | 耗时 | 内存峰值 | 告警数 |
 |------|------|----------|--------|
 | 全量加载（`rdpcap` + `analyze_packets`） | 380.8s | **1207.7 MB** | 15 |
-| **流式解析（`PcapReader` + `analyze_stream`）** | 325.3s | **8.8 MB** | 15 |
+| **流式解析（`PcapReader` + `analyze_stream`）** | 325.3s | **18.6 MB** | 15 |
 
-- 流式内存峰值降低约 **137 倍**（1207.7 MB → 8.8 MB），**告警结果完全一致（15/15）**
+- 流式内存峰值降低约 **65 倍**（1207.7 MB → 18.6 MB），**告警结果完全一致（15/15）**
 - 这是系统能在一台普通笔记本上分析 GB 级 PCAP 的关键
 - ⚠️ **耗时数字请谨慎解读**：同一份文件在本机不同时间测得 244.0s 与 325.3s（相差 33%），
   绝对耗时受机器负载影响很大；**跨版本比较内存峰值与告警一致性是可靠的**
@@ -438,21 +450,11 @@ docker compose up -d --build
 
 ### 改动无回归验证（多口径）
 
-用三组独立口径验证三引擎改动的告警结果未发生非预期变化：
-
-| 验证 | 命令 | 结果 |
-|------|------|------|
-| 黄金样本回归 | `python tools/verify_golden.py` | 攻击命中 **5/5**；normal 误报 **0** 条；exit 0 |
-| 压测告警一致性 | `python tools/bench_stream.py` | 全量 15 条 / 流式 15 条 → **PASS** |
-| 引擎独立性 | `python tools/eval_ml_engine.py` | 孤立森林 FPR=0.04 / TPR=0.857；EWMA 基线 FPR=0 / TPR=0.286 |
-
-### 改动无回归验证（多口径）
-
 用三组独立口径验证三引擎改动的**告警结果未发生非预期变化**：
 
 | 验证 | 命令 | 结果 |
 |------|------|------|
-| 黄金样本回归 | `python tools/verify_golden.py` | 攻击命中 **5/5**；normal 误报 **0** 条；exit 0 |
+| 黄金样本回归 | `python tools/verify_golden.py` | 攻击命中 **5/5**；**normal 告警 5 条（阈值 ≤3）→ exit 1** |
 | 压测告警一致性 | `python tools/bench_stream.py` | 全量 15 条 / 流式 15 条 → **PASS** |
 | 同文件交替对照 | 见下文说明 | 三份样本告警数**逐一相同**（49/49、0/0、0/0） |
 
@@ -468,7 +470,7 @@ docker compose up -d --build
 
 | 指标 | 数值 |
 |------|------|
-| 测试结果 | **163 passed / 0 skipped / 0 failed** |
+| 测试结果 | **265 passed / 0 skipped / 0 failed** |
 | 测试文件数 | 17 个 |
 | 覆盖模块 | 算法检测 / API 路由 / 存储 / 安全 / 服务层 / 工具 |
 
@@ -594,7 +596,7 @@ ai-network-security-analyzer/
 │   ├── db/                    # SQLite 数据库
 │   ├── chroma_db/             # ChromaDB 向量库
 │   └── eval_perf/             # 评测结果
-├── tests/                     # 测试（148 个用例 / 17 个文件）
+├── tests/                     # 测试（265 个用例 / 18 个文件）
 │   ├── test_services/         # 服务层单元测试（v3.0.0 新增）
 │   ├── test_routes/           # 路由层单元测试（v3.0.0 新增）
 │   ├── test_new_features.py   # 新功能综合测试（34 个）
@@ -789,7 +791,7 @@ pyinstaller --noconfirm --windowed --name "AI-Network-Security-Analyzer" ^
 - **孤立森林特征从 3 维扩展到 6 维（总特征 10→13）**：新增 `isolation_mean_score`、`isolation_max_score`、`isolation_top_dim_risk`
 - **UDP/QUIC 攻击完整检测**：UDP flood、DNS amplification、QUIC connection flood、QUIC long flow anomaly、QUIC initial ratio anomaly
 - **预置默认基线**：随安装包分发 `default_baseline.json`，首次开箱即用无需手动学习
-- **重新训练13维元学习器**：1732窗口样本（1468攻击/264正常），5折 CV F1 = 0.7747 ± 0.0129
+- **重新训练13维元学习器**：1368窗口样本（去重后；攻击664/正常704），GroupKFold CV F1 = 0.7425 ± 0.2700
 - **新增3个测试文件（18测试）**，全部176测试通过
 
 ### [3.3.0] - 2026-10-09
@@ -818,7 +820,7 @@ pyinstaller --noconfirm --windowed --name "AI-Network-Security-Analyzer" ^
 - **引擎顺序校验**：加载元学习器时校验 `feature_order`，不匹配即拒绝加载，
   防止用错误的引擎顺序给出判定
 - `tools/train_stacking.py`：用 golden 样本逐窗口提取三引擎特征训练元学习器，
-  完全自给自足、不依赖外部数据集。CV F1 = 0.7251 ± 0.0231（797 窗口，弱标注）
+  完全自给自足、不依赖外部数据集。GroupKFold CV F1 = 0.7425 ± 0.2700（1368 窗口，弱标注）
 - 置信度来源标注改为 `model`（元学习器输出）/ `weighted_fallback`（固定权重回退，非模型输出）
 
 **默认值变更**
@@ -840,7 +842,7 @@ pyinstaller --noconfirm --windowed --name "AI-Network-Security-Analyzer" ^
 - `analysis_history` 表列 `supervised_verdict` / `supervised_confidence`
   自动迁移为 `stacking_verdict` / `stacking_confidence`（幂等，保留历史数据）
 
-**测试**：163 passed / 0 skipped / 0 failed
+**测试**：265 passed / 0 skipped / 0 failed
 
 ### [3.2.0] - 2026-10-08
 

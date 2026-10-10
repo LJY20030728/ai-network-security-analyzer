@@ -6,7 +6,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110-green.svg)](https://fastapi.tiangolo.com/)
 [![Gradio](https://img.shields.io/badge/Gradio-6.x-orange.svg)](https://www.gradio.app/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-176%20passed-brightgreen.svg)](#testing)
+[![Tests](https://img.shields.io/badge/tests-265%20passed-brightgreen.svg)](#test-coverage)
 
 **[中文版 README](README.md) | English Version**
 
@@ -22,143 +22,117 @@
 - [API Documentation](#api-documentation)
 - [Evaluation Results](#evaluation-results)
 - [Project Structure](#project-structure)
-- [Development Guide](#development-guide)
+- [Development](#development)
 - [FAQ](#faq)
-- [License](#license)
 
 ---
 
 ## Project Overview
 
-Traditional network forensics relies on security analysts manually inspecting PCAP files packet-by-packet with Wireshark — extremely inefficient and highly dependent on individual experience. While rule engines automate detection, they suffer from severe false negatives for unknown attacks (rule-engine attack recall on UNSW-NB15 is only 0.0001).
+This system turns a raw `.pcap` capture into a human-readable, evidence-traceable
+forensic conclusion. It is built for analysts who need to answer
+"what happened in this traffic, and can I defend that conclusion?"
 
-This project is an **AI-assisted offline network forensics analysis tool** that implements:
-- **Three-Engine Stacking Fusion Detection (13-dim features)**: Rule engine (9 rule types incl. TCP+UDP+QUIC) + EWMA time-series baseline + Isolation Forest, fused by a Stacking meta-learner (LogisticRegression); confidence source is always honestly labelled. v3.4.0 fixes the isolation-forest zero-contribution bug — isolation forest anomaly score now gets the highest meta-learner weight
-- **LLM Threat Assessment**: Large language model translates technical alerts into human-readable threat analysis, with hallucination control trilogy
-- **RAG Security Knowledge Q&A**: Local vector store (BGE ONNX + ChromaDB, 1687 chunks), hybrid retrieval (vector + BM25 + RRF) + reranking
-- **Full-Process Closed Loop**: Detection → Analysis → Forensic Report (five elements) → Historical Knowledge Base (cross-sample correlation / trend analysis)
-- **Streaming Processing**: Single-pass streaming parsing, memory O(active flows + windows), handles GB-scale PCAP
-- **Preloaded Default Baseline**: Shipped with installer, works out-of-the-box without manual baseline learning
+**Design principle: a claim must be reproducible, or it is removed.**
+Every metric in this document is backed by a script that still exists in the
+repository. When the supervised model was removed in 3.3.0, the metrics that
+depended on it became unreproducible — those numbers and their result artifacts
+were deleted rather than left behind (see [Evaluation Results](#evaluation-results)).
 
 ### Why This Project?
 
-| Dimension | Description |
-|-----------|-------------|
-| **Algorithm Depth** | Three-engine Stacking fusion (rule/baseline/unsupervised, 13-dim), isolation forest anomaly score + top-dim risk, UDP/QUIC full detection, adaptive threshold, STL decomposition, per-packet streaming feature aggregation |
-| **AI Engineering** | Hallucination control trilogy, RAG hybrid retrieval + reranking, local vector inference |
-| **Engineering Quality** | 176 unit tests all green, FastAPI + Pydantic, SQLite WAL, DPAPI encryption, global exception handling, CI (with Windows/DPAPI job), dependency locking |
-| **Lightweight & Portable** | Average memory peak 23MB, local inference no external service dependency, Windows .exe packaging |
-| **Verifiable** | All metrics have evaluation scripts and result files — no "guesstimates" |
+- **Offline-first.** Core detection needs no API key and no network.
+- **Multi-engine by design.** Rule thresholds, an EWMA time-series baseline, and an
+  unsupervised Isolation Forest feed a Stacking meta-learner, so one engine's blind
+  spot is not automatically the system's blind spot.
+- **Honest confidence labeling.** When the meta-learner is unavailable, the output is
+  explicitly labeled `weighted_fallback` — it is never presented as a model output.
+- **Evidence provenance.** Reports carry the source-file SHA-256, a case ID, the rule
+  version, and a content hash in the filename.
 
 ---
 
 ## Core Features
 
-### 🔍 Four-Engine Integrated Detection
+### 🔍 Three-Engine Stacking Fusion (13-dimensional features)
 
-> **⚠️ Scope note (3.2.0)**: all four engines are implemented, but the **supervised model is
-> disabled by default** (`SUPERVISED_ENGINE_ENABLED=false`). It was verified to add **zero
-> measurable benefit** on this repository's own test samples while producing false positives and
-> raising streaming peak memory by 174%. It remains available and is genuinely effective
-> **within its training domain** (UNSW-NB15 F1=0.9487, reproducible via
-> `tools/eval_supervised_baseline.py`). See `docs/监督模型增量价值验证.md`.
+| Engine | Method | What it targets |
+|---|---|---|
+| Rule engine | Threshold rules (9 classes, TCP + UDP + QUIC) | SYN flood, port scan, DNS tunnel, RST storm, large transfer, UDP flood, DNS amplification, QUIC flood, long-lived QUIC |
+| Time-series baseline | EWMA + median/MAD robust z-score over 4 window dimensions | Magnitude shifts against a learned normal profile |
+| Isolation Forest | Unsupervised; jointly models the 4 window dimensions | Coupling anomalies that no single dimension reveals |
 
-| Engine | Type | Role | Description |
-|--------|------|------|-------------|
-| **Rule Engine** | Threshold rules | Active | 5 configurable rules (SYN flood / port scan / DNS tunnel / large transfer / RST storm); thresholds from `config/settings.py`, overridable via `.env` |
-| **Time-Series Baseline** | EWMA + Median/MAD | Active | 4-dimension joint detection (window packets / bytes / SYN / dst ports), with drift detection |
-| **Isolation Forest** | Unsupervised anomaly | Opt-in (`ML_ENGINE_ENABLED=false`) | Same window input as baseline; detects multi-dimensional coupling anomalies |
-| **Supervised Model** | HistGradientBoosting | **Default off** | 76-dim CICFlowMeter features; F1=0.9487 in-domain. In streaming mode it only evaluates a bounded packet window, reported honestly via `scope.coverage_ratio` / `scope.window_capped` |
+Their outputs are fused by a `LogisticRegression` meta-learner over 13 features.
 
-**Confidence integrity**: every confidence value discloses its provenance via `confidence_source` —
-`model` (from `predict_proba` only), `aggregate_heuristic` (a hand-set prior, **not** a model
-output), or `model+aggregate`. The runtime never presents a rule prior as a model confidence.
+### 🛡️ Confidence Provenance Labeling
 
-- **Adaptive Threshold**: Dynamically adjusted based on input traffic P95 percentile, adapts to different network environments
-- **STL Advanced Mode**: Zero-dependency lightweight time-series decomposition (trend + seasonality + residual), captures periodic deviations
-- **Strategy Pattern Architecture**: Extensible — new detection algorithms only need to implement the interface and register
+`confidence_source` is always reported as one of:
 
-### 🤖 LLM Threat Assessment + Hallucination Control
+- `model` — produced by the meta-learner's `predict_proba`;
+- `weighted_fallback` — a **hand-set** weight fallback for when the meta-learner is
+  missing or fails. This is explicitly *not* a model output.
 
-- **Threat Analysis**: LLM automatically generates threat analysis reports, cross-alert correlation, attack chain reconstruction
-- **Hallucination Control Trilogy**:
-  - `OutputValidator`: Format / length / reasonableness / evidence consistency / hallucination keyword detection
-  - `ConfidenceCrossValidator`: LLM vs Rules vs Supervised Model cross-validation, contradiction detection
-  - `ReviewMarker`: Low-confidence / contradictory conclusions automatically marked "needs human review"
-- **Thinking Process Visualization**: Displays LLM analysis and thinking process
-- **Multi-Model Compatibility**: Zhipu / DeepSeek / OpenAI compatible interfaces
+### 🤖 LLM Threat Assessment
+
+The LLM converts detection output into an analyst-readable narrative with
+recommended actions. It is **advisory only**: verdicts, severities and report
+conclusions do not depend on it, and the system behaves identically with the AI
+features disabled.
 
 ### 📚 RAG Security Knowledge Q&A
 
-- **Local Vector Store**: ChromaDB + BGE ONNX inference (1687 knowledge chunks, zero external service dependency)
-- **Hybrid Retrieval**: BM25 keyword + vector semantic, dual-channel recall
-- **Lightweight Reranking**: Title 0.4 + Content 0.3 + Metadata 0.2 + Vector Distance 0.1 + Exact Match bonus
-- **Security Terminology Synonym Expansion**: 10 categories Chinese→English, improves cross-language retrieval
-- **Conversation History Persistence**: SQLite storage, no loss on refresh
+Local vector store (BGE Chinese embeddings via ONNX) + BM25 + RRF fusion +
+term-aware reranking, over MITRE ATT&CK techniques and response handbooks.
 
-### 📋 Forensic Report Five Elements
+> ⚠️ **Not fully offline on first run**: if the embedding model is absent, it is
+> downloaded (~95 MB) on first use. See [Quick Start](#quick-start) step 3.
 
-1. **Event Timeline**: Alert timeline with severity color coding
-2. **ATT&CK Attack Chain Diagram**: SVG 7-stage kill chain, detected stages highlighted in red
-3. **IOC (Indicators of Compromise) List**: IP / Port / associated alerts
-4. **Evidence Chain**: Alert → Evidence → Detection Engine → Time Window
-5. **Analyst Notes**: Dashed box reserved for filling
+### 📋 Forensic Report (five elements)
 
-### 🧠 Forensic Knowledge Base
-
-- **Cross-Sample Correlation Analysis**: Same attack type / similar alerts / time proximity scoring, discovers attack pattern evolution
-- **Trend Analysis**: Daily statistics / attack type distribution / severity trend / primary engine verdict trend
-- **Duplicate Detection Cache**: Based on file SHA256, same file directly returns historical results
-- **IOC Extraction**: Automatically extracts IP / Port and other indicators from analysis records
+Event timeline, ATT&CK kill-chain view, IOC list, evidence chain
+(alert → evidence → engine), and a free-text analyst-notes area.
 
 ### 🔒 Security & Engineering
 
-- **API Key Secure Storage**: Windows DPAPI encryption (ctypes call, zero extra dependency), bound to current user
-- **Graphical Configuration Wizard**: First-launch guided configuration, API key validity check
-- **Global Exception Handling**: 10+ exception types friendly Chinese prompts, users never see Python stack traces
-- **Log Observability**: Log viewer API (level / keyword filtering) + one-click diagnostic report (7 dimensions)
-- **Input Validation**: PCAP file / API Key / Base URL / baseline name comprehensive validation
-- **Graceful Degradation**: LLM failure → rule engine summary, RAG failure → keyword matching
+- `X-API-Token` middleware; token auto-generated on first run.
+- API key stored via Windows DPAPI (ctypes `CryptProtectData`, no extra dependency).
+- Pydantic-validated configuration; SQLite with WAL.
+- CI matrix: Linux (3.11 / 3.13) + Windows (DPAPI-specific branches).
 
 ---
 
 ## Technical Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                     Desktop Window (pywebview)                    │
-│           Gradio UI + Custom HTML/CSS (Blue Anime Style)         │
-└──────────────────────────────┬──────────────────────────────────┘
-                               │ HTTP (localhost:8080)
-┌──────────────────────────────▼──────────────────────────────────┐
-│                     FastAPI Backend Service                       │
-│        Pydantic 20+ models │ Global Exception Handling │ Logs    │
-└──────┬──────────┬──────────┬──────────┬──────────┬─────────────┘
-       │          │          │          │          │
-┌──────▼───┐ ┌───▼────┐ ┌──▼─────┐ ┌─▼──────┐ ┌▼────────────┐
-│ Parsing  │ │Detection│ │  AI    │ │Storage │ │  Security    │
-│ Scapy    │ │ 4-Eng  │ │ LLM+RAG│ │ SQLite │ │  DPAPI       │
-│ Stream   │ │Ensemble│ │         │ │ WAL    │ │  Encrypted   │
-└──────────┘ └────────┘ └────────┘ └────────┘ └─────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│  Presentation:  Gradio Web UI  +  FastAPI REST API  +  Desktop shell │
+├─────────────────────────────────────────────────────────────────────┤
+│  Service layer: run_analysis()  ← the single analysis pipeline       │
+│                 (parse → detect → AI → hallucination control →       │
+│                  report → persist); consumed by both UI and API      │
+├─────────────────────────────────────────────────────────────────────┤
+│  Detection:     rule engine │ EWMA baseline │ Isolation Forest       │
+│                            → Stacking meta-learner                   │
+├─────────────────────────────────────────────────────────────────────┤
+│  Capture:       streaming PcapReader → PacketInfo (O(1) memory)      │
+├─────────────────────────────────────────────────────────────────────┤
+│  Knowledge:     RAG (BGE ONNX + BM25 + RRF) │ MITRE ATT&CK           │
+├─────────────────────────────────────────────────────────────────────┤
+│  Storage:       SQLite (history / baselines / audit) │ ChromaDB      │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Tech Stack
 
-| Layer | Technology | Version | Description |
-|-------|-----------|---------|-------------|
-| **Language** | Python | 3.11 | - |
-| **Backend** | FastAPI | 0.110+ | Async API, Pydantic validation |
-| **Frontend** | Gradio | 6.x | Rapid UI, custom CSS |
-| **Desktop** | pywebview | 5.x | Native window, system WebView |
-| **Parsing** | Scapy | 2.5+ | PCAP stream parsing |
-| **Algorithm** | scikit-learn | 1.3+ | HistGradientBoosting / IsolationForest |
-| **AI** | Zhipu GLM LLM | glm-4.5-air | Default LLM; also supports DeepSeek / OpenAI / Ollama |
-| **Vector** | ChromaDB | 0.5+ | Local vector database |
-| **Embedding** | BGE ONNX | bge-small-zh-v1.5 | Chinese-optimized, local inference, no API needed |
-| **Storage** | SQLite | 3.x | WAL mode, three tables + indexes |
-| **Security** | DPAPI (ctypes) | - | Windows built-in encryption |
-| **Logging** | loguru | 0.7+ | Structured logging |
-| **Testing** | pytest | 8.x+ | 163 passed / 0 skipped |
+| Layer | Technology |
+|---|---|
+| Web framework | FastAPI + uvicorn |
+| UI | Gradio 6.x, pywebview (desktop shell) |
+| Packet parsing | scapy (streaming `PcapReader`), dpkt |
+| ML | scikit-learn (LogisticRegression, IsolationForest) |
+| LLM / RAG | OpenAI-compatible API, ChromaDB, ONNX Runtime (BGE) |
+| Storage | SQLite (WAL), JSON |
+| Packaging | PyInstaller + Inno Setup; Docker |
 
 ---
 
@@ -166,354 +140,198 @@ output), or `model+aggregate`. The runtime never presents a rule prior as a mode
 
 ### Requirements
 
-- Windows 10/11 (recommended, DPAPI encryption requires)
-- Python 3.11+ (only for running from source; the installer bundles it)
-- WebView2 Runtime (needed to render the desktop window; preinstalled on Windows 10 2004+ / Windows 11; if missing on a stripped-down system, download 'WebView2 Runtime' from Microsoft)
-- Memory: Minimum 2GB, recommended 4GB+
-- Disk: Minimum 500MB (including models and dependencies)
+- Python ≥ 3.11
+- Windows recommended (DPAPI-encrypted key storage; other platforms fall back to plaintext)
 
-### Method 1: Source Code Run (Recommended for Development)
-
-> **Easiest: double-click `安装依赖.bat`** in the project root. It automatically: checks for Python 3.11 -> creates the `venv` -> upgrades pip -> installs **ALL dependencies** from `requirements.txt` (a Tsinghua mirror is preconfigured; takes ~5-15 min; it shows a completion message and pauses, and reports clearly on failure).
-
-Manual steps (equivalent to the script):
+### Method 1: Run from Source
 
 ```bash
 # 1. Clone the repository
 git clone https://github.com/LJY20030728/ai-network-security-analyzer.git
 cd ai-network-security-analyzer
 
-# 2. Create a virtual environment and install [ALL dependencies] (required)
+# 2. Create a virtual environment and install ALL dependencies (required)
 python -m venv venv
-venv\Scripts\activate
+venv\Scripts\activate          # Windows
 pip install -r requirements.txt
 
-# 3. Download large file resources (required for first run, ~90 MB)
-# BGE embedding model (ONNX), not included in the repo due to size
+# 3. Download large resources (~90 MB) — required on first run
+#    The BGE embedding model is not committed to the repository.
 python tools/init_resources.py
 
-# 4. Configure API Key (only needed for AI features, not for core detection)
+# 4. Configure the API key (only needed for AI features; core detection works without it)
 copy .env.example .env
-# Edit .env and fill in LLM_API_KEY; you can also do it later in UI Settings (DPAPI encrypted)
+# Edit .env and set LLM_API_KEY, or configure it later in the UI Settings tab (DPAPI-encrypted)
 
-# 5. Start the desktop version
-python desktop_app.py
-
-# Or start the API service (browser access http://127.0.0.1:8080)
-python -m uvicorn src.api.main:app --host 127.0.0.1 --port 8080
+# 5. Start
+python desktop_app.py          # desktop window
+# or: python run.py            # API service at http://127.0.0.1:8080
 ```
 
-> Core detection (rule engine / supervised model / time-series baseline / isolation forest) runs **without any API Key**; only AI threat triage and security Q&A need an LLM key.
+### Method 2: Windows Installer
 
-### Method 2: Windows Installer (Recommended for Users)
+Download the installer from Releases / CI artifacts (`installer_output/*.exe`) and
+run it. It bundles Python and all dependencies, and installs the WebView2 runtime
+if missing.
 
-1. Go to the [Releases page](https://github.com/LJY20030728/ai-network-security-analyzer/releases) and download `AI网络安全智能分析系统_Setup_3.1.1.exe`
-2. Double-click the installer and choose a directory (it bundles all runtime dependencies and models; no Python needed)
-3. **The installer auto-detects WebView2 Runtime**: if missing, it notifies you up front and, after you click Install, automatically downloads and silently installs it (a signed Microsoft online installer is bundled)
-4. After installation, launch from the desktop / Start Menu shortcut
-5. Core detection works out of the box; for AI threat triage & Q&A, configure an LLM key in the in-app **Settings** (DPAPI encrypted, not hardcoded)
+### Method 3: Docker
+
+```bash
+docker compose up -d
+# then open http://localhost:8080
+```
 
 ---
 
 ## Usage Guide
 
-### 1. PCAP Traffic Analysis
-
-1. Open the app, go to "📊 PCAP Traffic Analysis" tab
-2. Click "Select File" to upload .pcap/.pcapng file (max 200MB)
-3. (Optional) Select a learned time-series baseline for comparison detection
-4. Click "Start Analysis"
-5. View results:
-   - **Primary Engine Verdict**: Attack / Normal + Confidence + Attack flow ratio + Attack category
-   - **Alert List**: All alerts detected by four engines, sorted by severity
-   - **Traffic Statistics**: Packet count / Flow count / Byte count / Protocol distribution
-   - **AI Threat Analysis**: LLM-generated threat analysis report (with hallucination control validation)
-   - **Forensic Report**: Click to download five-element complete HTML report
-
-### 2. Baseline Management
-
-1. Go to "📈 Baseline Management" tab
-2. Click "Upload Normal Traffic to Learn Baseline", select normal business traffic .pcap file
-3. Enter baseline name, click "Learn"
-4. After learning, you can view:
-   - **Baseline Profile**: 4-dimension (packets/bytes/SYN/ports) median±MAD bar chart (SVG)
-   - **Comparison Chart**: Current traffic vs baseline median line chart (SVG)
-5. When analyzing PCAP, you can select this baseline for comparison detection
-
-### 3. Security Q&A Assistant
-
-1. Go to "🤖 Security Q&A" tab
-2. Enter security-related questions (e.g., "What is SQL injection? How to detect?")
-3. System retrieves relevant documents from local knowledge base, combines with LLM to generate answers
-4. Conversation history automatically saved, no loss on refresh
-5. Can view retrieved relevant document fragments
-
-### 4. Analysis History
-
-1. Go to "📜 Analysis History" tab
-2. View all historical analysis records (file / time / alert count / severity / primary engine verdict)
-3. Click records to view details, reload analysis results
-4. Forensic knowledge base features:
-   - **Cross-Sample Correlation**: View historical analyses similar to current sample
-   - **Trend Analysis**: Attack count / type / severity changes over time
-   - **Duplicate Detection Cache**: Same file (SHA256) directly returns historical results
-
-### 5. Settings
-
-1. Go to "⚙️ Settings" tab
-2. Configure API Key (password input field, saved with DPAPI encrypted storage)
-3. Configure Base URL and model name (**default: Zhipu GLM, Base URL `https://open.bigmodel.cn/api/paas/v4`, model `glm-4.5-air`**; local embedding is fixed to `BAAI/bge-small-zh-v1.5`)
-4. Click "Save Config" — takes effect immediately, no restart required; also switchable to DeepSeek / OpenAI-compatible endpoints or local Ollama
-5. The **RAG knowledge base path** is displayed below (vector store dir / knowledge source docs dir / chunk count / readiness), so you can verify whether the knowledge base has been initialized
+1. **PCAP analysis** — upload a `.pcap`/`.pcapng`, optionally pick a baseline, then
+   start the analysis. Progress is streamed in four stages.
+2. **Baseline management** — learn a baseline from normal traffic; the profile is
+   stored in SQLite and mirrored to JSON.
+3. **Security Q&A** — ask questions against the RAG knowledge base.
+4. **Analysis history** — browse past analyses, reopen reports, re-analyze.
+5. **Settings** — configure the LLM key and base URL; inspect diagnostics.
 
 ---
 
 ## API Documentation
 
-After starting the service, visit `http://127.0.0.1:8080/docs` for complete Swagger API documentation.
+Once running, Swagger is available at `http://127.0.0.1:8080/docs`.
 
 ### Core API Endpoints
 
 | Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/health` | GET | Health check |
-| `/api/analyze` | POST | PCAP analysis (upload file) |
-| `/api/knowledge/search` | POST | RAG knowledge retrieval |
+|---|---|---|
+| `/api/health` | GET | Health check (no token required) |
+| `/api/pcap/analyze` | POST | Analyze an uploaded PCAP |
+| `/api/pcap/analyze_async` | POST | Submit an async analysis task |
+| `/api/tasks/{task_id}` | GET | Poll an async task |
+| `/api/knowledge/search` | POST | RAG knowledge search |
 | `/api/chat` | POST | Security Q&A |
-| `/api/baseline/learn` | POST | Learn baseline |
-| `/api/baseline/list` | GET | Baseline list |
-| `/api/baseline/delete` | POST | Delete baseline |
-| `/api/forensic/stats` | GET | Forensic knowledge base statistics |
+| `/api/baseline/learn` | POST | Learn a baseline |
+| `/api/baseline/list` | GET | List baselines |
+| `/api/baseline/delete` | POST | Delete a baseline |
+| `/api/forensic/stats` | GET | Forensic knowledge-base stats |
 | `/api/forensic/trend` | GET | Attack trend analysis |
-| `/api/forensic/related/{id}` | GET | Cross-sample correlation |
-| `/api/config/status` | GET | Configuration status |
-| `/api/config/validate` | POST | API Key validity check |
-| `/api/config/save_secure` | POST | Save to DPAPI encrypted storage |
+| `/api/forensic/related/{analysis_id}` | GET | Cross-sample correlation |
+| `/api/forensic/iocs/{analysis_id}` | GET | Extract IOCs from an analysis |
+| `/api/config/status` | GET | Configuration status (key masked) |
+| `/api/config/validate` | POST | Validate the API key |
+| `/api/config/save_secure` | POST | Save to the DPAPI-encrypted store |
+| `/api/audit/logs` | GET | API audit log |
+| `/api/audit/stats` | GET | Audit statistics |
 | `/api/logs` | GET | Log viewer |
 | `/api/logs/stats` | GET | Log statistics |
-| `/api/diagnostic` | GET | One-click diagnostic report |
-| `/api/incident/report` | POST | Generate forensic report |
+| `/api/diagnostic` | GET | One-shot diagnostic report |
+| `/api/incident/report` | POST | Generate an incident report |
 
 ### Authentication
 
-All `/api/*` endpoints require `X-API-Token` in request headers (auto-generated on first launch, stored in .env as `API_AUTH_TOKEN`). Gradio UI (in-process calls) is not affected.
+All `/api/*` endpoints except `/api/health` require an `X-API-Token` header. The
+token is generated automatically on first run and persisted to `.env` as
+`API_AUTH_TOKEN`. In-process Gradio UI calls are unaffected.
 
 ---
 
 ## Evaluation Results
 
-> Every number below comes from a real run artifact stored under `data/eval_perf/`, `data/eval_rag/`, and `data/eval_cicids/`, and can be reproduced with the matching script. Nothing is estimated or mocked.
+> **Scope note.** Only metrics whose scripts remain in the repository are listed
+> here, and each can be re-run. When the supervised model was removed in 3.3.0, its
+> supporting scripts (`tune_thresholds.py`, `generalization_eval.py`,
+> `fusion_comparison.py`, `feature_importance.py`, `eval_unsw_oot.py`) and datasets
+> were deleted as well. **Metrics that could no longer be reproduced were removed
+> together with their result artifacts (JSON/CSV/PNG)** rather than left in place as
+> misleading numbers. Metrics not listed here belong to retired experiments and are
+> not claimed by this project.
 
-### Supervised Model Detection Performance
+### Three-Engine Fusion: Meta-Learner Training
 
-A supervised model (HistGradientBoosting) acts as the **primary detector**, validated on two datasets:
+| Metric | Value |
+|---|---|
+| Training windows (after deduplication) | **1368** (664 attack / 704 normal, 17 sample groups) |
+| Rows before deduplication | 1727 (359 bit-identical rows removed) |
+| Window size | 10 s |
+| **5-fold CV F1 (GroupKFold by source PCAP — no leakage)** | **0.7425 ± 0.2700** |
+| Reference: plain stratified CV (same-sample windows across folds) | 0.9194 ± 0.0148 |
 
-| Dataset | Flows | Precision | Recall | F1 | Accuracy |
-|---------|-------|-----------|--------|-----|----------|
-| **UNSW-NB15** (in-distribution split) | 175,341 | 0.9637 | **0.9772** | **0.9704** | 0.9594 |
-| **UNSW-CIC Re-extracted** (76-dim CICFlowMeter, in-distribution stratified, **not the public CIC-IDS2017**) | 447,915 | 0.9351 | 0.9628 | **0.9487** | 0.9792 |
+> **How to read this.** The gap between the two CV rows *is* the measured effect of
+> within-sample leakage — roughly +0.18 F1 of inflation. The primary figure must be
+> the GroupKFold one. The **±0.27 standard deviation** means the model is highly
+> sensitive to which samples it is trained on; that is a real limitation at this data
+> scale, and quoting only the mean would misrepresent it.
+>
+> The training data is synthetic and weakly labeled (window labels are derived from
+> attack-segment timing, not per-flow human annotation). **These weights should not
+> be read as an optimal fusion policy for production.** See `tools/train_stacking.py`.
 
-> **Honest note (UNSW-CIC Re-extracted)**: the 0.9487 above is the binary **aggregate** F1; per-class, minority-attack recall is low (DoS 0.168, Analysis 0.260, Shellcode 0.241, Worms 0.306) and attack **macro recall is only 0.4683**. This data is UNSW-NB15's underlying traffic re-extracted with CICFlowMeter (the time axis is synthetic, row-order × 0.5s, no real timestamps) — not the public CIC-IDS2017; it is used only to validate the 76-dim CICFlowMeter feature system.
+### Per-Engine Independent Evaluation
 
-**vs unsupervised/rule engines** (same UNSW-NB15 test set):
+| Evaluation | Script | Artifact |
+|---|---|---|
+| Isolation Forest vs EWMA baseline (FPR / TPR) | `tools/eval_ml_engine.py` | `data/eval_perf/ml_engine.json` |
+| Baseline window/σ sensitivity grid | `tools/eval_window_sensitivity.py` | `data/eval_perf/window_sensitivity.json` |
+| Baseline incremental value (rules only vs rules + baseline) | `tools/verify_baseline_value.py` | terminal output |
+| Meta-learner training | `tools/train_stacking.py` | `models/stacking_meta_learner.joblib` + `data/eval_perf/stacking_training.json` |
 
-| Detector | Attack Recall |
-|----------|---------------|
-| Rule engine (large-flow class) | 0.0001 |
-| Isolation Forest | 0.2107 |
-| Time-series baseline (best σ=2) | 0.5045 |
-| **Supervised model** | **0.9772** |
-
-The supervised model lifts attack recall from 0.0001 (rule engine) to 0.9772 — which is why it is the primary detector.
-
-### Overfitting Check & Model Stability
-
-| Metric | Value | Note |
-|--------|-------|------|
-| Train F1 | 0.9791 | — |
-| Test F1 | 0.9704 | — |
-| **F1 gap** | **0.0088** | ✅ Low overfitting risk (< 0.03) |
-| **5-fold CV F1** | **0.9394 ± 0.0429** | Overall stable |
-| L2 / early stopping | l2=1.0 / enabled | Double safeguard |
-
-The train/test F1 gap is only 0.0088, so in-distribution overfitting risk is low. Note, however, that genuine cross-dataset transfer degrades sharply when feature systems do not align (see Generalization below; UNSW→NSL is only 0.192) — a new environment therefore needs baseline learning / local retraining rather than reusing a model as-is.
-
-### Out-of-Time Validation (closest to real deployment)
-
-Stratified-random splitting measures generalization within the same time window, but in production a model is always applied to traffic captured in the **future**. To test out-of-time (OOT) generalization, we use UNSW-NB15's **two official time windows**: the entire official training-set (175,341) for training and the official testing-set (82,332, a different window) as an independent test (`tools/eval_unsw_oot.py`):
-
-![Three-Caliber Validation Comparison](docs/validation_split_comparison.png)
-
-| Validation caliber | F1 | Note |
-|--------------------|-----|------|
-| In-distribution (stratified random) | 0.9704 | Same window, upper bound |
-| **Out-of-Time (OOT)** | **0.8924** | Different window; P 0.8187 / R 0.9808 / Acc 0.8698 |
-| Cross-dataset UNSW→NSL | 0.1924 | Different feature system, lower bound |
-
-- Train self F1 is 0.9783; after OOT the F1 decays by **0.0859** yet stays at 0.89 — the model does not merely memorize in-distribution samples and generalizes reasonably to a future window.
-- Under OOT, **Normal-class recall is 0.734 (more false positives, P down to 0.82) — a real weakness**: the model tends to flag normal flows with unseen patterns in the new window as attacks. This points to combining baseline learning + a small local calibration at deployment rather than launching zero-shot.
-- Five `state` values unseen at test time are handled conservatively as all-zero.
-
-### UNSW-NB15 Per-Class Recall
-
-| Attack | Recall | | Attack | Recall |
-|--------|--------|-|--------|--------|
-| Backdoor | 1.0000 | | Exploits | 0.9953 |
-| Worms | 1.0000 | | DoS | 0.9988 |
-| Generic | 1.0000 | | Shellcode | 0.9911 |
-| Reconnaissance | 0.9991 | | Analysis | 0.9171 |
-| Normal | 0.9215 | | Fuzzers | 0.8715 |
+Only `eval_ml_engine.py` uses a genuine held-out split (80/20 on the normal
+capture); the sensitivity grid fits and scores on the same windows, so its FPR
+values are in-sample self-tests rather than FPR estimates.
 
 ### RAG Retrieval (Dual-Caliber Recall@k / MRR)
 
-A 16-question golden set (MITRE techniques, protocols, incident handbooks, web security) evaluates the production retrieval path (BGE Chinese embeddings + BM25 + RRF fusion + term-aware reranking) under two calibers:
+Evaluated on a 16-question golden set against the production retrieval path
+(BGE Chinese embeddings + BM25 + RRF + term-aware reranking):
 
 | Caliber | Recall@1 | Recall@3 | Recall@5 | MRR@5 |
-|---------|----------|----------|----------|-------|
-| **Strict (single authoritative doc)** | 0.6875 | 1.0000 | 1.0000 | 0.8333 |
-| **Relevant (relevant-doc set)** | **0.8750** | 1.0000 | 1.0000 | **0.9375** |
+|---|---|---|---|---|
+| **Strict** (single authoritative entry) | 0.6875 | 1.0000 | 1.0000 | 0.8333 |
+| **Relevant** (relevant-document set) | **0.8750** | 1.0000 | 1.0000 | **0.9375** |
 
-- **Strict**: gold = the single authoritative doc whose title contains the technique ID / full handbook name.
-- **Relevant**: gold = the set of docs that objectively answer the question (standard IR practice; a question usually has more than one relevant doc). The rationale for each gold set is annotated in `tools/evaluate_rag.py`.
-- Store size: **1687 chunks / 63 entries** (including **697 valid ATT&CK techniques**, excluding 149 revoked + 12 deprecated; 15 full technique-expansion docs); ~0.3s average retrieval.
-- Per-category Relevant Recall@5: MITRE 1.0, handbooks 1.0, protocols 1.0.
-- **Two honestly-reported top-1 flaws** (lateral movement; system-information discovery) — the correct docs are within top-3; weights are not force-tuned to overfit the golden set. Raw output: `data/eval_rag/rag_result.json`.
+- Vector store: **1687 chunks / 63 entries** (including 697 active ATT&CK techniques).
+- Two known top-1 flaws are reported rather than tuned away; see
+  `data/eval_rag/rag_result.json` for raw per-query results.
+- **Caveat:** Recall@3 and Recall@5 both saturate at 1.0 on this set, so only
+  Recall@1 discriminates. The "Relevant" gold sets are author-defined and include
+  loose protocol tokens, making 0.8750 an upper bound rather than a measurement.
 
-### Streaming vs Full-Load Memory Test (300k packets / 28 MB PCAP)
+### Streaming vs Full-Load Memory (300k packets / 28 MB PCAP)
 
-| Mode | Time | Memory Peak | Alerts |
-|------|------|-------------|--------|
-| Full load | 246.7s | **1112.3 MB** | 15 |
-| Streaming | 244.0s | **6.8 MB** | 15 |
+All three engines run inside a single streaming pass and never hold the full packet
+list.
 
-Streaming cuts memory peak by **162.8x** with identical alerts (`data/eval_perf/perf_baseline.json`) — the key to analyzing GB-scale PCAPs on an ordinary laptop.
+| Mode | Time | Peak memory | Alerts |
+|---|---|---|---|
+| Full load (`rdpcap` + `analyze_packets`) | 380.8 s | **1207.7 MB** | 15 |
+| **Streaming (`PcapReader` + `analyze_stream`)** | 325.3 s | **18.6 MB** | 15 |
 
-### Testing Coverage
+- Peak memory reduced ~**65×** (1207.7 MB → 18.6 MB) with **identical alerts (15/15)**.
+- ⚠️ **Timing varies**: the same file measured 244.0 s and 325.3 s on the same
+  machine (33% spread). Cross-version comparison of memory and alert agreement is
+  reliable; absolute timings are not.
+- Raw data: `data/eval_perf/perf_baseline.json`.
+
+### Regression Verification (multi-caliber)
+
+| Verification | Command | Result |
+|---|---|---|
+| Golden-sample regression | `python tools/verify_golden.py` | Attack hits **5/5**; **5 normal-traffic alerts (threshold ≤3) → exit 1** |
+| Stress-test alert consistency | `python tools/bench_stream.py` | Full-load 15 / streaming 15 → **PASS** |
+| Engine independence | `python tools/eval_ml_engine.py` | Isolation Forest FPR=0.04 / TPR=0.857; EWMA baseline FPR=0 / TPR=0.4286 |
+
+> **Known open issue.** `verify_golden.py` currently exits non-zero: 5 false
+> positives on normal traffic, all of them `ML_ANOMALY` alerts from the Isolation
+> Forest. The cause is the contamination setting combined with training and scoring
+> on the same capture. It is documented here rather than hidden by widening the
+> threshold. The earlier "0 false positives / exit 0" claim predates this state.
+
+### Test Coverage
 
 | Metric | Value |
-|--------|-------|
-| Result | **163 passed / 0 skipped / 0 failed** |
-| Test files | 17 |
-| Covered modules | Detection algorithms / API routes / Storage / Security / Services / Utils |
-
----
-
-## Deep Evaluation & Optimization Experiments
-
-> Each experiment maps to a reproducible script in the root; charts and CSVs live in `docs/`.
-
-### 1. Feature Importance (Permutation Importance)
-
-Features are not guessed — permutation importance is measured on a genuinely unseen test set (a stratified, representative 4,000-flow subset; `n_repeats=3`, scored by F1):
-
-![Feature Importance](docs/feature_importance.png)
-
-| Rank | Feature | Importance | Meaning |
-|------|---------|------------|---------|
-| 1 | `sttl` | **0.2229** | Source-to-destination TTL (attack TTL distribution is highly anomalous; the decisive feature, far ahead of all others) |
-| 2 | `ct_state_ttl` | 0.0089 | Flow-state TTL correlation count |
-| 3 | `sbytes` | 0.0072 | Source-to-destination byte count |
-| 4 | `ct_srv_src` | 0.0061 | Same-service connection count from source |
-| 5 | `ct_srv_dst` | 0.0057 | Same-service connection count to destination |
-
-A category-aggregated view is available at `docs/feature_category_importance.png`.
-
----
-
-### 2. Generalization & Cross-Domain Transfer (including an honest "failure")
-
-We do not hide the model's weakness. We select five semantically corresponding features shared by UNSW and NSL-KDD (duration / source bytes / destination bytes / connection count / same-service count) and test four settings:
-
-![Generalization Evaluation](docs/generalization_evaluation.png)
-
-| Setting | F1 | Note |
-|---------|-----|------|
-| A. UNSW same distribution | 0.9635 | Performance upper bound |
-| B. NSL independent test set | 0.7967 | Drops after switching datasets |
-| C. UNSW → NSL cross-domain transfer | **0.1924** | Applying the UNSW model to NSL nearly fails |
-| D. NSL full 31 features | 0.7785 | Trained on NSL's own features (control) |
-
-**Domain-shift gap Δ = 0.604.** This "ugly" result is the core justification for the design: **one model cannot be used directly across network environments** — protocol mix, service distribution and traffic baselines differ greatly. Instead of betting on one universal model, the product offers Baseline Management (learning each environment's own normal profile) and local retraining, while AI (RAG + LLM) handles cross-environment triage and explanation.
-
-> Supervised-model choice: HistGradientBoosting vs XGBoost/LightGBM differs by < 0.01 in F1, but it is native sklearn with zero extra dependencies and the most stable under PyInstaller — the engineering-optimal choice, avoiding two heavy dependencies.
-
----
-
-### 3. Performance Stress Test (10 samples, real timing / memory)
-
-10 samples, from 10 packets to 11k packets, up to 11.4MB, measured with time + tracemalloc:
-
-![Performance Bench](docs/performance_benchmark.png)
-
-| File | Size | Packets / Flows | Time | Memory |
-|------|------|-----------------|------|--------|
-| dnstunnel | <1KB | 10 / 0 | 0.03s | 0.9MB |
-| portscan | <1KB | 50 / 50 | 0.09s | 0.9MB |
-| rststorm | <1KB | 80 / 80 | 0.12s | 0.9MB |
-| synflood | 0.01MB | 200 / 198 | 0.26s | 1.3MB |
-| lightscan | 0.12MB | 1495 / 235 | 1.49s | 5.7MB |
-| normal | 0.12MB | 1480 / 220 | 1.72s | 5.6MB |
-| burst | 0.18MB | 2080 / 820 | 2.73s | 8.2MB |
-| baseline_demo_normal | 0.63MB | 2729 / 2729 | 4.18s | 15.2MB |
-| largeflow | 11.44MB | 8239 / 1 | 9.51s | 67.0MB |
-| baseline_demo_attack | 1.2MB | 11673 / 11661 | **22.06s** | **124.5MB** |
-
-**Typical cases** (everyday files <3,000 packets): 0.03–2.7s, memory peak <8.2MB — second-level on an ordinary laptop; across the 10 samples average time is **4.22s**, average memory peak **23.0MB**.
-
-**Bottlenecks kept honestly**: `baseline_demo_attack` (11.6k high-cardinality short connections) takes 22s / 124MB; `largeflow` (a single 11MB giant flow) 9.5s / 67MB — marked in orange on the chart. The bottleneck is high-cardinality flow-table construction, a clear target for later optimization (hashing/bucketing, giant-flow truncation) rather than being hidden by averages.
-
----
-
-### 4. RAG Real Comparison (Direct Prompt vs RAG)
-
-Five real security questions, comparing a bare LLM with RAG:
-
-![RAG Comparison](docs/rag_real_comparison.png)
-
-| Metric | Direct Prompt | RAG |
-|--------|---------------|-----|
-| Average time | 6.02s | 6.34s (+0.32s) |
-| Average answer length | 128 chars | **202 chars** |
-| Empty/failed answers | **3** | **0** |
-| Traceable sources | ❌ | ✅ |
-
-**Hard evidence of hallucination**: asked "What is T1046?", the direct prompt answered "Initial Access / Network Shared Drive" (wrong), while RAG correctly answered "Reconnaissance / Network Service Scanning"; the direct prompt also returned empty on 3 other questions. RAG trades ~0.3s of retrieval for accuracy, completeness, and reliability.
-
----
-
-### 5. Fusion Architecture (Fixed Weights vs Data-Driven Weights)
-
-Addressing "are the fusion weights guessed?", five schemes were tested on a leakage-free held-out set (base-engine predictions generated via 5-fold OOF on the dev set, the combiner trained, then evaluated on an independent 20%):
-
-![Fusion Architecture](docs/fusion_architecture_comparison.png)
-
-| Scheme | held-out F1 | Weight Source |
-|--------|-------------|---------------|
-| Supervised only | 0.9691 | — |
-| Fixed-weight sum (0.5/0.2/0.15/0.15) | **0.9577** | ❌ Manual; weak engines dilute the strong supervisor |
-| Grid-search weights | 0.9692 | ✅ Auto-finds supervised 0.9 / baseline 0.1 |
-| Stacking (LogisticRegression) | 0.9691 | ✅ Learned (supervised coefficient 9.37, others ≈0) |
-| Cascade + Stacking | 0.9691 | ✅ Rules decide first, rest goes to the meta-learner |
-
-**Honest conclusion**: when the supervised model is already strong (UNSW), guessed fixed weights also mix in noise from weak engines (rule/isolation) and lower F1 (0.958 < 0.969); GridSearch/Stacking both concentrate weight on the supervisor (~0.9) and return to the optimum — proving **fusion weights must be data-driven**.
-
-To be fair, fixed weights are not worthless: in a real-PCAP unknown-attack / unlabeled cold start, the supervised model may fail on out-of-distribution attacks, while the baseline and isolation forest provide signals the supervisor cannot; fixed weights are a conservative engineering trade-off for robustness. The engine injects a trained meta-learner via `set_meta_learner()` and falls back to weighted fusion when absent, so it works out of the box.
-
----
-
-### 6. Differentiation from Existing Tools
-
-| Dimension | Wireshark | Suricata/Snort | **This System** |
-|-----------|-----------|----------------|-----------------|
-| Method | Manual per-packet | Rules/signatures | **Multi-engine + AI assessment** |
-| Target user | Network expert | Security engineer | Security ops / analyst |
-| Unknown/encrypted | Manual discovery | Missed outside rules | Behavioral baseline + unsupervised + supervised fallback |
-| Threat interpretation | None | Raw alerts | LLM human-readable report + remediation |
-| Knowledge Q&A | None | None | RAG knowledge base (1687 chunks) |
-| Output | Packet list | Alert log | Forensic five-element HTML report |
-| Deployment | Local | Server | Installer / Docker / source |
-
-**Positioning**: Wireshark is an expert's "microscope", Suricata is a rule-driven "gate"; this system is an analyst's **AI assessment assistant** — upload a PCAP and get a complete conclusion from evidence and attack chain to remediation.
+|---|---|
+| Test result | **265 passed / 0 skipped / 0 failed** |
+| Test files | 18 |
+| Covered modules | Detection algorithms, API routes, storage, security, service layer, tooling |
 
 ---
 
@@ -521,278 +339,128 @@ To be fair, fixed weights are not worthless: in a real-PCAP unknown-attack / unl
 
 ```
 ai-network-security-analyzer/
+├── config/                  # Pydantic settings (.env-driven)
 ├── src/
-│   ├── analysis/              # Analysis engine
-│   │   ├── cic_features.py    # 76-dim CICFlowMeter feature extraction
-│   │   ├── supervised_detector.py  # Supervised detector (HistGradientBoosting)
-│   │   ├── flow_extractor.py  # Flow extraction + four-engine ensemble
-│   │   ├── baseline.py        # EWMA time-series baseline + STL advanced detection
-│   │   ├── stl_decomposer.py # Zero-dependency lightweight STL decomposition
-│   │   ├── isolation_detector.py  # Isolation Forest unsupervised detection
-│   │   └── detection_engine.py    # Strategy pattern + Factory pattern detection engine
-│   ├── ai/                    # AI module
-│   │   ├── llm_client.py      # LLM client
-│   │   ├── threat_analyzer.py # Threat analyzer
-│   │   ├── rag_engine.py      # RAG retrieval engine (hybrid + reranking)
-│   │   ├── hallucination_control.py  # Hallucination control trilogy
-│   │   ├── evidence_matcher.py      # Evidence matcher
-│   │   └── embeddings/        # Embedding model (BGE ONNX)
-│   ├── api/                   # API layer
-│   │   ├── main.py            # FastAPI main app + Gradio UI
-│   │   ├── schemas.py         # Pydantic models (20+)
-│   │   ├── history_store.py   # History storage (SQLite)
-│   │   ├── task_queue.py      # Task queue
-│   │   └── audit.py           # Audit log
-│   ├── capture/               # Capture / parsing
-│   │   ├── packet_parser.py   # Packet parser
-│   │   └── pcap_parser.py     # PCAP file parser
-│   ├── report/                # Report generation
-│   │   └── html_report.py     # HTML forensic report (five elements)
-│   ├── storage/               # Storage layer
-│   │   ├── database.py        # SQLite database (WAL, three tables + indexes)
-│   │   └── forensic_kb.py     # Forensic knowledge base (correlation / trend / cache)
-│   ├── security/              # Security layer
-│   │   └── secure_store.py    # DPAPI encrypted storage
-│   ├── ui/                    # UI resources
-│   │   └── custom_style.css   # Blue anime style custom CSS
-│   └── utils/                 # Utility functions
-│       ├── paths.py           # Path management
-│       ├── helpers.py         # Common utilities
-│       ├── error_handler.py   # Three-layer error handling
-│       └── log_observer.py    # Log observability
-├── models/                    # Trained models
-│   ├── supervised_detector.joblib      # UNSW-CIC Re-extracted supervised model (76-dim, F1=0.9487)
-│   └── unsw_supervised_detector.joblib # UNSW dedicated model (Recall=0.9772)
-├── data/                      # Data directory
-│   ├── samples/golden/        # Golden test samples (10)
-│   ├── baselines/             # Baseline files (JSON compatible backup)
-│   ├── eval_perf/             # Evaluation results
-│   └── ...                    # (db/history/chroma_db generated at runtime)
-├── tests/                     # Tests (163)
-├── tools/                     # Reproducible experiment scripts
-│   ├── init_resources.py      # Resource initialization (download BGE + MITRE)
-│   ├── train_unsw_supervised.py  # UNSW model training (stratified random)
-│   ├── eval_supervised_baseline.py  # CIC supervised baseline
-│   ├── generalization_eval.py # Generalization / cross-domain transfer
-│   ├── fusion_comparison.py   # Fusion architecture comparison
-│   ├── benchmark.py           # Performance benchmark (time + tracemalloc)
-│   └── eval_rag_recall.py     # RAG Recall@k evaluation
-├── feature_importance.py      # Permutation importance (real data)
-├── benchmark_performance.py   # Reads benchmark results and plots
-├── rag_real_comparison.py     # Direct prompt vs RAG real comparison
-├── docs/                      # Documentation and charts
-│   ├── 项目自述_REACT完整版.md (Project narrative, REACT)
-│   └── DOCKER_DEPLOYMENT.md
-├── config/                    # Configuration
-│   └── settings.py            # Global config (pydantic-settings)
-├── desktop_app.py             # Desktop entry (pywebview)
-├── requirements.txt           # Python dependencies
-├── .env.example               # Environment variable example
-├── .gitignore
-├── LICENSE
-├── README.md                  # Chinese README
-└── README_EN.md               # English README (this file)
+│   ├── analysis/            # flow extraction, baseline, Isolation Forest, Stacking
+│   ├── ai/                  # LLM client, RAG, threat analysis, hallucination control
+│   ├── api/                 # audit log, task queue, history store
+│   ├── capture/             # streaming PCAP/packet parsing
+│   ├── core/                # exceptions
+│   ├── knowledge/           # MITRE ATT&CK, protocol and web-security corpora
+│   ├── report/              # HTML forensic report, summary formatter
+│   ├── security/            # DPAPI-backed secure store
+│   ├── services/            # analysis pipeline (single implementation)
+│   ├── storage/             # SQLite, forensic knowledge base, baseline-name rules
+│   ├── ui/                  # Gradio app, charts, i18n manager
+│   └── utils/               # helpers, paths, error handling, log observer
+├── tools/                   # evaluation and training scripts
+├── tests/                   # pytest suite
+├── data/                    # samples, baselines, knowledge, run artifacts
+├── models/                  # Stacking meta-learner; BGE ONNX (downloaded)
+└── docs/                    # deployment guide, historical self-audit
 ```
 
 ---
 
-## Development Guide
+## Development
 
-### Adding a New Detection Engine
+### Adding a Detection Engine
 
-The project uses the Strategy pattern — adding a new detection algorithm is simple:
+Engines must produce alerts the fusion layer can consume:
 
-```python
-# 1. Implement DetectionStrategy interface
-from src.analysis.detection_engine import DetectionStrategy, DetectorFactory
-
-class MyDetector(DetectionStrategy):
-    @property
-    def name(self): return "my_detector"
-
-    @property
-    def version(self): return "1.0.0"
-
-    def detect(self, packets, flows=None, context=None):
-        # Your detection logic
-        alerts = []
-        # ...
-        return {"alerts": alerts, "summary": {}, "stats": {}}
-
-# 2. Register with factory
-DetectorFactory.register("my_detector", MyDetector)
-
-# 3. Use in ensemble engine (automatic weighted voting)
-from src.analysis.detection_engine import DetectionEngine
-engine = DetectionEngine()
-engine.add_strategy(MyDetector(), weight=0.1)
-result = engine.detect_all(packets)
-```
+1. Implement the detection logic, aligning with the alert schema used by
+   `TrafficAnalyzer._detect_anomalies` (`type`, `severity`, `detector`,
+   `time_window`, plus rule-specific evidence fields).
+2. Expose the engine's contribution as features in
+   `src/analysis/stacking_fusion.py` (`THREE_ENGINE_FEATURE_NAMES`), keeping the
+   order consistent with `ENGINE_ORDER` — the loader refuses a model whose engine
+   order does not match.
+3. Retrain the meta-learner: `python tools/train_stacking.py`.
 
 ### Running Tests
 
 ```bash
-# Run all tests
-pytest tests -q
-
-# Run specific test file
-pytest tests/test_new_features.py -v
-
-# Run with coverage (requires pytest-cov)
-pytest tests --cov=src --cov-report=html
+pytest tests                       # full suite
+pytest tests/test_charts.py -q     # security regressions only
+pytest --cov=src                   # with coverage
 ```
 
 ### Performance Benchmark
 
 ```bash
-python tools/benchmark.py
-# Results saved in data/eval_perf/benchmark_result.json
+python benchmark_performance.py    # results in data/eval_perf/benchmark_result.json
 ```
 
 ### RAG Evaluation
 
 ```bash
-python tools/eval_rag_recall.py
-# Results saved in data/eval_perf/rag_recall_result.json
+python tools/evaluate_rag.py       # results in data/eval_rag/rag_result.json
 ```
 
-### Training Supervised Models
+### Retraining the Stacking Meta-Learner
 
 ```bash
-# CIC model
-python tools/eval_supervised_baseline.py
-
-# UNSW dedicated model
-python tools/train_unsw_supervised.py
+python tools/train_stacking.py     # writes models/stacking_meta_learner.joblib
 ```
 
 ### Code Standards
 
-- Follow PEP 8
-- Use type hints
-- Every module/class/function has docstrings
-- Error handling: no bare except, no swallowing exceptions, users never see stack traces
-- Logging: use loguru, key operations all have logs
+`ruff` (E, W, F, I, B, UP, S, C4, SIM) and `mypy` are configured in
+`pyproject.toml` for a progressive rollout across core domain modules.
 
 ---
 
 ## FAQ
 
-### Q1: Is the API Key secure? Is it hardcoded?
+### Q1: Is the API key safe? Is it hardcoded anywhere?
 
-**A**: Absolutely not. API Key has two storage methods:
-1. **DPAPI Encrypted Storage (Recommended)**: Windows built-in encryption, bound to current user, other users cannot decrypt. Automatically encrypted when saved via UI Settings.
-2. **.env File**: Plaintext storage, only as compatible backup. DPAPI encrypted storage recommended.
+No key is hardcoded. On Windows the key is encrypted with DPAPI
+(`CryptProtectData`, user-scoped) via `src/security/secure_store.py`.
 
-No API Key is hardcoded in the code.
+**Known limitation:** when the key is saved through the UI, it is currently *also*
+written in plaintext to `.env` so a restart picks it up. The DPAPI copy is therefore
+redundant rather than exclusive. Moving to a DPAPI-only secret path is a tracked
+improvement.
 
-### Q2: Does it need internet?
+### Q2: Does it need network access?
 
-**A**: By feature:
-- **PCAP parsing / detection / baseline / report**: Fully offline, no internet needed
-- **LLM threat analysis / security Q&A**: Needs to call LLM API, requires internet
-- **RAG retrieval**: Local vector store, fully offline
-
-Project positioning is "offline forensics tool" — core detection functionality fully offline.
+Core detection (rules / baseline / Isolation Forest / Stacking) is fully offline.
+Only the AI features need an API key, and the RAG retrieval stack runs locally. Note
+that the embedding model is downloaded once on first run if absent.
 
 ### Q3: Which LLMs are supported?
 
-**A**: The default LLM is **Zhipu GLM (`glm-4.5-air`, Base URL `https://open.bigmodel.cn/api/paas/v4`)**. Any OpenAI-compatible interface also works, including:
-- Zhipu AI (GLM-4.5-Air / GLM-4 / GLM-4.5)
-- DeepSeek (deepseek-chat)
-- OpenAI (GPT-4 / GPT-4o)
-- Locally deployed Ollama / vLLM (OpenAI-compatible interface)
+Any OpenAI-compatible endpoint. Defaults to Zhipu AI (`glm-4.5-air`); DeepSeek,
+OpenAI, and local Ollama have all been used successfully.
 
-The local embedding model is fixed to `BAAI/bge-small-zh-v1.5` (ONNX, offline). Configure the Base URL and model name in Settings.
+### Q4: How much memory does it use?
 
-### Q4: Is memory usage high?
+Streaming analysis peaks at 18.6 MB on a 300k-packet / 28 MB capture, versus
+1207.7 MB for the full-load path.
 
-**A**: Very lightweight. Performance benchmark shows:
-- Average memory peak: **23.0 MB**
-- Average analysis time: **4.22 seconds/file** (10 samples, 28,036 total packets)
-- Typical <3,000-packet files: 0.03–2.7s / <8.2MB (extreme high-cardinality files can reach 22s / 124MB — a known bottleneck)
+### Q5: How does this differ from Wireshark or Suricata?
 
-BGE ONNX model uses ~100-200MB after loading, but can be loaded on demand. Regular computers can run smoothly.
+| Dimension | Wireshark | Suricata/Snort | **This system** |
+|---|---|---|---|
+| Analysis | Manual packet inspection | Rule/signature matching | **Multi-engine + AI-assisted assessment** |
+| Target user | Network experts | Security engineers | Security ops / analysts |
+| Unknown or encrypted traffic | Manual discovery | Blind outside rules | Behavioral baseline + unsupervised anomaly detection |
+| Threat interpretation | None | Raw alerts | LLM narrative + recommended actions |
+| Knowledge Q&A | None | None | RAG security knowledge base (1687 chunks) |
+| Output | Packet list | Alert log | Five-element HTML forensic report |
+| Deployment | Local | Server | Installer / Docker / source |
 
-### Q5: What's the difference from Wireshark / Suricata?
+### Q6: How was RAG Recall@5 measured, and is it trustworthy?
 
-**A**: Different positioning, complementary:
-- **vs Wireshark**: Wireshark is a protocol analyzer, requires manual packet-by-packet inspection; this project is an automated analysis tool — upload PCAP and automatically get threat verdict and forensic report.
-- **vs Suricata**: Suricata is real-time IDS/IPS, rule-based, needs continuous running; this project is offline forensics analysis tool, focused on post-incident analysis, uses supervised models to detect unknown attacks.
-
-Practical use case: Use Suricata for real-time monitoring to discover alerts, then use this project for deep forensic analysis of related PCAPs.
-
-### Q6: How is RAG Recall@5 measured? Is it trustworthy?
-
-**A**: A 16-question, human-labeled golden set is used; Top-5 is retrieved without seeing the answer and scored under two calibers:
-1. **Strict** (gold = single authoritative doc): Recall@1=0.6875, @5=1.0, MRR=0.8333
-2. **Relevant** (gold = relevant-doc set): Recall@1=0.875, @5=1.0, MRR=0.9375
-3. Production retrieval is BGE Chinese embeddings + BM25 + RRF + term-aware reranking, averaging ~0.3s
-4. The script and golden set are in the repo (`tools/evaluate_rag.py`, `data/eval_rag/`); gold-set rationale is annotated in the script and it can be re-run. Two top-1 flaws are reported honestly.
-
-### Q7: How to package as Windows .exe?
-
-**A**: Use PyInstaller:
-
-```bash
-pip install pyinstaller
-pyinstaller --noconfirm --windowed --name "AI-Network-Security-Analyzer" ^
-    --add-data "models;models" ^
-    --add-data "data/samples;data/samples" ^
-    --add-data "src/ui/custom_style.css;src/ui" ^
-    desktop_app.py
-```
-
-Packaged files in `dist/` directory. Recommended to use Inno Setup to create installer.
-
----
-
-## Changelog
-
-See [CHANGELOG.md](CHANGELOG.md) for full details.
-
-### [3.4.1] - 2026-10-09
-
-**Hotfix: Fix isolation forest not executing at runtime (found by adversarial review after v3.4.0 release)**
-
-- **Root cause**: `default_baseline.json` does not contain `train_windows` raw data, causing `if self.baseline._train_windows:` to be False, isolation forest not learned (`learned=False`), `detect_windows()` not executed at runtime, 3 isolation forest features always 0 in 13-dim features
-- **Fix**: When `_train_windows` is empty, use `normal.pcap` (219 windows, priority) or `baseline_demo_normal.pcap` (45 windows, fallback) to re-aggregate windows and train isolation forest
-- **Secondary fix**: Training with 45-window small sample caused 100% anomaly rate and attack missed detection; switched to `normal.pcap` (219 windows), normal traffic anomaly rate dropped from 100% to 8.7%
-- **Verification**: synflood prob=0.7672 ✅, portscan prob=0.8581 ✅, normal prob=0.4315 ✅, 44 related tests all passed
-
-### [3.4.0] - 2026-10-09
-
-**Core fix: isolation forest zero-contribution bug; UDP/QUIC detection; preconfigured baseline; 13-dim meta-learner retraining**
-
-- **Isolation forest zero contribution (most severe)**: `to_dict()` only output metadata, missing `anomaly_windows` and `total_windows`, causing isolation forest features to always be `[1.0, 0.0, 0.0]` during training. After fix, `isolation_mean_score` gets highest absolute weight -3.5069
-- **Isolation forest features expanded from 3 to 6 dims (total 10→13)**: Added `isolation_mean_score`, `isolation_max_score`, `isolation_top_dim_risk`
-- **UDP/QUIC attack complete detection**: UDP flood, DNS amplification, QUIC connection flood, QUIC long flow anomaly, QUIC initial ratio anomaly
-- **Preconfigured default baseline**: `default_baseline.json` distributed with installer, out-of-box without manual learning
-- **13-dim meta-learner retrained**: 1732 window samples (1468 attack/264 normal), 5-fold CV F1 = 0.7747 ± 0.0129
-- **Added 3 test files (18 tests)**, all 176 tests passed
+See [RAG Retrieval](#rag-retrieval-dual-caliber-recallk--mrr). Two calibers are
+reported side by side, the golden set has 16 questions, and the two known top-1
+failures are listed rather than tuned away. The honest reading is that Recall@1 is
+the only discriminating column, and that the "Relevant" caliber is an upper bound
+because its gold sets were authored by the same person who wrote the questions.
+Expanding the set with negatives and independent labeling is the next step.
 
 ---
 
 ## License
 
-MIT License
-
-Copyright (c) 2026 Jingyu Liao (LJY20030728)
-
----
-
-## Acknowledgments
-
-- [Scapy](https://scapy.net/) - Powerful network packet processing library
-- [FastAPI](https://fastapi.tiangolo.com/) - Modern Python web framework
-- [Gradio](https://www.gradio.app/) - Rapid ML UI building
-- [scikit-learn](https://scikit-learn.org/) - Machine learning library
-- [ChromaDB](https://www.trychroma.com/) - Local vector database
-- [BAAI/bge](https://huggingface.co/BAAI) - Chinese-optimized embedding model
-- [UNSW-NB15](https://research.unsw.edu.au/projects/unsw-nb15-dataset) - Network security dataset
-- [CICFlowMeter](https://www.unb.ca/cic/research/tools/flowmeter.html) - Network flow feature extraction reference
-
----
-
-**If this project helps you, please give a Star ⭐**
-
+MIT — see [LICENSE](LICENSE).

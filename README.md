@@ -766,18 +766,52 @@ BGE ONNX 模型加载后约占用 100-200MB，但可以按需加载。普通电�
 
 ### Q7：如何打包成 Windows .exe？
 
-**A**：使用 PyInstaller：
+**A**：使用仓库自带的一键脚本（**推荐**，已包含全部必需资源与参数）：
 
-```bash
-pip install pyinstaller
-pyinstaller --noconfirm --windowed --name "AI-Network-Security-Analyzer" ^
-    --add-data "models;models" ^
-    --add-data "data/samples;data/samples" ^
-    --add-data "src/ui/custom_style.css;src/ui" ^
+```bat
+build_exe.bat        :: PyInstaller 打包 → dist\AI网络安全分析系统\
+制作安装程序.bat      :: Inno Setup 生成安装包 → installer_output\..._Setup_3.4.2.exe
+```
+
+前置条件：已执行 `安装依赖.bat` 建好 venv；做安装包还需 Inno Setup 6
+（`winget install JRSoftware.InnoSetup`）。
+
+两个关键约束（**手工执行 PyInstaller 时最易踩**）：
+
+1. **必须固定 `QT_API=pyqt6`**。桌面窗口经 pywebview → qtpy 选择 Qt 绑定，
+   而本环境同时装有 PyQt5 与 PyQt6；PyQt5 的 `QLibraryInfo` 为枚举式且无
+   `.path()`/`.location()`，会让 PyInstaller 的 PyQt5 hook 取不到 Qt 路径并直接
+   报 `Qt plugin directory ... does not exist!`。脚本已 `set QT_API=pyqt6`
+   并排除全部 PyQt5 模块。
+2. **必须带上全部 `--add-data`**。除 `models/` 外还需 `data/chroma_db`（预构建
+   向量库）、`data/baselines`、`data/knowledge/*`、`config`、`src`、`assets`；
+   否则装出来的程序缺少知识库与预置基线（RAG 与基线检测将不可用）。
+
+等价的核心命令（完整参数见 `build_exe.bat`，勿以简写替代）：
+
+```bat
+set QT_API=pyqt6
+venv\Scripts\python.exe -m PyInstaller --noconfirm --clean --onedir --windowed ^
+    --name "AI网络安全分析系统" ^
+    --add-data "config;config" --add-data "src;src" ^
+    --add-data "data\baselines;data\baselines" ^
+    --add-data "data\chroma_db;data\chroma_db" ^
+    --add-data "data\knowledge\docs;data\knowledge\docs" ^
+    --add-data "data\knowledge\attack_types;data\knowledge\attack_types" ^
+    --add-data "models\bge-small-zh-v1.5;models\bge-small-zh-v1.5" ^
+    --add-data "models\stacking_meta_learner.joblib;models" ^
+    --add-data "assets;assets" --icon "assets\app_icon.ico" ^
+    --collect-all gradio --collect-all chromadb --collect-all scapy ^
+    --collect-all onnxruntime --collect-all tokenizers --collect-all webview ^
+    --collect-all qtpy ^
+    --exclude-module PyQt5 --exclude-module PyQt5.QtCore --exclude-module PyQt5.QtWidgets ^
+    --exclude-module PyQt5.sip --exclude-module PyQtWebEngine ^
     desktop_app.py
 ```
 
-打包后的文件在 `dist/` 目录下。建议使用 Inno Setup 制作安装包。
+产物约 **1.1 GB**（`--onedir`，含 91 MB BGE 模型与 PyQt6 运行时），安装包约
+**334 MB**（lzma2/ultra 压缩）。`dist/`、`build/`、`installer_output/` 均已在
+`.gitignore` 中，不会进入版本库。
 
 ---
 

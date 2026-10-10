@@ -144,7 +144,9 @@ class ProjectSettings(BaseSettings):
     project_name: str = "AI Network Security Analyzer"
     debug: bool = True
     log_level: str = "INFO"
-    version: str = "3.3.0"
+    # 单一版本来源：FastAPI app.version、/api/config/status、报告头 rule_version 均取自此处。
+    # 升级发布版本时必须同步 pyproject.toml 与 installer.iss（三者保持一致）。
+    version: str = "3.4.2"
 
 
 class Settings(BaseSettings):
@@ -166,7 +168,7 @@ class Settings(BaseSettings):
     project_name: str = "AI Network Security Analyzer"
     debug: bool = True
     log_level: str = "INFO"
-    version: str = "3.3.0"
+    version: str = "3.4.2"   # 与 ProjectSettings.version / pyproject.toml / installer.iss 保持一致
 
     # ===== 大模型配置（平铺，向后兼容）=====
     llm_api_key: str = ""

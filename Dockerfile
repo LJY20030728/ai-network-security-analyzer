@@ -1,6 +1,8 @@
 # AI网络安全智能分析系统 - Docker 部署
-# 构建: docker build -t ai-nsa:2.1.0 .
+# 构建: docker build -t ai-nsa:3.4.2 .
 # 运行: docker compose up -d  （映射 8080 端口 + 挂载数据目录）
+#
+# 版本号与 config/settings.py 的 settings.version、pyproject.toml、installer.iss 保持一致。
 #
 # 【安全】本次修正三处：
 #   1. 入口文件：原先 COPY/CMD 引用 run_dev.py——该文件在仓库中**不存在**，
@@ -12,7 +14,7 @@ FROM python:3.11-slim
 
 LABEL maintainer="nsa-project" \
       description="AI网络安全智能分析系统（PCAP离线分析 + 三引擎 Stacking 融合检测 + LLM威胁研判 + RAG安全知识问答）" \
-      version="2.1.0"
+      version="3.4.2"
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \

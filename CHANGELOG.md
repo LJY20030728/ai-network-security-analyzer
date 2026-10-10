@@ -24,7 +24,83 @@
 - 通过测试脚本检查 `demo.blocks` 确认：Tab 组件类型为 `"Tab"`，label 属性存在且在翻译字典中，
   但 Gradio 6.26.0 不支持通过事件更新 Tab label
 - 自动注册组件数从 69 增加到 72（新增3个 info 字段注册）
-- 回归测试：176 passed（5 errors 为预存 sqlite3 问题，与本次修改无关）
+
+### Security / Correctness / Reproducibility（系统对抗性自审后的修复批次）
+
+> 以「文档是嫌疑人、注释是嫌疑人、沉默的失败最危险」为原则，对仓库做第一性原理
+> 审查 + 实测复核，并逐项修复。每一项都有可复现的验证方式。
+
+**安全**
+- 修复基线名**存储型 XSS**：基线名经 SQLite 持久化后原样拼进 SVG，而该图表由
+  `demo.load(...)` 驱动（每次页面加载都执行），且 `gr.HTML` 无 `sanitize_html`。
+  现为双层防御（storage 层名称白名单 + 渲染层统一转义）。
+- Gradio UI 此前**完全无鉴权**（token 中间件只覆盖 `/api/*`，UI 挂在 `/`），
+  叠加 `os.startfile()` 与"递归搜索桌面找文件再打开"→ 可升级为主机代码执行。
+  现改为：挂载点加 `auth_dependency`（回环免 token、非回环强制、未配置 token 时
+  fail closed）；`os.startfile` 默认禁用且限定 data 目录内；搜索收窄到 `data/samples`。
+- API Key 此前在 DPAPI 写入后**仍明文再写一份到 `.env`**，且预填函数由
+  `demo.load()` 每次页面加载把真实 Key 推送到浏览器 → 现 Windows 仅 DPAPI
+  并清除 `.env` 明文；预填只回掩码、输入框保持为空。
+- 修复 `/api/config/validate` 的 **SSRF 与凭据外带**：原先用户传入的 `base_url`
+  被直接请求并携带 `Authorization: Bearer <真实 Key>`，仅校验非空。现强制 https、
+  拒绝回环/私网/链路本地/保留地址与非标端口、禁止跟随重定向、不回显响应正文。
+- 移除 Gradio `allowed_paths` 对 `data/reports|uploads|history` 的暴露
+  （此前取证报告可被**无鉴权**直接下载）。
+- BGE 模型自动下载此前**不做任何完整性校验**（只查文件大小）就交给 onnxruntime
+  执行；BGE 不可用时还降级为 chromadb 默认 embedding（会**从 AWS S3 下载第二个
+  模型**），与"完全离线"的宣称矛盾。现内置 sha256 白名单校验、支持
+  `AI_NSA_MODEL_AUTO_DOWNLOAD=0` 禁用下载，并移除默认 EF 降级。
+
+**可信度 / 实验诚实性**
+- 修复 Stacking 元学习器**标签污染**：混合样本被整文件标为攻击，而其正常前缀与
+  `normal.pcap` 逐位相同 → 264 行同特征同时标 0 和 1（1732 行仅 50.7% 唯一）。
+  现按窗口打标（正常前缀=0/攻击段=1/跨界窗丢弃）+ 去重 + **GroupKFold**；
+  主口径 CV F1 从虚高的 0.7747 变为真实的 **0.7425 ± 0.2700**（泄漏对照 0.9194）。
+  模型落盘新增训练数据指纹。
+- 修复孤立森林的**语义错配**：它是双向统计异常检测，而安全威胁是单向的
+  （资源偏高才算威胁）。此前"流量更安静"的窗口也被计为 HIGH 告警，使
+  `verify_golden.py` 以 5 条正常误报 exit 1。现高侧计告警、低侧记入
+  `behavioral_observations`，正常误报 **5 → 1**、exit **1 → 0**，攻击命中保持 5/5。
+- 修复幻觉控制**把 LLM 调用失败认证为合格输出**：`[大模型调用失败] Error code: 401`
+  此前被评为 `校验分 1.0 (pass) / 幻觉风险 low`。现新增失败检测，返回
+  `level="unavailable"`，报告显示"AI 分析不可用"并隐藏分数；同时修复否定词
+  反向计分（"未发现"含"发现"）与报错串被当作攻击技术。
+- 多温度投票此前是**虚构的**（记录 3 个温度但实际只发生 1 次调用）→ 现真正传递
+  温度并绕开响应缓存。
+
+**功能正确性**
+- 混合检索此前上报**伪造相似度**：BM25-only 命中被凭空赋 0.5（高于真实
+  dist=0.6→0.40），且映射非单调（dist 1.9→0.34 > dist 1.0→0.0）。现改为单调的
+  `1-dist/2`，缺失真实距离时标记 `unavailable` 而非伪造。
+- `expand_terms` 此前把 `HTTPS` 改写成 `HTTP 超文本传输S`（`HTTP` 先于 `HTTPS`
+  命中）；`rewrite_query` 把"XSS和CSRF有什么区别"拆成 `CSRF有什么是什么`。
+  现改为长度降序 + 边界正则，以及两步切分。
+- 取证攻击趋势此前**恒为空**（`list_analysis` 不 SELECT `raw_json` 而
+  `forensic_kb` 读 `rec["raw"]`）；`clear()` 不复位 BM25 索引与播种标记，
+  导致"重建知识库"后返回空内容幽灵结果。
+
+**可复现性**
+- **全部 15 个 `__init__.py` 从未入库**：`.gitignore` 的 `_*.py`（无前导斜杠）
+  误匹配所有包的 `__init__.py`。修复规则并补回文件。
+- 补入从未提交的 `run.py`（README 的 API 入口）、`AI网络安全分析系统.spec`、
+  `src/ui/i18n_manager.py`、`src/ui/translations.json`。
+- 评测脚本此前**每次运行都覆盖 `data/samples/golden/*.pcap`**，静默改写回归测试的
+  输入数据；现默认写入 `data/samples/generated/`，仅显式传参时才改动 golden。
+- 删除 14 个**不可复现的孤儿产物**（对应脚本已随监督模型删除），并把
+  "所有指标均可一键复现"收窄为只列真实可复跑的指标。
+- 修复 Docker 部署的致命缺陷：入口引用**不存在的 `run_dev.py`**（构建必然失败）、
+  `main()` 硬编码 `host=127.0.0.1` 使 `HOST=0.0.0.0` 从未生效（端口映射不可达）、
+  `.dockerignore` 排除模型文件与 `COPY` 矛盾；并改为非 root 运行、
+  端口默认只绑回环、移除 `changeme` 弱默认 token。
+- 版本号统一：`config/settings.py`、`pyproject.toml`、`installer.iss`、`Dockerfile`、
+  `docker-compose.yml` 此前分别漂移在 3.3.0 / 3.3.0 / 3.4.2 / 2.1.0 / 1.1.0，
+  现统一为 **3.4.2**，并新增一致性回归测试固化该契约。
+
+### Technical Details（本批次）
+- 测试规模：**181 → 378 passed**（新增 197 项，逐项覆盖上述修复）
+- 仓库体积：3239 MB → 2219 MB（清理 1.66 GB 构建垃圾与临时文件）
+- `src/ui/gradio_app.py`：2825 → 2334 行（抽出 `charts.py` 与
+  `services/analysis_service.py`，合并三份重复的分析流水线）
 
 ---
 

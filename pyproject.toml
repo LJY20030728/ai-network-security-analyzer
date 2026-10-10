@@ -4,7 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ai-network-security-analyzer"
-version = "3.3.0"
+# 发布版本：需与 config/settings.py 的 settings.version 及 installer.iss 保持一致
+version = "3.4.2"
 description = "AI 辅助的离线网络取证分析系统：流式 PCAP 解析 + 三引擎 Stacking 融合检测 + LLM 威胁研判 + RAG 安全知识问答"
 readme = "README.md"
 requires-python = ">=3.11"

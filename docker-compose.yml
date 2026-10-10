@@ -3,7 +3,8 @@ version: "3.8"
 services:
   nsa:
     build: .
-    image: ai-nsa:1.1.0
+    # 镜像标签与项目版本保持一致（config/settings.py / pyproject.toml / installer.iss）
+    image: ai-nsa:3.4.2
     container_name: ai-nsa
     ports:
       # 默认只绑本机回环：对外暴露需显式改为 "8080:8080" 并同时设置 API_AUTH_TOKEN

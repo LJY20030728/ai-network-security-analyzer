@@ -6,25 +6,31 @@
     "isolation_forest"
   ],
   "window_sec": 10,
-  "training_samples": 1732,
-  "n_attack_windows": 1468,
-  "n_normal_windows": 264,
-  "cv_f1_mean": 0.7747013475845461,
-  "cv_f1_std": 0.012887786592850994,
+  "training_samples": 1368,
+  "training_samples_raw": 1727,
+  "training_samples_removed_as_duplicate": 359,
+  "n_attack_windows": 664,
+  "n_normal_windows": 704,
+  "n_groups": 17,
+  "cv_scheme": "groupkfold_by_sample",
+  "cv_f1_mean": 0.7424766967302312,
+  "cv_f1_std": 0.27003284489097945,
+  "cv_f1_ungrouped_mean": 0.9193709399294949,
+  "cv_f1_ungrouped_std": 0.014822169006473422,
   "feature_importance": {
-    "rule_has_alert": 2.376158988239776,
-    "rule_alert_count_norm": 0.159049911375692,
-    "rule_max_severity": -0.8674923587532481,
-    "rule_triggered_rules": 2.7677764793812747,
-    "baseline_deviation_count": -0.6845711058027386,
-    "baseline_multi_dim_triggered": 1.4164563675470163,
-    "baseline_drifted": -0.08122222601796117,
-    "isolation_available": -0.08122222601796117,
-    "isolation_anomaly_count": 0.6132625847119065,
-    "isolation_anomaly_ratio": 0.9886476176003458,
-    "isolation_mean_score": -3.5069489081044694,
-    "isolation_max_score": 0.9099077751963165,
-    "isolation_top_dim_risk": -0.7454937482393047
+    "rule_has_alert": 3.846011210606099,
+    "rule_alert_count_norm": 0.05791095259096204,
+    "rule_max_severity": -1.3324010783191809,
+    "rule_triggered_rules": 4.332628501678857,
+    "baseline_deviation_count": -1.3328734183063802,
+    "baseline_multi_dim_triggered": 2.0518658808333323,
+    "baseline_drifted": -0.010551328489433142,
+    "isolation_available": -0.010551328489433142,
+    "isolation_anomaly_count": 5.548912008023672,
+    "isolation_anomaly_ratio": 3.481586228740007,
+    "isolation_mean_score": -3.5662137508143683,
+    "isolation_max_score": -0.43941310083108814,
+    "isolation_top_dim_risk": -4.334932364592439
   },
   "per_sample": {
     "baseline_demo_attack": {
@@ -58,39 +64,67 @@
       "packets": 1495
     },
     "mix_normal_burst": {
-      "label": 1,
-      "windows": 281,
-      "packets": 4809
+      "labels": "per_window",
+      "normal_windows": 45,
+      "attack_windows": 235,
+      "dropped_boundary": 1,
+      "windows": 280,
+      "packets": 4809,
+      "attack_start": 1700000470.956857
     },
     "mix_normal_dnstunnel": {
-      "label": 1,
-      "windows": 47,
-      "packets": 2739
+      "labels": "per_window",
+      "normal_windows": 45,
+      "attack_windows": 1,
+      "dropped_boundary": 1,
+      "windows": 46,
+      "packets": 2739,
+      "attack_start": 1700000470.956857
     },
     "mix_normal_portscan": {
-      "label": 1,
-      "windows": 51,
-      "packets": 2779
+      "labels": "per_window",
+      "normal_windows": 45,
+      "attack_windows": 5,
+      "dropped_boundary": 1,
+      "windows": 50,
+      "packets": 2779,
+      "attack_start": 1700000470.956857
     },
     "mix_normal_rststorm": {
-      "label": 1,
-      "windows": 52,
-      "packets": 2809
+      "labels": "per_window",
+      "normal_windows": 45,
+      "attack_windows": 6,
+      "dropped_boundary": 1,
+      "windows": 51,
+      "packets": 2809,
+      "attack_start": 1700000470.956857
     },
     "mix_normal_synflood": {
-      "label": 1,
-      "windows": 52,
-      "packets": 2929
+      "labels": "per_window",
+      "normal_windows": 45,
+      "attack_windows": 6,
+      "dropped_boundary": 1,
+      "windows": 51,
+      "packets": 2929,
+      "attack_start": 1700000470.956857
     },
     "mix_short_normal_portscan": {
-      "label": 1,
+      "labels": "per_window",
+      "normal_windows": 220,
+      "attack_windows": 6,
+      "dropped_boundary": 0,
       "windows": 226,
-      "packets": 1530
+      "packets": 1530,
+      "attack_start": 1700003597.3
     },
     "mix_short_normal_synflood": {
-      "label": 1,
+      "labels": "per_window",
+      "normal_windows": 220,
+      "attack_windows": 6,
+      "dropped_boundary": 0,
       "windows": 226,
-      "packets": 1680
+      "packets": 1680,
+      "attack_start": 1700003597.3
     },
     "normal": {
       "label": 0,
@@ -113,10 +147,44 @@
       "packets": 200
     }
   },
+  "provenance": {
+    "dataset_rows": 1368,
+    "dataset_distinct_rows": 1368,
+    "dataset_raw_rows": 1727,
+    "n_features": 13,
+    "n_attack": 664,
+    "n_normal": 704,
+    "n_groups": 17,
+    "groups": [
+      "baseline_demo_attack",
+      "baseline_demo_normal",
+      "burst",
+      "dnstunnel",
+      "largeflow",
+      "lightscan",
+      "mix_normal_burst",
+      "mix_normal_dnstunnel",
+      "mix_normal_portscan",
+      "mix_normal_rststorm",
+      "mix_normal_synflood",
+      "mix_short_normal_portscan",
+      "mix_short_normal_synflood",
+      "normal",
+      "portscan",
+      "rststorm",
+      "synflood"
+    ],
+    "dataset_hash": "ec2d7d98a21bfc8f",
+    "window_sec": 10,
+    "labeling": "per_window(混合样本正常前缀=0/攻击段=1/跨界窗丢弃)",
+    "trained_at": "2026-10-10 16:17:11",
+    "git_sha": "4bab4c5"
+  },
   "limitations": [
-    "训练数据来自 10 个合成 golden 样本 + 7 个时间混合样本，非真实生产流量",
-    "样本级标签下推到窗口级属于弱标注，存在标签噪声",
-    "v3.4.0 起特征维度从10扩展到13（新增孤立森林异常分统计+top维度风险）",
+    "训练数据来自合成 golden 样本 + 时间混合样本，非真实生产流量",
+    "混合样本按窗口打标：正常前缀=0、攻击段=1、跨界窗丢弃（此前整文件标 1，导致同一正常窗口同时被标为 0 和 1，264 行矛盾标签）",
+    "仍属弱标注：窗口级真值由攻击段起止时间推导，非逐流人工标注",
+    "13 维特征（v3.4.0 起，新增孤立森林异常分统计 + top 维度风险）",
     "元学习器权重不应被解读为生产环境最优融合策略",
     "真实部署前请用自有标注流量重新运行本脚本"
   ]

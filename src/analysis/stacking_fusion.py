@@ -70,6 +70,8 @@ class ThreeEngineStacking:
         self.feature_names = THREE_ENGINE_FEATURE_NAMES
         self.feature_dim = len(THREE_ENGINE_FEATURE_NAMES)
         self.engine_order = list(ENGINE_ORDER)
+        # 训练数据指纹（由训练脚本写入，随模型落盘，便于溯源「这个模型是谁训的」）
+        self.provenance: Dict[str, Any] = {}
         if model_path and os.path.exists(model_path):
             self.load(model_path)
 
@@ -235,9 +237,12 @@ class ThreeEngineStacking:
                     self.meta_learner = None
                     return False
                 self.meta_learner = data["model"]
+                self.provenance = data.get("provenance") or {}
             else:
                 self.meta_learner = data
-            logger.info(f"三引擎 Stacking 元学习器加载成功: {model_path}")
+            logger.info(f"三引擎 Stacking 元学习器加载成功: {model_path}"
+                        + (f" | 数据指纹={self.provenance.get('dataset_hash')}"
+                           if self.provenance.get("dataset_hash") else " | 无数据指纹（旧模型）"))
             return True
         except Exception as e:
             logger.warning(f"meta-learner 加载失败，将使用固定权重回退: {e}")
@@ -252,22 +257,50 @@ class ThreeEngineStacking:
             "feature_names": self.feature_names,
             "feature_order": list(ENGINE_ORDER),
             "architecture": "three_engine_stacking",
+            # 训练数据指纹：模型溯源（此前 joblib 无任何训练数据记录）
+            "provenance": self.provenance or {},
         }, model_path)
         logger.info(f"三引擎 Stacking 元学习器保存成功: {model_path}")
 
+    def set_provenance(self, provenance: Dict[str, Any]) -> None:
+        """记录训练数据指纹（由训练脚本调用；随模型一同落盘）"""
+        self.provenance = dict(provenance or {})
+
     def train_meta_learner(self, X: np.ndarray, y: np.ndarray,
-                           model_path: Optional[str] = None) -> Dict[str, Any]:
-        """训练 meta-learner（逻辑回归）"""
+                           model_path: Optional[str] = None,
+                           groups: Optional[np.ndarray] = None) -> Dict[str, Any]:
+        """训练 meta-learner（逻辑回归）
+
+        :param groups: 样本分组（通常是源 PCAP 名）。传入时使用 **GroupKFold**，
+            保证同一样本的所有窗口落在同一折内——否则同一 PCAP 的近似重复窗口
+            会同时出现在训练折与验证折，CV 分数被系统性高估。
+        """
         from sklearn.linear_model import LogisticRegression
-        from sklearn.model_selection import cross_val_score, StratifiedKFold
+        from sklearn.model_selection import GroupKFold, StratifiedKFold, cross_val_score
 
         clf = LogisticRegression(C=1.0, max_iter=1000, random_state=42,
                                  class_weight="balanced")
-        # 样本极少时 5 折不可行，按最小类别数自适应
+        # 样本极少时 5 折不可行，按最小类别数/最少组数自适应
         n_min = int(np.bincount(y.astype(int)).min()) if len(y) else 0
         n_splits = max(2, min(5, n_min))
         cv_f1_mean = cv_f1_std = None
-        if n_min >= 2:
+        cv_f1_ungrouped_mean = cv_f1_ungrouped_std = None
+        cv_scheme = "stratified"
+
+        if groups is not None and len(set(groups)) >= 2:
+            n_groups = len(set(groups))
+            n_splits = max(2, min(n_splits, n_groups))
+            gkf = GroupKFold(n_splits=n_splits)
+            cv = cross_val_score(clf, X, y, cv=gkf, groups=groups, scoring="f1")
+            cv_f1_mean, cv_f1_std = float(np.mean(cv)), float(np.std(cv))
+            cv_scheme = "groupkfold_by_sample"
+            # 对照：普通分层 CV（存在样本内泄漏，仅用于展示差距）
+            if n_min >= 2:
+                skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
+                cv_u = cross_val_score(clf, X, y, cv=skf, scoring="f1")
+                cv_f1_ungrouped_mean = float(np.mean(cv_u))
+                cv_f1_ungrouped_std = float(np.std(cv_u))
+        elif n_min >= 2:
             skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
             cv = cross_val_score(clf, X, y, cv=skf, scoring="f1")
             cv_f1_mean, cv_f1_std = float(np.mean(cv)), float(np.std(cv))
@@ -279,6 +312,10 @@ class ThreeEngineStacking:
             "cv_f1_mean": cv_f1_mean,
             "cv_f1_std": cv_f1_std,
             "cv_splits": n_splits,
+            "cv_scheme": cv_scheme,
+            "cv_f1_ungrouped_mean": cv_f1_ungrouped_mean,
+            "cv_f1_ungrouped_std": cv_f1_ungrouped_std,
+            "n_groups": int(len(set(groups))) if groups is not None else None,
             "feature_importance": {
                 name: float(c) for name, c in zip(self.feature_names, clf.coef_[0])
             },
@@ -288,7 +325,8 @@ class ThreeEngineStacking:
         }
         if model_path:
             self.save(model_path)
-        logger.info(f"三引擎 Stacking 元学习器训练完成 | 样本 {len(y)} | CV F1={cv_f1_mean}")
+        logger.info(f"三引擎 Stacking 元学习器训练完成 | 样本 {len(y)} | "
+                    f"{cv_scheme} F1={cv_f1_mean}")
         return result
 
 

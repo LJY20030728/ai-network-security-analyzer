@@ -19,6 +19,7 @@ from loguru import logger
 
 from src.utils.paths import data_dir
 from src.utils.helpers import ensure_dir, get_timestamp_str
+from src.storage.baseline_name import validate_baseline_name
 
 
 class Database:
@@ -337,7 +338,15 @@ class Database:
     def save_baseline(self, name: str, profile: Dict[str, Any], window_sec: int = 5,
                       total_packets: int = 0, total_windows: int = 0,
                       description: Optional[str] = None) -> bool:
-        """保存基线"""
+        """保存基线
+
+        `name` 会同时成为 SQLite 主键与 UI 图表中的展示文本，因此在此**唯一入口**
+        做名称校验（UI / API / JSON 导入三条路径都经过本方法）。非法名称抛
+        ValueError，由调用方转成用户文案或 HTTP 400。
+
+        :raises ValueError: 名称非法（空/超长/含不允许字符/系统保留名）
+        """
+        name = validate_baseline_name(name)
         conn = self._get_conn()
         conn.execute("""
             INSERT OR REPLACE INTO baselines

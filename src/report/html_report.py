@@ -11,6 +11,7 @@ HTML 取证型分析报告生成器
 
 设计：纯字符串模板 + 内联 CSS，零外部依赖，可离线打开
 """
+import hashlib
 import html as _html
 import os
 from datetime import datetime
@@ -30,6 +31,40 @@ SEVERITY_COLORS = {
 
 def _esc(v: Any) -> str:
     return _html.escape(str(v if v is not None else ""))
+
+
+def _coerce_num(v: Any, default: float = 0.0) -> tuple:
+    """尽力把值转成 float，失败时返回 (default, 原始值字符串)。
+
+    背景：报告里的 confidence / overall_confidence 直接来自**大模型解析出的 JSON**，
+    可能是 `'0.9'`、`'high'`、`None`。此前用 `{conf:.2f}` 直接格式化，遇到非数值会抛
+    ValueError/TypeError，异常被调用方宽 except 吞掉 → 报告静默为空，而界面仍显示
+    "分析完成"。这里改为：能转就转，不能转就用默认值**并保留原值供展示**。
+
+    :return: (数值, 原始值标记)；标记为 None 表示转换成功、无需额外提示
+    """
+    if isinstance(v, bool):
+        # bool 是 int 的子类，但作为置信度没有意义，按非法处理
+        return default, str(v)
+    if isinstance(v, (int, float)):
+        return float(v), None
+    if v is None:
+        return default, "None"
+    if isinstance(v, str):
+        try:
+            return float(v.strip()), None
+        except (ValueError, TypeError):
+            return default, v
+    return default, str(v)
+
+
+def _fmt_conf(v: Any) -> str:
+    """把置信度格式化为 `0.85` 形式；非数值时附上原始值标记。"""
+    num, raw = _coerce_num(v, 0.0)
+    if raw is None:
+        return f"{num:.2f}"
+    return (f"{num:.2f}<span style='color:#B23A3C;font-size:11px;'>"
+            f"（原始值不可解析: {_esc(raw)}）</span>")
 
 
 def _fmt_bytes(n: Any) -> str:
@@ -141,13 +176,13 @@ def build_html_report(analysis: Dict[str, Any],
         for a in structured_report["attacks"]:
             tp = "✅ 真实攻击" if a.get("is_true_positive") else "⚠️ 疑似误报"
             ttp = _esc(a.get("mitre_technique") or "—")
-            conf = a.get("confidence", 0)
+            conf_html = _fmt_conf(a.get("confidence", 0))
             actions = "；".join(a.get("recommended_actions", []) or ["—"])
             att_rows += f"""
             <tr>
               <td style="font-size:13px;"><b>{_esc(a.get('alert_type',''))}</b></td>
               <td style="font-size:12px;color:#666;">{ttp}</td>
-              <td style="font-size:12px;">{tp} <span style="color:#666;">(conf {conf:.2f})</span></td>
+              <td style="font-size:12px;">{tp} <span style="color:#666;">(conf {conf_html})</span></td>
               <td style="font-size:12px;color:#444;">{_esc(a.get('evidence',''))}</td>
               <td style="font-size:12px;color:#444;">{_esc(actions)}</td>
             </tr>"""
@@ -156,7 +191,7 @@ def build_html_report(analysis: Dict[str, Any],
           <h2>4. AI 结构化研判</h2>
           <div style="background:#f8f6f1;border:1px solid #e4e3dd;border-radius:8px;padding:14px;font-size:13px;line-height:1.7;">
             <b>总体研判：</b>{_esc(structured_report.get('overview',''))}<br/>
-            <span style="color:#666;">整体判定：{'存在威胁' if structured_report.get('is_threat') else '未发现威胁'} | 置信度 {structured_report.get('overall_confidence', 0):.2f}</span>
+            <span style="color:#666;">整体判定：{'存在威胁' if structured_report.get('is_threat') else '未发现威胁'} | 置信度 {_fmt_conf(structured_report.get('overall_confidence', 0))}</span>
           </div>
           <table style="margin-top:12px;">
             <tr><th style="width:110px;">告警</th><th style="width:70px;">MITRE</th><th style="width:110px;">判定</th><th>证据</th><th style="width:180px;">处置动作</th></tr>
@@ -280,11 +315,17 @@ def save_html_report(analysis: Dict[str, Any],
                      report_dir: str = "./data/reports",
                      case_id: Optional[str] = None) -> str:
     """生成并保存 HTML 报告，返回文件路径
-    
+
     Args:
-        case_id: 可选的案例号/文件名标识。传入时使用该标识作为文件名，
-                 避免重新生成历史报告时与最新报告同名覆盖。
+        case_id: 可选的案例号/文件名标识。传入时使用该标识作为文件名前缀。
                  不传时使用当前时间戳（默认行为）。
+
+    文件名附带**正文内容哈希**（前 8 位）：
+    此前 API 路径与 UI 路径对同一 case_id 传入不同 kwargs（API 多传
+    ai_traffic_summary / structured_report），却写成同名文件——谁后跑谁覆盖，
+    于是「同一个 case_id 对应两份不同正文」，证据链自相矛盾。
+    现在文件名由正文内容决定：内容相同则同名（幂等，可安全重跑），
+    内容不同则不会互相覆盖。
     """
     os.makedirs(report_dir, exist_ok=True)
     if case_id:
@@ -293,7 +334,6 @@ def save_html_report(analysis: Dict[str, Any],
         cid = safe_cid[:50] if safe_cid else f"ASE-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
     else:
         cid = f"ASE-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
-    filepath = os.path.join(report_dir, f"report_{cid}.html")
     # 构造完整的 evidence（防止空字典导致 build_html_report 内部 KeyError）
     full_evidence = dict(evidence) if evidence else {}
     full_evidence.setdefault("source_file", "历史记录重新生成")
@@ -302,11 +342,13 @@ def save_html_report(analysis: Dict[str, Any],
     full_evidence.setdefault("rule_version", settings.version)
     html_content = build_html_report(analysis, full_evidence, ai_analysis, ai_traffic_summary,
                                      structured_report=structured_report, case_id=cid)
+    content_hash = hashlib.sha256(html_content.encode("utf-8")).hexdigest()[:8]
+    filepath = os.path.join(report_dir, f"report_{cid}_{content_hash}.html")
     with open(filepath, "w", encoding="utf-8") as f:
         f.write(html_content)
     # 返回绝对路径（Gradio DownloadButton / 历史记录打开报告需绝对路径）
     filepath = os.path.abspath(filepath)
-    logger.info(f"HTML 报告已生成: {filepath} (case_id={cid})")
+    logger.info(f"HTML 报告已生成: {filepath} (case_id={cid}, content={content_hash})")
     return filepath
 
 

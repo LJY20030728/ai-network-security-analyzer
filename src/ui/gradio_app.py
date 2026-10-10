@@ -30,6 +30,29 @@ except ImportError:
     GRADIO_AVAILABLE = False
     gr = None
 
+# i18n 国际化支持（自研轻量方案，兼容 Gradio 6.x）
+try:
+    from src.ui.i18n_manager import I18nManager
+    I18N_AVAILABLE = True
+except ImportError:
+    I18N_AVAILABLE = False
+    I18nManager = None
+
+# 翻译函数：恒等返回（组件创建时使用中文原文，运行时通过 I18nManager 批量切换）
+def _(text):
+    return text
+
+# Tab 组件专用翻译函数：创建时直接使用翻译后的文本
+# 原因：Gradio 6.x 中 Tab 的 label 无法通过 gr.update 事件更新
+def _tab(text):
+    global _i18n
+    if _i18n is not None:
+        return _i18n.tr(text)
+    return text
+
+# 全局 i18n 管理器实例（在 build_ui 中初始化）
+_i18n: Optional[I18nManager] = None
+
 # 确保项目根目录在path中
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -51,6 +74,16 @@ from src.utils.paths import data_dir, seed_assets
 from src.api.audit import AuditLogger
 from src.api.history_store import get_history_store
 from src.api.task_queue import get_task_queue
+# 图表构建已抽到 src/ui/charts.py（所有插值在模块内统一 html.escape）
+# 名称规范绑定到本地，调用点无需改动
+from src.ui.charts import _build_baseline_compare_svg, _build_baseline_profile_svg
+from src.storage.baseline_name import safe_baseline_name, validate_baseline_name
+# 分析流水线已抽到服务层（唯一实现，UI/API 共用），见 §4c 重构
+from src.services.analysis_service import (
+    load_baseline_into as _load_baseline_into,
+    quick_sha256 as _quick_sha256,
+    run_analysis as _run_analysis,
+)
 
 # 初始化日志（同时输出到控制台和文件，文件路径与 LogObserver 一致）
 import os as _os
@@ -446,11 +479,15 @@ BASELINE_DIR = data_dir("baselines")
 
 
 def _baseline_path(name: str) -> str:
-    """基线文件名安全化 + 路径"""
-    safe = "".join(ch for ch in name if ch.isalnum() or ch in "-_.").strip()
+    """基线文件名安全化 + 路径
+
+    复用 `validate_baseline_name` 的字符策略（消除此前「内联过滤规则」与
+    「名称校验规则」两套并存的漂移），但文件名额外不允许空格与点。
+    """
+    safe = "".join(ch for ch in (name or "") if ch.isalnum() or ch in "-_")
     if not safe:
         safe = "baseline"
-    return os.path.join(BASELINE_DIR, f"{safe}.json")
+    return os.path.join(BASELINE_DIR, f"{safe[:64]}.json")
 
 
 def _list_baselines() -> List[Dict[str, Any]]:
@@ -466,8 +503,20 @@ def _list_baselines() -> List[Dict[str, Any]]:
                 path = os.path.join(BASELINE_DIR, fn)
                 b = TrafficBaseline.load(path)
                 if b and b.learned:
+                    # JSON 文件的 name 属不可信输入（文件可被手工编辑），
+                    # 非法名回退到文件名 stem；仍非法则跳过该条并记日志，
+                    # 不能让整个列表页因一条脏数据挂掉。
+                    raw_name = b.name or os.path.splitext(fn)[0]
+                    safe_name = safe_baseline_name(raw_name, fallback="")
+                    if not safe_name:
+                        safe_name = safe_baseline_name(os.path.splitext(fn)[0], fallback="")
+                    if not safe_name:
+                        logger.warning(f"跳过名称非法的基线文件: {fn}（name={raw_name!r}）")
+                        continue
+                    if safe_name != raw_name:
+                        logger.warning(f"基线名称非法，已回退为安全名: {raw_name!r} → {safe_name!r}")
                     db.save_baseline(
-                        name=b.name or os.path.splitext(fn)[0],
+                        name=safe_name,
                         profile=b.to_dict().get("profile", {}),
                         window_sec=b.window_sec,
                         total_packets=getattr(b, "packets_used", 0),
@@ -501,114 +550,6 @@ def _baseline_names() -> List[str]:
 
 
 
-def _build_baseline_compare_svg(window_series, baseline_profile):
-    """流量每窗口包数 vs 基线中位数 对比图（纯 SVG，零依赖）"""
-    if not window_series:
-        return None
-    try:
-        n = len(window_series)
-        if n == 0:
-            return None
-        median = None
-        win_sec = 10
-        if isinstance(baseline_profile, dict):
-            prof = baseline_profile.get("profile") or {}
-            w = prof.get("window_packets") or {}
-            if isinstance(w, dict) and w.get("median"):
-                median = float(w["median"])
-            win_sec = int(baseline_profile.get("window_sec", 10) or 10)
-        values = [float(x.get("packets", 0)) for x in window_series]
-        vmax = max(max(values), median or 0, 1) * 1.15
-        W, H, P = 760, 220, 38
-        iw, ih = W - 2 * P, H - 2 * P
-        def _xy(i, v):
-            x = P + (iw * i / max(n - 1, 1))
-            y = P + ih - (ih * v / vmax)
-            return x, y
-        pts = " ".join(f"{_xy(i, v)[0]:.1f},{_xy(i, v)[1]:.1f}" for i, v in enumerate(values))
-        svg = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}" style="font-family:Segoe UI,Arial,sans-serif;background:linear-gradient(180deg,#f8faff,#eef4ff);border-radius:12px;border:1px solid #dbe6ff">']
-        for g in range(5):
-            gy = P + ih * g / 4
-            svg.append(f'<line x1="{P}" y1="{gy:.1f}" x2="{W-P}" y2="{gy:.1f}" stroke="#e2e8f0" stroke-width="1"/>')
-        if median:
-            my = P + ih - (ih * median / vmax)
-            svg.append(f'<line x1="{P}" y1="{my:.1f}" x2="{W-P}" y2="{my:.1f}" stroke="#ef4444" stroke-width="2" stroke-dasharray="6,4"/>')
-            svg.append(f'<text x="{W-P-8}" y="{my-7:.1f}" text-anchor="end" font-size="11" fill="#ef4444">基线中位数 {median:.0f} 包/窗</text>')
-        svg.append(f'<polyline points="{pts}" fill="none" stroke="#2563eb" stroke-width="2.4" stroke-linejoin="round"/>')
-        for i, v in enumerate(values):
-            x, y = _xy(i, v)
-            svg.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="3" fill="#2563eb"/>')
-        svg.append(f'<text x="{P}" y="{H-8}" font-size="11" fill="#64748b">窗口序号（每 {win_sec} 秒一个窗口，共 {n} 个）</text>')
-        svg.append(f'<text x="{P}" y="{P-12}" font-size="11" fill="#64748b">每窗口包数</text>')
-        svg.append(f'<text x="{W-P}" y="{P-12}" text-anchor="end" font-size="12" fill="#2563eb">当前流量</text>')
-        svg.append('</svg>')
-        return "".join(svg)
-    except Exception:
-        return None
-
-def _build_baseline_profile_svg(profile, name):
-    """基线画像（各维度 中位数±MAD）条形图（纯 SVG）"""
-    if not isinstance(profile, dict) or not profile:
-        return None
-    try:
-        dims = [("window_packets", "每窗包数"), ("window_bytes", "每窗字节"),
-                ("window_syn", "每窗SYN"), ("window_dports", "每窗端口数")]
-        rows = []
-        vmax = 1
-        for k, _lab in dims:
-            v = profile.get(k) or {}
-            if isinstance(v, dict) and v.get("median"):
-                vmax = max(vmax, float(v["median"]) * 1.25)
-        W, H, P = 560, 46 + len(dims) * 46, 40
-        bar_w = W - 2 * P
-        svg = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}" style="font-family:Segoe UI,Arial,sans-serif;background:#f8faff;border-radius:12px;border:1px solid #dbe6ff">']
-        svg.append(f'<text x="{P}" y="22" font-size="13" font-weight="600" fill="#1e293b">基线「{name or "?"}」画像（中位数 ± MAD）</text>')
-        for i, (k, lab) in enumerate(dims):
-            y = 44 + i * 46
-            v = profile.get(k) or {}
-            med = float(v.get("median", 0) or 0)
-            mad = float(v.get("mad", 0) or 0)
-            bw = bar_w * med / vmax
-            svg.append(f'<text x="{P}" y="{y+13}" font-size="11" fill="#475569">{lab}</text>')
-            svg.append(f'<rect x="{P}" y="{y+18}" width="{bw:.1f}" height="12" rx="4" fill="#60a5fa"/>')
-            svg.append(f'<rect x="{P}" y="{y+18}" width="{bar_w*mad/vmax:.1f}" height="12" rx="4" fill="none" stroke="#ef4444" stroke-dasharray="4,3"/>')
-            svg.append(f'<text x="{P+bw+8:.1f}" y="{y+29}" font-size="11" fill="#2563eb">中位 {med:.1f} · MAD {mad:.1f}</text>')
-        svg.append('</svg>')
-        return "".join(svg)
-    except Exception:
-        return None
-
-
-def _load_baseline_into(analyzer: TrafficAnalyzer, baseline_name: str) -> bool:
-    """加载基线到分析器（P1-4: 优先 SQLite，回退 JSON）"""
-    if not baseline_name:
-        return False
-    from src.storage.database import Database
-    db = Database()
-    bl = db.get_baseline(baseline_name)
-    if bl and bl.get("learned"):
-        # 从 SQLite 数据重建 TrafficBaseline 对象
-        b = TrafficBaseline(window_sec=bl.get("window_sec", 5))
-        b.name = baseline_name
-        b._learned = True
-        prof = bl.get("profile", {})
-        if isinstance(prof, dict) and "profile" in prof:
-            b.profile = prof["profile"]
-        elif isinstance(prof, dict):
-            b.profile = prof
-        analyzer.baseline = b
-        logger.info(f"已加载基线(SQLite): {baseline_name}")
-        return True
-    # 回退到 JSON
-    b = TrafficBaseline.load(_baseline_path(baseline_name))
-    if b and b.learned:
-        analyzer.baseline = b
-        logger.info(f"已加载基线(JSON): {b.name or baseline_name}")
-        return True
-    logger.warning(f"基线加载失败或未学习: {baseline_name}")
-    return False
-
-
 @app.post("/api/baseline/learn")
 async def baseline_learn(file: UploadFile = File(...), name: str = Form("default")):
     """
@@ -616,6 +557,12 @@ async def baseline_learn(file: UploadFile = File(...), name: str = Form("default
     检测阶段可引用该基线对照统计偏差。
     """
     try:
+        # 名称校验必须早于任何落盘动作（否则非法名会先写进 data/baselines/）
+        try:
+            name = validate_baseline_name(name)
+        except ValueError as name_err:
+            raise HTTPException(status_code=400, detail=str(name_err)) from name_err
+
         max_bytes = settings.max_upload_mb * 1024 * 1024
         content = await file.read(max_bytes + 1)
         if len(content) > max_bytes:
@@ -723,11 +670,6 @@ async def baseline_delete(name: str = Form(...)):
 ALLOWED_PCAP_EXTENSIONS = {".pcap", ".pcapng", ".cap", ".pcap.gz"}
 
 
-def _quick_sha256(filepath: str) -> str:
-    """计算文件 SHA-256（证据溯源）——委托 src.utils.helpers，避免三处重复实现"""
-    return calculate_file_sha256(filepath)
-
-
 def _check_upload_file(filename: str, size: int):
     """校验上传文件类型与大小——委托 src.utils.helpers，由 UI 层决定如何提示"""
     err = validate_upload_file(filename, size, max_mb=settings.max_upload_mb)
@@ -737,94 +679,44 @@ def _check_upload_file(filename: str, size: int):
 
 
 def _analyze_pcap_task(filepath: str, enable_ai: bool, baseline_name: str = "") -> Dict[str, Any]:
-    """在后台线程执行完整分析（解析+规则检测+基线对照+AI研判）"""
-    # 源文件 SHA-256（证据溯源）——统一走 utils.helpers，避免重复实现
-    sha256 = calculate_file_sha256(filepath)
+    """在后台线程执行完整分析——委托 src/services/analysis_service.py（唯一实现）
 
-    parser = PcapParser()
-    # P0-1: 流式解析+流式分析（GB 级大文件不落全量内存，内存 O(活跃流+窗口数)）
-    traffic_analyzer = TrafficAnalyzer()
-    if baseline_name:
-        _load_baseline_into(traffic_analyzer, baseline_name)
-    analysis_report = None
+    本函数只做「服务结果 → API 契约」的字段映射，不再持有流水线逻辑。
+    此前这里与 UI 路径是两份副本，kwargs 与是否跑幻觉控制都不一致。
+    """
     try:
-        analysis_report = traffic_analyzer.analyze_stream(
-            parser.iter_packets(filepath), sample_count=50)
-    except Exception as e:
-        logger.error(f"流式分析失败: {e}")
-        raise HTTPException(status_code=400, detail=f"PCAP文件解析失败或为空")
-    packet_count = analysis_report.get("summary", {}).get("total_packets", 0) if analysis_report else 0
-    samples = (analysis_report or {}).pop("_samples", [])
-
-    if packet_count == 0:
-        raise HTTPException(status_code=400, detail="PCAP文件解析失败或为空")
-
-    result = {
-        "status": "success",
-        "packet_count": packet_count,
-        "analysis_report": analysis_report,
-        "evidence": {
-            "source_file": os.path.basename(filepath),
-            "source_sha256": sha256,
-            "analyzed_at": get_timestamp_str(),
-            "rule_version": settings.version,
-        },
-    }
-
-    # AI威胁分析（可选）
-    if enable_ai:
-        llm = get_llm_client()
-        if llm.is_available():
-            logger.info("开始AI威胁分析...")
-            threat_analyzer = get_threat_analyzer()
-            _samples_dict = []
-            if samples:
-                from src.capture.packet_parser import PacketParser as _PP
-                _pp = _PP()
-                _pp.captured_packets = samples
-                _samples_dict = _pp.to_dict_list()
-            structured = threat_analyzer.analyze_threats_structured(
-                analysis_report["anomaly_detection"],
-                packet_samples=_samples_dict
-            )
-            ai_analysis = structured["raw_text"]
-            result["ai_threat_analysis"] = ai_analysis
-            result["ai_threat_structured"] = structured["structured"]
-            result["ai_threat_structured_ok"] = structured["ok"]
-            if ai_analysis.startswith("[大模型调用失败]") or ai_analysis.startswith("[LLM"):
-                result["ai_analysis_failed"] = True
-
-            # AI流量概览
-            ai_traffic_summary = threat_analyzer.analyze_traffic_summary(
-                analysis_report["summary"],
-                analysis_report["protocol_distribution"],
-                analysis_report["top_talkers"]
-            )
-            result["ai_traffic_summary"] = ai_traffic_summary
-        else:
-            result["ai_warning"] = "未配置大模型API Key，跳过AI分析"
-
-    # 取证型 HTML 报告（含证据溯源）
-    try:
-        # 用PCAP【内容】哈希作为case_id（与Gradio路径统一）：
-        # 同一内容的PCAP（无论文件名/上传路径）→ 唯一报告，覆盖旧版只留最新；
-        # 此前误用 filepath 路径字符串的md5，导致每次上传路径不同就重复生成。
-        _content_hash = (sha256 or "")[:16]
-        case_id = f"PCAP-{_content_hash}" if _content_hash else None
-        
-        html_path = save_html_report(
-            analysis_report,
-            result["evidence"],
-            ai_analysis=result.get("ai_threat_analysis"),
-            ai_traffic_summary=result.get("ai_traffic_summary"),
-            structured_report=result.get("ai_threat_structured"),
-            report_dir=data_dir("reports"),
-            case_id=case_id,  # 【新增】传case_id实现去重
+        outcome = _run_analysis(
+            filepath,
+            enable_ai=enable_ai,
+            baseline_name=baseline_name,
+            ai_mode="structured",   # API 路径：非流式，含流量概览
+            run_hallucination=True,  # 与 UI 路径统一（此前 API 不跑）
+            generate_report=True,
         )
-        result["report_html"] = html_path
-    except Exception as e:
-        logger.warning(f"HTML 报告生成失败（不影响分析结果）: {e}")
-        result["report_html"] = ""
+    except ValueError as e:
+        # 解析失败/空文件 → 客户端错误
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    result: Dict[str, Any] = {
+        "status": "success",
+        "packet_count": outcome.packet_count,
+        "analysis_report": outcome.report,
+        "evidence": outcome.evidence,
+        "report_html": outcome.html_path,
+        "case_id": outcome.case_id,
+    }
+    if enable_ai:
+        result["ai_threat_analysis"] = outcome.ai_text
+        result["ai_threat_structured"] = outcome.ai_structured
+        result["ai_threat_structured_ok"] = outcome.ai_structured_ok
+        if outcome.ai_failed:
+            result["ai_analysis_failed"] = True
+        if outcome.ai_traffic_summary is not None:
+            result["ai_traffic_summary"] = outcome.ai_traffic_summary
+        if outcome.ai_warning:
+            result["ai_warning"] = outcome.ai_warning
+    if outcome.hallucination:
+        result["hallucination_control"] = outcome.hallucination
 
     return result
 
@@ -1127,9 +1019,9 @@ async def forensic_trend(days: int = 30):
         raise HTTPException(status_code=500, detail=f"趋势分析失败: {e}")
 
 
-@app.get("/api/forensic/related/{{analysis_id}}")
+@app.get("/api/forensic/related/{analysis_id}")
 async def forensic_related(analysis_id: str, max_related: int = 10):
-    """跨样本关联分析"""
+    """跨样本关联分析（路径参数为单花括号；双花括号会被当成字面量导致 404）"""
     try:
         from src.storage.forensic_kb import get_forensic_kb
         related = get_forensic_kb().find_related_samples(analysis_id, max_related)
@@ -1138,9 +1030,9 @@ async def forensic_related(analysis_id: str, max_related: int = 10):
         raise HTTPException(status_code=500, detail=f"关联分析失败: {e}")
 
 
-@app.get("/api/forensic/iocs/{{analysis_id}}")
+@app.get("/api/forensic/iocs/{analysis_id}")
 async def forensic_iocs(analysis_id: str):
-    """从分析记录提取 IOC"""
+    """从分析记录提取 IOC（路径参数为单花括号）"""
     try:
         from src.storage.forensic_kb import get_forensic_kb
         iocs = get_forensic_kb().extract_iocs(analysis_id)
@@ -1254,9 +1146,6 @@ def _render_app_header() -> str:
 
 
 
-_GRADIO_MAJOR = int(getattr(gr, "__version__", "4").split(".")[0])
-
-
 def _load_custom_css() -> str:
     """P2-6: 加载自定义 CSS（内联基础样式 + 外部蓝色二次元风格文件）"""
     css = _GRADIO_CSS
@@ -1272,11 +1161,52 @@ def _load_custom_css() -> str:
     return css
 
 
-_UI_KWARGS = {"theme": gr.themes.Soft(primary_hue=gr.themes.colors.blue), "css": _load_custom_css()}
+# 【重要】以下两项必须惰性求值，不能放在模块级：
+# 无 gradio 环境下 `gr` 为 None，模块级 `gr.themes.Soft(...)` 会抛
+# AttributeError，导致本模块（以及 re-export 它的 src/api/main.py）
+# 整体导入失败——"gradio 未安装时仅启动 API 服务"这条降级路径随之失效。
+_GRADIO_MAJOR: int = 0
+_UI_KWARGS: Dict[str, Any] = {}
+
+
+def _init_gradio_ui_kwargs() -> None:
+    """在确认 gradio 可用后初始化 UI kwargs（幂等）。"""
+    global _GRADIO_MAJOR, _UI_KWARGS
+    if _UI_KWARGS:
+        return
+    _GRADIO_MAJOR = int(getattr(gr, "__version__", "4").split(".")[0])
+    _UI_KWARGS = {"theme": gr.themes.Soft(primary_hue=gr.themes.colors.blue),
+                  "css": _load_custom_css()}
 
 
 def create_gradio_interface():
     """创建Gradio Web界面（简单易用，无需前端开发）"""
+    global _i18n
+
+    # 无 gradio 时给出明确错误，而不是让调用方撞上 NoneType 属性错误
+    if not GRADIO_AVAILABLE:
+        raise RuntimeError(
+            "gradio 未安装，无法创建 Web UI。请 `pip install -r requirements.txt`，"
+            "或仅使用 API 服务（不调用本函数）。"
+        )
+    # gradio 可用后再初始化依赖 gr 的 kwargs（模块级不能做，否则破坏"gradio 可选"）
+    _init_gradio_ui_kwargs()
+
+    # 初始化 i18n 管理器
+    _default_lang = "zh"
+    if I18N_AVAILABLE:
+        _trans_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "translations.json")
+        _config_path = os.path.join(data_dir("config"), "ui_settings.json")
+        _default_lang = I18nManager.load_preference(_config_path, "zh")
+        _i18n = I18nManager(_trans_path, default_lang=_default_lang)
+        # 同步设置 LLM 输出语言
+        try:
+            from src.ai.llm_client import LLMClient
+            LLMClient.set_language(_default_lang)
+        except Exception as _e:
+            logger.warning(f"同步 LLM 语言失败: {_e}")
+        logger.info(f"i18n 管理器已初始化，默认语言: {_default_lang}")
+
     # P2-6: Gradio 6.x 也加载自定义 CSS
     _blocks_kwargs = {"css": _load_custom_css()} if _GRADIO_MAJOR >= 6 else _UI_KWARGS
     with gr.Blocks(title="AI网络安全分析系统", **_blocks_kwargs) as demo:
@@ -1284,45 +1214,49 @@ def create_gradio_interface():
 
         with gr.Tabs():
             # Tab 1: PCAP分析
-            with gr.Tab("📊 PCAP流量分析"):
-                gr.Markdown("上传Wireshark抓包文件（.pcap/.pcapng），系统将自动进行流量分析和AI威胁研判")
+            with gr.Tab(_tab("📊 PCAP流量分析")):
+                gr.Markdown(_("上传Wireshark抓包文件（.pcap/.pcapng），系统将自动进行流量分析和AI威胁研判"))
                 with gr.Row():
-                    pcap_file = gr.File(label="上传PCAP文件", file_types=[".pcap", ".pcapng", ".cap"])
-                    enable_ai = gr.Checkbox(label="启用AI分析", value=True)
+                    pcap_file = gr.File(label=_("上传PCAP文件"), file_types=[".pcap", ".pcapng", ".cap"])
+                    enable_ai = gr.Checkbox(label=_("启用AI分析"), value=True)
                 baseline_dropdown = gr.Dropdown(
-                    label="时序基线（可选）", choices=_baseline_names(), interactive=True,
-                    info="选择已学习的正常流量基线，分析时将对照时序偏差检测"
+                    label=_("时序基线（可选）"), choices=_baseline_names(), interactive=True,
+                    info=_("选择已学习的正常流量基线，分析时将对照时序偏差检测")
                 )
-                analyze_btn = gr.Button("🔍 开始分析", variant="primary")
-                process_output = gr.Markdown(label="🧠 分析过程", value="🕐 等待上传 PCAP 开始分析")
+                analyze_btn = gr.Button(_("🔍 开始分析"), variant="primary")
+                process_output = gr.Markdown(label=_("🧠 分析过程"), value=_("🕐 等待上传 PCAP 开始分析"))
                 with gr.Row():
                     summary_output = gr.Textbox(
-                                                label="📋 流量概览", lines=15, max_lines=25)
+                                                label=_("📋 流量概览"), lines=15, max_lines=25)
                     threat_output = gr.Textbox(
-                                                label="⚠️ AI威胁分析", lines=15, max_lines=25)
+                                                label=_("⚠️ AI威胁分析"), lines=15, max_lines=25)
                 with gr.Row():
                     toggle_raw_btn = gr.Button(
-                        "📖 展开完整报告", size="sm")
+                        _("📖 展开完整报告"), size="sm")
                 raw_output = gr.Code(
-                    label="📊 完整分析报告（JSON）",
+                    label=_("📊 完整分析报告（JSON）"),
                     language="json", lines=12, max_lines=15,
                     elem_id="raw-code-collapsed")
                 raw_output_full = gr.Code(
-                    label="📊 完整分析报告（JSON）· 展开视图",
+                    label=_("📊 完整分析报告（JSON）· 展开视图"),
                     language="json", lines=30, max_lines=40, visible=False,
                     elem_id="raw-code-full")
                 raw_content_state = gr.State("")
                 raw_expanded_state = gr.State(False)
                 # 下载报告区域：按钮在上，进度条和操作按钮在下
                 report_download = gr.DownloadButton(
-                    label="📄 下载取证型HTML报告", value=None, visible=True)
+                    label=_("📄 下载取证型HTML报告"), value=None, visible=True)
                 download_progress = gr.HTML(value="", visible=True)
                 with gr.Row():
-                    tab1_open_report_btn = gr.Button("📄 打开报告文件", size="sm", visible=False)
-                    tab1_open_report_dir_btn = gr.Button("📂 打开报告所在文件夹", size="sm", visible=False)
-                baseline_chart_output = gr.HTML(label="📈 流量 vs 基线对比图（选基线分析时显示）")
-                report_feedback = gr.Markdown("💡 分析完成后点击「下载取证型HTML报告」，进度条显示下载状态，完成后可直接打开报告")
+                    tab1_open_report_btn = gr.Button(_("📄 打开报告文件"), size="sm", visible=False)
+                    tab1_open_report_dir_btn = gr.Button(_("📂 打开报告所在文件夹"), size="sm", visible=False)
+                baseline_chart_output = gr.HTML(label=_("📈 流量 vs 基线对比图（选基线分析时显示）"))
+                report_feedback = gr.Markdown(_("💡 分析完成后点击「下载取证型HTML报告」，进度条显示下载状态，完成后可直接打开报告"))
                 analysis_done = gr.State(False)  # 标记当前会话是否已完成至少一次分析
+                # 本会话生成的报告路径。此前下载按钮用「目录里最新的 .html」定位报告，
+                # 多标签页/多用户/报告生成失败时会取到**别的案件**的报告；改为随分析
+                # 结果写入本会话状态，下载只认自己这一份。
+                report_path_state = gr.State(None)
 
                 def refresh_baselines():
                     try:
@@ -1333,21 +1267,22 @@ def create_gradio_interface():
 
                 baseline_dropdown.focus(refresh_baselines, outputs=baseline_dropdown)
 
-                def on_report_download_click(done):
-                    """点击下载：定位最新报告，设置下载按钮value触发浏览器下载，显示进度条和完成提示"""
-                    if not done:
-                        return (gr.update(value=None), "⚠️ 还未进行任何分析，请先上传PCAP文件并点击「开始分析」", "",
+                def on_report_download_click(done, report_path):
+                    """点击下载：使用**本会话**生成的报告路径，设置下载按钮 value 触发浏览器下载"""
+                    if not done or not report_path:
+                        return (gr.update(value=None),
+                                "⚠️ 尚未生成报告：请先上传 PCAP 文件并点击「开始分析」\n"
+                                "（若分析已完成仍看到此提示，说明报告生成失败，请查看上方错误信息）",
+                                "",
                                 gr.update(visible=False), gr.update(visible=False))
                     try:
-                        d = data_dir("reports")
-                        if not os.path.isdir(d):
-                            return (gr.update(value=None), "❌ 尚无报告：请先完成一次 PCAP 分析", "",
+                        # 只认本会话产生的报告，不再扫描目录取最新文件：
+                        # 此前用 max(mtime) 会在多标签页/多用户时取到别的案件的报告
+                        newest = report_path
+                        if not os.path.isfile(newest):
+                            return (gr.update(value=None),
+                                    f"❌ 报告文件不存在或已被移动：{newest}", "",
                                     gr.update(visible=False), gr.update(visible=False))
-                        fs = [os.path.join(d, f) for f in os.listdir(d) if f.endswith(".html")]
-                        if not fs:
-                            return (gr.update(value=None), "❌ 尚无报告：请先完成一次 PCAP 分析", "",
-                                    gr.update(visible=False), gr.update(visible=False))
-                        newest = max(fs, key=os.path.getmtime)
                         sz = os.path.getsize(newest) / 1024
                         # 【P1优化】更真实的分阶段进度反馈
                         progress_html = f"""
@@ -1401,95 +1336,79 @@ def create_gradio_interface():
                     if not file:
                         yield ("❌ 请先上传PCAP文件", "请先上传PCAP文件", "", "", None,
                                gr.update(value=_history_table_value()), gr.update(value=None),
-                               False)
+                               False, None)
                         return
                     try:
-                        # 阶段 1：解析 + 特征提取 + 规则/基线/ML 检测
-                        yield ("🔍 阶段 1/4：正在解析 PCAP 并提取网络流特征（规则→基线→ML 检测）...",
-                               "⏳ 分析中...", "", "", None, gr.update(value=_history_table_value()), gr.update(value=None), False)
-                        parser = PcapParser()
-                        traffic_analyzer = TrafficAnalyzer()
-                        if baseline_name:
-                            _load_baseline_into(traffic_analyzer, baseline_name)
-                        report = traffic_analyzer.analyze_stream(
-                            parser.iter_packets(file.name), sample_count=50)
-                        if not report.get("summary", {}).get("total_packets"):
-                            yield ("❌ PCAP文件解析失败", "PCAP文件解析失败", "", "", None,
-                                   gr.update(value=_history_table_value()), gr.update(value=None), False)
-                            return
-                        # 取出监督模型窗口内留存的样本包（供 AI 研判使用）。
-                        # 注意：不可用 parser.to_dict_list()——iter_packets 流式解析
-                        # 从不填充 parser.captured_packets，那样会得到空列表。
-                        _raw_samples = report.pop("_samples", []) or []
-                        _samples_dict = []
-                        if _raw_samples:
-                            from src.capture.packet_parser import PacketParser as _PP
-                            _pp = _PP()
-                            _pp.captured_packets = _raw_samples
-                            _samples_dict = _pp.to_dict_list()
+                        # 阶段 1-4：解析、检测、AI 研判、幻觉控制、报告生成
+                        # 全部委托 src/services/analysis_service.py（与 API 路径同一实现）。
+                        # 用队列把服务层的进度/AI 分片回传到本生成器，保持真实流式展示。
+                        import queue as _queue
+                        import threading as _threading
 
-                        report_json = json.dumps(report, ensure_ascii=False, indent=2, default=str)
-                        # 摘要文本由 src/report/summary_formatter.py 组装（纯函数、可单测），
-                        # 不再内联在回调闭包里
-                        summary = format_analysis_summary(report)
+                        _q: "_queue.Queue" = _queue.Queue()
 
-                        # 阶段 2-3：AI 威胁研判（RAG 检索 + LLM 流式输出）
+                        # 服务层在阶段 1 结束时才知道摘要，通过闭包回传，供进度事件展示
+                        _ui_state = {"summary": "⏳ 分析中..."}
+
+                        def _on_progress(msg):
+                            _q.put(("progress", msg))
+
+                        def _on_ai_chunk(text):
+                            _q.put(("ai", text))
+
+                        def _on_summary_ready(summary_text):
+                            _ui_state["summary"] = summary_text
+
+                        _box = {}
+
+                        def _worker():
+                            try:
+                                _box["outcome"] = _run_analysis(
+                                    file.name,
+                                    enable_ai=ai_enabled,
+                                    baseline_name=baseline_name,
+                                    ai_mode="stream",
+                                    run_hallucination=True,
+                                    generate_report=True,
+                                    on_progress=_on_progress,
+                                    on_ai_chunk=_on_ai_chunk,
+                                    on_summary_ready=_on_summary_ready,
+                                )
+                            except BaseException as err:  # noqa: BLE001 原样回传
+                                _box["error"] = err
+                            finally:
+                                _q.put(("done", None))
+
+                        _threading.Thread(target=_worker, daemon=True).start()
+
+                        outcome = None
                         ai_threat = ""
-                        if ai_enabled:
-                            llm = get_llm_client()
-                            if llm.is_available():
-                                threat_analyzer = get_threat_analyzer()
-                                yield ("📚 阶段 2/4：RAG 知识检索（MITRE ATT&CK + 处置手册）...",
-                                       summary, "🔎 检索中...", report_json, None,
-                                       gr.update(value=_history_table_value()), gr.update(value=None), False)
-                                # 流式输出研判过程
-                                ai_threat = ""
-                                for chunk in threat_analyzer.analyze_threats_stream(
-                                        report["anomaly_detection"],
-                                        packet_samples=_samples_dict):
-                                    ai_threat += chunk
-                                    yield ("🧠 阶段 3/4：AI 威胁研判中（流式输出）...",
-                                           summary, ai_threat, report_json, None,
-                                           gr.update(value=_history_table_value()), gr.update(value=None), False)
-                            else:
-                                ai_threat = "⚠️ 未配置大模型API Key，无法进行AI分析\n请在⚙️设置中配置LLM_API_KEY"
+                        while True:
+                            kind, payload = _q.get()
+                            if kind == "done":
+                                break
+                            if kind == "progress":
+                                yield (payload, _ui_state["summary"], ai_threat, "", None,
+                                       gr.update(value=_history_table_value()),
+                                       gr.update(value=None), False, None)
+                            elif kind == "ai":
+                                ai_threat = payload
+                                yield ("🧠 阶段 3/4：AI 威胁研判中（流式输出）...",
+                                       _ui_state["summary"], ai_threat, "", None,
+                                       gr.update(value=_history_table_value()),
+                                       gr.update(value=None), False, None)
 
-                        # P0-3: LLM 幻觉控制三件套（输出校验+交叉验证+人工复核）
-                        hallucination_result = None
-                        try:
-                            from src.ai.hallucination_control import run_hallucination_control
-                            hallucination_result = run_hallucination_control(
-                                ai_threat or "",
-                                report.get("anomaly_detection", {}),
-                                report.get("stacking_fusion"),
-                                report.get("baseline_profile"),
-                            )
-                            # 在威胁分析末尾附加幻觉控制结果（格式化逻辑见 summary_formatter）
-                            if hallucination_result:
-                                ai_threat += "\n\n" + format_hallucination_block(hallucination_result)
-                        except Exception as e:
-                            logger.warning(f"幻觉控制失败（不影响主流程）: {e}")
+                        if "error" in _box:
+                            raise _box["error"]
+                        outcome = _box["outcome"]
 
-                        # 阶段 4：生成 HTML 报告 + 写入历史
-                        yield ("📄 阶段 4/4：生成取证型 HTML 报告...",
-                               summary, ai_threat, report_json, None,
-                               gr.update(value=_history_table_value()), gr.update(value=None), False)
-                        html_path = None
-                        try:
-                            file_sha256 = _quick_sha256(file.name)
-                            evidence = {
-                                "source_file": os.path.basename(file.name),
-                                "source_sha256": file_sha256,
-                                "analyzed_at": get_timestamp_str(),
-                                "rule_version": settings.version,
-                            }
-                            # 使用PCAP文件SHA256作为报告case_id，相同PCAP反复分析覆盖旧报告（一一映射）
-                            report_cid = f"PCAP-{file_sha256[:16]}" if file_sha256 else None
-                            html_path = save_html_report(report, evidence, ai_analysis=ai_threat,
-                                                         report_dir=data_dir("reports"),
-                                                         case_id=report_cid)
-                        except Exception as e:
-                            logger.warning(f"HTML报告生成失败: {e}")
+                        report = outcome.report
+                        summary = outcome.summary
+                        report_json = outcome.report_json
+                        html_path = outcome.html_path
+                        # 幻觉控制已由服务层统一执行（API 路径同样执行）
+                        hallucination_result = outcome.hallucination
+                        evidence = outcome.evidence
 
                         # 复制PCAP文件到项目目录（确保持久化，重新分析时源文件一定存在）
                         import shutil as _shutil
@@ -1537,18 +1456,18 @@ def create_gradio_interface():
                                gr.update(value=_history_table_value()),
                                _build_baseline_compare_svg(report.get("window_series"),
                                                            report.get("baseline_profile")),
-                               True)  # 设置 analysis_done=True
+                               True, html_path)  # analysis_done=True + 本会话报告路径
 
                     except Exception as e:
                         logger.error(f"分析失败: {e}")
                         yield (f"❌ 分析失败: {str(e)}", "分析失败", "", "", None,
                                gr.update(value=_history_table_value()), gr.update(value=None),
-                               False)  # 分析失败保持 analysis_done=False
+                               False, None)  # 分析失败保持 analysis_done=False，清空报告路径
 
                 # 注：analyze_btn 的事件注册在「📜 分析历史」Tab 定义之后（需引用 history_dropdown）
 
             # Tab 2: 分析历史（v1.5.1：表格列表 + 行点击查看详情）
-            with gr.Tab("📜 分析历史"):
+            with gr.Tab(_tab("📜 分析历史")):
                 def _fmt_time(ts):
                     """历史时间戳 → 可读格式：20260908_231447 → 2026/9/8 23:14"""
                     ts = ts or ""
@@ -1565,9 +1484,9 @@ def create_gradio_interface():
                 def _history_count_text():
                     try:
                         n = len(get_history_store().list_analysis())
-                        return f"📊 当前 **{n}** 条分析记录"
+                        return _("📊 当前 **{n}** 条分析记录").replace("{n}", str(n))
                     except Exception:
-                        return "📊 当前 **0** 条分析记录"
+                        return _("📊 当前 **0** 条分析记录")
 
                 def _history_table_value():
                     """历史记录 → 表格行（时间/文件/包/流/告警/严重度/摘要）"""
@@ -1588,12 +1507,12 @@ def create_gradio_interface():
                                      h.get('alerts', 0), sev_str, summary])
                     return rows
 
-                gr.Markdown("每次 PCAP 分析完成后自动记录。**点击表格任意一行**查看该次分析的详情、摘要与报告（最多保留 60 条）")
+                gr.Markdown(_("每次 PCAP 分析完成后自动记录。**点击表格任意一行**查看该次分析的详情、摘要与报告（最多保留 60 条）"))
                 history_count = gr.Markdown(value=_history_count_text())
                 history_table = gr.Dataframe(
                     value=_history_table_value(),
-                    label="历史分析记录（点击行查看详情）",
-                    headers=["时间", "文件", "包数", "流数", "告警数", "严重度", "摘要"],
+                    label=_("历史分析记录（点击行查看详情）"),
+                    headers=[_("时间"), _("文件"), _("包数"), _("流数"), _("告警数"), _("严重度"), _("摘要")],
                     datatype=["str", "str", "number", "number", "number", "str", "str"],
                     interactive=False, row_count=(5, "dynamic"), column_count=7, wrap=True)
                 # 下拉框选择记录（更可靠，不依赖表格点击的状态同步）
@@ -1665,35 +1584,35 @@ def create_gradio_interface():
                 
                 history_select_dropdown = gr.Dropdown(
                     choices=_history_dropdown_choices(),
-                    label="📌 选择要操作的记录（推荐：用下拉框精确选择，避免表格点击状态不同步）",
+                    label=_("📌 选择要操作的记录（推荐：用下拉框精确选择，避免表格点击状态不同步）"),
                     interactive=True,
                     allow_custom_value=False
                 )
                 with gr.Row():
-                    refresh_history_btn = gr.Button("🔄 刷新列表")
-                    load_history_btn = gr.Button("📂 加载到分析结果", variant="primary")
-                    open_report_btn = gr.Button("📄 打开选中记录的报告", variant="primary")
-                    clear_history_btn = gr.Button("🗑 清空全部历史")
+                    refresh_history_btn = gr.Button(_("🔄 刷新列表"))
+                    load_history_btn = gr.Button(_("📂 加载到分析结果"), variant="primary")
+                    open_report_btn = gr.Button(_("📄 打开选中记录的报告"), variant="primary")
+                    clear_history_btn = gr.Button(_("🗑 清空全部历史"))
                 
                 # 重新分析确认区域（默认隐藏，按钮紧下方，更醒目）
                 with gr.Row(visible=False) as regen_confirm_row:
                     regen_confirm_msg = gr.Markdown(
-                        "### ⚠️ 报告已删除，是否重新分析？\n\n"
-                        "点击「✅ 确认重新分析」后，系统将在后台重新执行完整PCAP分析（含AI研判），\n"
-                        "分3阶段显示进度，完成后自动打开报告。**此操作不影响Tab1的PCAP分析页面。**",
+                        _("### ⚠️ 报告已删除，是否重新分析？\n\n"
+                          "点击「✅ 确认重新分析」后，系统将在后台重新执行完整PCAP分析（含AI研判），\n"
+                          "分3阶段显示进度，完成后自动打开报告。**此操作不影响Tab1的PCAP分析页面。**"),
                         scale=3)
                     with gr.Column(scale=1):
-                        confirm_regen_btn = gr.Button("✅ 确认重新分析", variant="primary")
-                        cancel_regen_btn = gr.Button("❌ 取消")
+                        confirm_regen_btn = gr.Button(_("✅ 确认重新分析"), variant="primary")
+                        cancel_regen_btn = gr.Button(_("❌ 取消"))
                 
                 # 重新分析进度显示（默认隐藏，确认区域下方）
                 regen_progress = gr.Markdown("", visible=False)
                 
-                history_detail = gr.Markdown(value="点击表格任意一行查看记录详情", label="记录详情（点击行后展示）")
+                history_detail = gr.Markdown(value=_("点击表格任意一行查看记录详情"), label=_("记录详情（点击行后展示）"))
                 history_feedback = gr.Markdown(
-                    "💡 **用法**：点击表格任意行 → 下方查看详情；\n"
-                    "「加载到分析结果」= 把该次分析回填到上方 Tab1 结果区；\n"
-                    "「打开报告」= 在浏览器打开该次 HTML 取证报告")
+                    _("💡 **用法**：点击表格任意行 → 下方查看详情；\n"
+                      "「加载到分析结果」= 把该次分析回填到上方 Tab1 结果区；\n"
+                      "「打开报告」= 在浏览器打开该次 HTML 取证报告"))
                 
                 selected_history = gr.State(None)
                 pending_regen_id = gr.State(None)  # 待重新分析的记录ID
@@ -1862,14 +1781,22 @@ def create_gradio_interface():
                     """将当前选中的历史记录回填到 Tab1 结果区（并在本 Tab 显示明确反馈）"""
                     h = sel
                     if not h:
-                        return ("⚠️ 请先在表格中点击选择一条记录", {"info": "请先选择记录"},
+                        return ("⚠️ 请先在表格中点击选择一条记录", "",
                                 "", "", "", None)
                     detail = {k: v for k, v in h.items() if k not in ('summary_text', 'ai_summary', 'raw')}
-                    detail["_回填提示"] = "已加载到「PCAP流量分析」结果区"
+                    # 将 dict 转换为 Markdown 表格格式（history_detail 是 Markdown 组件）
+                    detail_md = "### 📋 记录详情\n\n"
+                    detail_md += "| 字段 | 值 |\n|------|-----|\n"
+                    for k, v in detail.items():
+                        val_str = str(v) if v is not None else "—"
+                        if len(val_str) > 80:
+                            val_str = val_str[:77] + "..."
+                        detail_md += f"| {k} | {val_str} |\n"
+                    detail_md += "\n✅ **已回填到「PCAP流量分析」结果区**"
                     brief = (h.get("summary_text") or "").replace("\n", " ")[:60]
                     return (f"✅ **已回填到「🔍 PCAP流量分析」结果区**（请切换到第一个 Tab 查看）\n"
                             f"文件：`{h.get('file', '?')}` | 告警 {h.get('alerts', 0)} 条\n摘要：{brief}…",
-                            detail, h.get("summary_text", ""), h.get("ai_summary", ""),
+                            detail_md, h.get("summary_text", ""), h.get("ai_summary", ""),
                             json.dumps(h.get("raw", {}), ensure_ascii=False, indent=2, default=str), h)
 
                 def open_selected_report_ui(dropdown_val, sel):
@@ -1963,7 +1890,7 @@ def create_gradio_interface():
                 def clear_history_ui():
                     n = get_history_store().clear_analysis()
                     return (gr.update(value=[]), "📊 当前 **0** 条分析记录",
-                            f"🗑 已清空全部历史记录（{n} 条）", {"cleared": n}, None,
+                            f"🗑 已清空全部历史记录（{n} 条）", "", None,
                             gr.update(choices=[], value=None))
 
                 history_table.select(on_history_row_click,
@@ -2038,7 +1965,8 @@ def create_gradio_interface():
                     outputs=[raw_output, raw_output_full, toggle_raw_btn,
                              raw_expanded_state])
 
-                report_download.click(on_report_download_click, inputs=[analysis_done],
+                report_download.click(on_report_download_click,
+                                      inputs=[analysis_done, report_path_state],
                                       outputs=[report_download, report_feedback, download_progress,
                                                tab1_open_report_btn, tab1_open_report_dir_btn])
 
@@ -2048,20 +1976,20 @@ def create_gradio_interface():
                     inputs=[pcap_file, enable_ai, baseline_dropdown],
                     outputs=[process_output, summary_output, threat_output, raw_content_state,
                              report_download, history_table, baseline_chart_output,
-                             analysis_done]
+                             analysis_done, report_path_state]
                 )
                 # 分析完成后刷新下拉框选项（通过一个隐藏的辅助按钮触发）
                 def _refresh_dropdown_only():
                     return gr.update(choices=_history_dropdown_choices())
 
             # Tab 3: 安全问答（v1.4.0：流式输出 + 对话历史持久化 + RAG 检索依据展示）
-            with gr.Tab("💬 安全知识问答"):
-                gr.Markdown("基于MITRE ATT&CK知识库的安全问答助手 —— 回答逐字流式显示，对话自动保存（刷新不丢失）")
-                chatbot = gr.Chatbot(label="安全助手")
-                msg_input = gr.Textbox(label="输入问题", placeholder="例如：什么是DNS隧道？如何检测端口扫描？")
+            with gr.Tab(_tab("💬 安全知识问答")):
+                gr.Markdown(_("基于MITRE ATT&CK知识库的安全问答助手 —— 回答逐字流式显示，对话自动保存（刷新不丢失）"))
+                chatbot = gr.Chatbot(label=_("安全助手"))
+                msg_input = gr.Textbox(label=_("输入问题"), placeholder=_("例如：什么是DNS隧道？如何检测端口扫描？"))
                 with gr.Row():
-                    send_btn = gr.Button("发送", variant="primary")
-                    clear_btn = gr.Button("清空对话")
+                    send_btn = gr.Button(_("发送"), variant="primary")
+                    clear_btn = gr.Button(_("清空对话"))
 
                 def _norm_chat_history(history):
                     """兼容新旧 Chatbot 历史格式 → messages 格式"""
@@ -2151,23 +2079,23 @@ def create_gradio_interface():
                 demo.load(lambda: get_history_store().load_chat(), outputs=chatbot)
 
             # Tab 3: 知识库管理
-            with gr.Tab("📚 知识库管理"):
-                gr.Markdown("管理安全知识库（MITRE ATT&CK、处置手册、协议知识）")
+            with gr.Tab(_tab("📚 知识库管理")):
+                gr.Markdown(_("管理安全知识库（MITRE ATT&CK、处置手册、协议知识）"))
                 # 第一行：两个操作按钮同高
                 with gr.Row(equal_height=True):
-                    init_btn = gr.Button("🔄 初始化/重建知识库", variant="primary", size="lg")
-                    import_btn = gr.Button("📥 导入到知识库", variant="secondary", size="lg")
+                    init_btn = gr.Button(_("🔄 初始化/重建知识库"), variant="primary", size="lg")
+                    import_btn = gr.Button(_("📥 导入到知识库"), variant="secondary", size="lg")
                 # 第二行：文件上传（全宽）
-                kb_file = gr.File(label="导入知识文档（.txt/.md/.json/.pdf/.docx）", file_types=[".txt", ".md", ".json", ".pdf", ".docx"])
+                kb_file = gr.File(label=_("导入知识文档（.txt/.md/.json/.pdf/.docx）"), file_types=[".txt", ".md", ".json", ".pdf", ".docx"])
                 # 第三行：两个结果内容框同高
                 with gr.Row(equal_height=True):
-                    stats_output = gr.Markdown(label="📊 知识库统计", value="尚未初始化，请点击「初始化知识库」")
-                    import_output = gr.Markdown(label="📥 导入结果", value="请选择文件后点击「导入到知识库」")
+                    stats_output = gr.Markdown(label=_("📊 知识库统计"), value=_("尚未初始化，请点击「初始化知识库」"))
+                    import_output = gr.Markdown(label=_("📥 导入结果"), value=_("请选择文件后点击「导入到知识库」"))
                 # 第四行：搜索
                 with gr.Row():
-                    search_input = gr.Textbox(label="搜索知识库", placeholder="输入关键词搜索...", scale=4)
-                    search_btn = gr.Button("🔍 搜索", scale=1)
-                search_output = gr.Markdown(label="搜索结果", value="输入关键词后点击搜索")
+                    search_input = gr.Textbox(label=_("搜索知识库"), placeholder=_("输入关键词搜索..."), scale=4)
+                    search_btn = gr.Button(_("🔍 搜索"), scale=1)
+                search_output = gr.Markdown(label=_("搜索结果"), value=_("输入关键词后点击搜索"))
 
                 def _format_kb_stats(stats):
                     """将知识库统计字典格式化为友好的Markdown"""
@@ -2249,15 +2177,15 @@ def create_gradio_interface():
                 search_btn.click(search_kb, inputs=search_input, outputs=search_output)
 
             # Tab 4: 基线管理
-            with gr.Tab("📈 基线管理"):
-                gr.Markdown("""
+            with gr.Tab(_tab("📈 基线管理")):
+                gr.Markdown(_("""
                 **时序基线（EWMA 学习-检测两阶段）**
                 上传一份**正常流量** pcap，系统学习该网络的"日常画像"（每时间窗的包数/字节/SYN/端口数中位数），
                 之后分析可疑流量时可对照该基线，偏差超 σ 即告警。预置基线 `default`（学习自 normal.pcap）可直接使用。
-                """)
+                """))
                 
                 # === 已有基线列表（放在最前面，用户进入即可看到）===
-                gr.Markdown("### 📋 已保存基线")
+                gr.Markdown(_("### 📋 已保存基线"))
                 def _baseline_table_value():
                     rows = []
                     for b in _list_baselines():
@@ -2267,15 +2195,15 @@ def create_gradio_interface():
 
                 baseline_table = gr.Dataframe(
                     value=_baseline_table_value(),
-                    headers=["名称", "学习包数", "窗口(s)", "σ", "创建时间", "文件"],
-                    label="已保存基线（点击行查看画像图表）",
+                    headers=[_("名称"), _("学习包数"), _("窗口(s)"), _("σ"), _("创建时间"), _("文件")],
+                    label=_("已保存基线（点击行查看画像图表）"),
                     interactive=False)
-                baseline_feedback = gr.Markdown("💡 点击表格任意一行查看该基线的画像图表")
+                baseline_feedback = gr.Markdown(_("💡 点击表格任意一行查看该基线的画像图表"))
                 
                 # === 基线画像图表（紧跟表格，点击行立即可见）===
                 with gr.Row():
-                    baseline_profile_output = gr.JSON(label="选中基线画像数据")
-                    baseline_chart = gr.HTML(label="📊 基线画像图表（4维度中位数±MAD）")
+                    baseline_profile_output = gr.JSON(label=_("选中基线画像数据"))
+                    baseline_chart = gr.HTML(label=_("📊 基线画像图表（4维度中位数±MAD）"))
                 
                 # 页面加载时自动显示默认基线图表（如果有default基线）
                 def _load_default_baseline_chart():
@@ -2300,19 +2228,19 @@ def create_gradio_interface():
                 baseline_selected = gr.State(None)
                 
                 # === 学习新基线 ===
-                gr.Markdown("### 🧠 学习新基线")
+                gr.Markdown(_("### 🧠 学习新基线"))
                 with gr.Row():
-                    baseline_file = gr.File(label="上传正常流量PCAP", file_types=[".pcap", ".pcapng", ".cap"])
-                    baseline_name_input = gr.Textbox(label="基线名称", value="my-network",
-                                                     placeholder="如: office-network")
-                learn_btn = gr.Button("🧠 一键学习基线", variant="primary")
-                learn_feedback = gr.Markdown("💡 上传正常流量 pcap → 命名 → 点「一键学习」→ 结果与列表即时刷新")
-                learn_output = gr.JSON(label="学习结果（基线画像）")
+                    baseline_file = gr.File(label=_("上传正常流量PCAP"), file_types=[".pcap", ".pcapng", ".cap"])
+                    baseline_name_input = gr.Textbox(label=_("基线名称"), value="my-network",
+                                                     placeholder=_("如: office-network"))
+                learn_btn = gr.Button(_("🧠 一键学习基线"), variant="primary")
+                learn_feedback = gr.Markdown(_("💡 上传正常流量 pcap → 命名 → 点「一键学习」→ 结果与列表即时刷新"))
+                learn_output = gr.JSON(label=_("学习结果（基线画像）"))
                 
                 # === 操作按钮 ===
                 with gr.Row():
-                    refresh_baseline_btn = gr.Button("🔄 刷新列表")
-                    delete_baseline_btn = gr.Button("🗑 删除选中基线", variant="stop")
+                    refresh_baseline_btn = gr.Button(_("🔄 刷新列表"))
+                    delete_baseline_btn = gr.Button(_("🗑 删除选中基线"), variant="stop")
 
                 def learn_baseline_ui(file, name):
                     if not file:
@@ -2325,6 +2253,11 @@ def create_gradio_interface():
                         if not packets:
                             return "❌ PCAP解析失败或为空，无法学习基线", None, gr.update(value=_baseline_table_value(), interactive=False), gr.update(choices=_baseline_names())
                         name = (name or "default").strip()
+                        # 名称校验必须早于落盘（baseline.save 会先写 JSON 文件）
+                        try:
+                            name = validate_baseline_name(name)
+                        except ValueError as name_err:
+                            return f"❌ {name_err}", None, gr.update(value=_baseline_table_value(), interactive=False), gr.update(choices=_baseline_names())
                         baseline = TrafficBaseline()
                         baseline.name = name
                         baseline.learn(packets)
@@ -2332,7 +2265,7 @@ def create_gradio_interface():
                         ensure_dir(BASELINE_DIR)
                         ok = baseline.save(save_path)
                         if not ok:
-                            return f"❌ 基线保存失败：{name}（名称含非法字符？）", None, gr.update(value=_baseline_table_value(), interactive=False), gr.update(choices=_baseline_names())
+                            return f"❌ 基线保存失败：{name}", None, gr.update(value=_baseline_table_value(), interactive=False), gr.update(choices=_baseline_names())
                         # 关键修复：同步保存到SQLite数据库（_list_baselines从数据库读取）
                         try:
                             from src.storage.database import Database
@@ -2423,20 +2356,44 @@ def create_gradio_interface():
                 demo.load(_load_default_baseline_chart,
                           outputs=[baseline_profile_output, baseline_feedback, baseline_selected, baseline_chart])
 
-            with gr.Tab("⚙️ 设置"):
-                gr.Markdown("""
+            with gr.Tab(_tab("⚙️ 设置")):
+                # 从服务端配置加载语言偏好
+                _default_lang = "zh"
+                try:
+                    _config_path = os.path.join(data_dir("config"), "ui_settings.json")
+                    if os.path.exists(_config_path):
+                        # 使用 utf-8-sig 兼容带 BOM 的文件（PowerShell Out-File 会添加 BOM）
+                        with open(_config_path, encoding="utf-8-sig") as _f:
+                            _ui_settings = json.load(_f)
+                            _default_lang = _ui_settings.get("language", "zh")
+                        # 同步设置 LLM 输出语言
+                        from src.ai.llm_client import LLMClient
+                        LLMClient.set_language(_default_lang)
+                except Exception as _e:
+                    logger.warning(f"加载语言偏好失败，使用默认中文: {_e}")
+
+                # 语言选择器（i18n）
+                with gr.Row():
+                    language_selector = gr.Dropdown(
+                        choices=[(_("简体中文"), "zh"), (_("English"), "en")],
+                        value=_default_lang,
+                        label=_("🌐 界面语言 / Interface Language"),
+                        info=_("选择后立即生效，偏好将自动保存")
+                    )
+                gr.Markdown("---")
+                gr.Markdown(_("""
                 **大模型 API 配置** —— 用于 AI 威胁研判与安全问答，保存后立即生效
                 支持服务商：智谱 / DeepSeek / 通义千问 / 硅基流动 / Ollama（任选其一）
-                """)
+                """))
                 with gr.Row():
-                    api_key_input = gr.Textbox(label="🔑 API Key", type="password",
+                    api_key_input = gr.Textbox(label=_("🔑 API Key"), type="password",
                                                placeholder="sk-...")
-                    api_url_input = gr.Textbox(label="🔗 API 地址 (Base URL)",
+                    api_url_input = gr.Textbox(label=_("🔗 API 地址 (Base URL)"),
                                                placeholder="https://open.bigmodel.cn/api/paas/v4")
-                    api_model_input = gr.Textbox(label="🧠 模型名称",
+                    api_model_input = gr.Textbox(label=_("🧠 模型名称"),
                                                  placeholder="glm-4-flash")
-                save_btn = gr.Button("💾 保存配置", variant="primary")
-                api_status = gr.Markdown("点击保存后立即生效，无需重启")
+                save_btn = gr.Button(_("💾 保存配置"), variant="primary")
+                api_status = gr.Markdown(_("点击保存后立即生效，无需重启"))
                 kb_paths_md = gr.Markdown("")
 
                 def load_api_config_ui():
@@ -2532,21 +2489,38 @@ def create_gradio_interface():
                         chroma = data_dir("chroma_db")
                         kb_docs = data_dir("knowledge", "docs")
                         exists = os.path.isdir(chroma) and os.listdir(chroma)
-                        state = "✅ 已就绪" if exists else "⚠️ 尚未初始化（可到「📚 知识库管理」初始化/重建）"
+                        # 根据当前语言选择文本
+                        _lang = _i18n.current_lang if I18N_AVAILABLE and _i18n else "zh"
+                        if _lang == "en":
+                            state = "✅ Ready" if exists else "⚠️ Not initialized (go to 📚 Knowledge Base to init/rebuild)"
+                            title = "### 📚 RAG Knowledge Base Paths"
+                            vec_label = "**Vector DB (ChromaDB)**"
+                            doc_label = "**Source Docs Directory**"
+                            chunk_label = "**Document Chunks**"
+                            status_label = "**Status**"
+                            engine_note = "(engine not loaded)"
+                        else:
+                            state = "✅ 已就绪" if exists else "⚠️ 尚未初始化（可到「📚 知识库管理」初始化/重建）"
+                            title = "### 📚 RAG 知识库路径"
+                            vec_label = "**向量库目录（ChromaDB）**"
+                            doc_label = "**知识源文档目录**"
+                            chunk_label = "**文档块数**"
+                            status_label = "**状态**"
+                            engine_note = "（引擎未加载）"
                         try:
                             from src.ai.rag_engine import get_rag_engine
                             stats = get_rag_engine().get_stats()
                             chunks = stats.get("chunks") or stats.get("total_documents") or stats.get("documents") or "?"
-                            lines = [f"### 📚 RAG 知识库路径", "",
-                                     f"- **向量库目录（ChromaDB）**: `{chroma}`",
-                                     f"- **知识源文档目录**: `{kb_docs}`",
-                                     f"- **文档块数**: {chunks}",
-                                     f"- **状态**: {state}"]
+                            lines = [title, "",
+                                     f"- {vec_label}: `{chroma}`",
+                                     f"- {doc_label}: `{kb_docs}`",
+                                     f"- {chunk_label}: {chunks}",
+                                     f"- {status_label}: {state}"]
                         except Exception:
-                            lines = [f"### 📚 RAG 知识库路径", "",
-                                     f"- **向量库目录（ChromaDB）**: `{chroma}`",
-                                     f"- **知识源文档目录**: `{kb_docs}`",
-                                     f"- **状态**: {state}（引擎未加载）"]
+                            lines = [title, "",
+                                     f"- {vec_label}: `{chroma}`",
+                                     f"- {doc_label}: `{kb_docs}`",
+                                     f"- {status_label}: {state}{engine_note}"]
                         return "\n".join(lines)
                     except Exception as e:
                         return f"### 📚 RAG 知识库路径\n- ❌ 读取失败: {e}"
@@ -2561,6 +2535,35 @@ def create_gradio_interface():
                                inputs=[api_key_input, api_url_input, api_model_input],
                                outputs=api_status)
 
+                # i18n：语言切换事件处理（LLM语言同步 + 服务端持久化）
+                # 注意：不使用 language_selector.change 直接绑定，避免与 gradio-i18n 的事件冲突
+                # gradio-i18n 通过 translate_blocks 内部注册 lang.change 事件处理UI文本切换
+                # 这里使用 gr.on 额外监听语言变化，用于副作用（LLM同步 + 持久化），不返回输出
+                def on_language_change(lang):
+                    """语言切换副作用：更新 LLM 输出语言 + 保存到服务端配置"""
+                    try:
+                        from src.ai.llm_client import LLMClient
+                        LLMClient.set_language(lang)
+                    except Exception as e:
+                        logger.warning(f"设置 LLM 语言失败: {e}")
+
+                    try:
+                        config_dir = data_dir("config")
+                        os.makedirs(config_dir, exist_ok=True)
+                        config_path = os.path.join(config_dir, "ui_settings.json")
+                        settings_data = {}
+                        if os.path.exists(config_path):
+                            with open(config_path, encoding="utf-8") as f:
+                                settings_data = json.load(f)
+                        settings_data["language"] = lang
+                        with open(config_path, "w", encoding="utf-8") as f:
+                            json.dump(settings_data, f, ensure_ascii=False, indent=2)
+                    except Exception as e:
+                        logger.warning(f"保存语言偏好失败: {e}")
+
+                    lang_name = "简体中文" if lang == "zh" else "English"
+                    logger.info(f"语言切换为: {lang_name}")
+
         gr.Markdown("""
         ---
         💡 **使用提示**：
@@ -2569,6 +2572,90 @@ def create_gradio_interface():
         3. 确保已在 `.env` 文件中配置 `LLM_API_KEY`（推荐DeepSeek/智谱）
         4. PCAP文件可用Wireshark抓包后导出
         """)
+
+        # i18n 国际化：自动注册组件 + 语言切换事件
+        if I18N_AVAILABLE and _i18n is not None:
+            try:
+                # 自动扫描所有组件，注册那些属性值在翻译字典中的组件
+                _registered = 0
+                _tab_count = 0
+                _debug_info = []
+                for _comp_id, _component in demo.blocks.items():
+                    _comp_type = type(_component).__name__
+                    # 跳过 Tab 组件（创建时已通过 _tab() 使用翻译文本，且无法通过事件更新 label）
+                    if _comp_type == "Tab":
+                        _tab_count += 1
+                        continue
+                    # 语言选择器：只注册 info（不注册 value 避免循环更新）
+                    if _component is language_selector:
+                        _info_val = getattr(_component, "info", None)
+                        if _info_val and isinstance(_info_val, str) and _i18n.translations.get("en", {}).get(_info_val):
+                            _i18n.register(_component, "info", _info_val)
+                            _registered += 1
+                        continue
+                    # 检查常见文本字段（支持一个组件注册多个字段，如 label + info）
+                    for _field in ["value", "label", "info", "placeholder"]:
+                        _val = getattr(_component, _field, None)
+                        if _val and isinstance(_val, str) and _i18n.translations.get("en", {}).get(_val):
+                            _i18n.register(_component, _field, _val)
+                            _registered += 1
+                    # 调试：记录有 info 但未注册的 Dropdown
+                    if _comp_type == "Dropdown":
+                        _info_val = getattr(_component, "info", None)
+                        if _info_val and isinstance(_info_val, str):
+                            _has_trans = _info_val in _i18n.translations.get("en", {})
+                            _debug_info.append(f"Dropdown info='{_info_val[:30]}...' trans={'Y' if _has_trans else 'N'}")
+                    # 特殊处理 Dropdown 的 choices
+                    _choices = getattr(_component, "choices", None)
+                    if _choices and isinstance(_choices, list):
+                        for _choice in _choices:
+                            if isinstance(_choice, tuple) and len(_choice) == 2:
+                                _display, _v = _choice
+                                if isinstance(_display, str) and _i18n.translations.get("en", {}).get(_display):
+                                    _i18n.register(_component, "choices", _display)
+                                    _registered += 1
+                                    break
+                logger.info(f"i18n 自动注册完成: {_registered} 个组件 (Tab: {_tab_count})")
+                for _d in _debug_info:
+                    logger.debug(f"i18n 调试: {_d}")
+
+                # 语言切换事件：批量更新所有注册组件 + LLM同步 + 持久化
+                def _on_switch_language(lang):
+                    # 更新当前语言（关键：确保刷新后初始加载使用新语言）
+                    _i18n.current_lang = lang
+                    # 更新 LLM 输出语言
+                    try:
+                        from src.ai.llm_client import LLMClient
+                        LLMClient.set_language(lang)
+                    except Exception as _e:
+                        logger.warning(f"设置 LLM 语言失败: {_e}")
+                    # 保存到服务端配置
+                    _cfg_path = os.path.join(data_dir("config"), "ui_settings.json")
+                    _i18n.save_preference(lang, _cfg_path)
+                    # 返回所有注册组件的更新
+                    return _i18n.get_updates(lang)
+
+                language_selector.change(
+                    _on_switch_language,
+                    inputs=[language_selector],
+                    outputs=_i18n.get_component_outputs(),
+                )
+                logger.info(f"i18n 语言切换事件已注册，输出 {len(_i18n.get_component_outputs())} 个组件")
+
+                # 初始加载时触发一次语言切换（确保默认语言生效）
+                def _on_initial_load():
+                    return _i18n.get_updates(_i18n.current_lang)
+
+                demo.load(
+                    _on_initial_load,
+                    inputs=[],
+                    outputs=_i18n.get_component_outputs(),
+                )
+                logger.info(f"i18n 初始加载事件已注册，默认语言: {_default_lang}")
+            except Exception as e:
+                logger.warning(f"i18n 初始化失败（不影响主功能）: {e}")
+                import traceback
+                logger.warning(traceback.format_exc())
 
     return demo
 

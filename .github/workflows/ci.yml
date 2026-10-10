@@ -33,6 +33,13 @@ jobs:
         run: pip install -r requirements.lock
       - name: 运行测试
         run: pytest tests -q
+      - name: 安全回归门禁（图表转义 / 名称校验 / 路由可达性 / gradio 可选性）
+        # 这组测试锁定四个已确认缺陷，防止回归：
+        #   1. 基线名存储型 XSS（恶意名穿透 gr.HTML）
+        #   2. 基线名称校验（写入层单一入口）
+        #   3. /api/forensic/related|iocs 路径参数退化为字面花括号 → 404
+        #   4. 无 gradio 时模块级 gr.themes 访问导致整个 API 导入失败
+        run: pytest tests/test_charts.py -q
 
   test-windows:
     name: 测试(Windows/DPAPI) · Python 3.11

@@ -71,8 +71,11 @@ venv_broken/
 installer_output/
 installer_test/
 _build_log.txt
-_*.log
-_*.py
+# 打包/调试临时产物（仅在仓库根目录生效）
+# 注意：不加前导斜杠会让 `_*.py` 匹配到 **所有** `__init__.py`
+# （basename 以 `_` 开头），导致全部包初始化文件从未入库 —— 新 clone 缺包结构。
+/_*.log
+/_*.py
 
 # Large files - training data (not suitable for GitHub, download separately)
 data/eval_cicids/csv/*.csv

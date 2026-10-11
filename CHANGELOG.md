@@ -104,6 +104,62 @@
 
 ---
 
+## [3.4.2] - 2026-10-10 · 死代码清理与文档对齐
+
+**全仓库死代码审计后的清理批次**（与上方 3.4.2 的 i18n/安全修复同属一个发布版本）
+
+### Removed（死代码）
+
+- **整套未接线的 `src/core/` 子系统**（4 文件，约 12.7 KB）：
+  `middleware.py` 零引用；`errors.py` 仅被 `middleware.py` 引用；
+  `exceptions.py` 仅被 `services/history_service.py` 引用。这是一套预设的
+  异常/中间件框架，但运行路径上使用的是 `gradio_app.py` 内的自有实现，
+  从未被 `setup_middleware()` 之类挂载。
+- **`src/services/history_service.py`**（159 行）：仅被自身测试引用，
+  且只是 `src/api/history_store.py` 的**薄包装**（`self._store = get_history_store()`），
+  生产代码直接使用后者。连同 `tests/test_services/test_history_service.py`
+  （16 个用例）一并删除。
+- **`src/ai/rag_benchmark.py`**（10.5 KB）：全仓库零引用（入口、测试、工具均不引用）。
+- **`_check_css.py`**（1.8 KB）：根目录临时脚本，零引用且已被 `.gitignore` 忽略。
+- **`src/api/schemas.py` 精简 27 → 7 个模型**：本文件的类不会被任何工具自动发现，
+  未经 `response_model=` / `Body(...)` 引用的模型既不影响 OpenAPI 文档也不参与
+  校验，属纯死代码。实际只有 `HealthResponse` 与 `ChatResponse` 被端点在
+  `response_model=` 中引用；其余保留项为请求体或被引用模型的子模型。
+- **`config/settings.py` 删除 5 个废弃配置类**（约 83 行）：
+  `APISettings` / `LLMSettings` / `AnalysisSettings` / `StorageSettings` /
+  `SecuritySettings` 各自只出现 1 次（定义处）——`Settings` 已平铺全部 49 个字段，
+  从未继承或实例化过这些子类，是早期"按域拆分配置"重构的残留。
+  文件由 283 行降至 196 行。
+- **`docs/系统诊断与架构建议.md`**（49 KB）：早期自审报告，其记录的 BLOCKER
+  已在本轮全部修复，内容与 CHANGELOG 重叠且已过时。
+
+### Fixed（文档与实测不一致）
+
+- **README 目录树描述了一整套不存在的结构**：声称保留 `src/api/routes/*`
+  （5 个 APIRouter / 12 端点）与按领域拆分的 `src/services/*`（analysis/baseline/
+  knowledge/report/history）作为"待接入项"，但这些目录并不存在于仓库；
+  同时列出 `tools/generalization_eval.py`、`tools/fusion_comparison.py`、
+  `tools/benchmark.py`、`feature_importance.py` 四个不存在的脚本。
+  现已按实测结构重写目录树与模块职责表。
+- **测试规模声明过时**：badge 标 `176 passed`、表格标 `265 passed`，
+  与实际测试数不符；现分别更新为真实值（清理前 386、清理后 370）。
+- **性能基准命令指向不存在的文件**：`python tools/benchmark.py` →
+  实际为 `python tools/bench_stream.py`（输出 `data/eval_perf/perf_baseline.json`）。
+- 架构图中的基础层误引 `src/core/exceptions.py`（已删除）→ 改为
+  `src/utils/error_handler.py`。
+- 更新日志段补充统一免责说明：历史条目提到的文件在后续版本中可能已被删除，
+  属正常的"已删除"而非遗漏。
+
+### Technical Details
+- 测试：**386 → 370 passed**（减少的 16 项全部来自被删的 `test_history_service.py`，
+  无既有测试失效）。
+- 本地工作区体积：**4136.8 MB → 2552.7 MB**（清理 `dist/` 1145 MB、`build/` 165 MB、
+  `pytest-of-Curry/` 274 MB 等构建与测试垃圾）。
+- `verify_golden.py` 退出码 0；应用与 `src.api.main` 构建正常（33 条路由）；
+  `settings.version` 保持 3.4.2、49 个配置字段完整。
+
+---
+
 ## [3.4.1] - 2026-10-09
 
 **Hotfix：修复运行时孤立森林仍未执行的严重 bug（v3.4.0 发布后对抗性审查发现）**

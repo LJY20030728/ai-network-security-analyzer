@@ -54,89 +54,12 @@ def find_env_file() -> str:
     return ".env"
 
 
-class APISettings(BaseSettings):
-    """API服务配置"""
-    api_host: str = "127.0.0.1"
-    api_port: int = 8080
-    api_auth_token: str = ""
-    max_upload_mb: int = 200  # 单个 PCAP 上传上限（MB）
-    request_timeout: int = 300  # 请求超时（秒）
+# 注：此处原有 APISettings / LLMSettings / AnalysisSettings / StorageSettings /
+# SecuritySettings 五个 BaseSettings 子类（约 83 行），是早期"按域拆分配置"的
+# 重构残留——下方 `Settings` 已平铺全部字段，从未继承或实例化过这些子类，
+# 属于纯死代码，已于本次清理中移除。若今后要恢复模块化拆分，请让 `Settings`
+# 真正组合/继承它们，否则子类不会生效（环境变量也不会被读取）。
 
-
-class LLMSettings(BaseSettings):
-    """大模型配置"""
-    llm_api_key: str = ""
-    llm_base_url: str = "https://open.bigmodel.cn/api/paas/v4"
-    llm_model: str = "glm-4.5-air"
-    embedding_model: str = "BAAI/bge-small-zh-v1.5"
-    llm_vote_samples: int = 3
-    llm_vote_temperatures: str = "0.1,0.4,0.7"
-    llm_timeout: int = 60  # LLM API 超时（秒）
-
-
-class AnalysisSettings(BaseSettings):
-    """分析引擎配置"""
-    # 通用分析
-    flow_timeout: int = 60  # 网络流超时时间（秒）
-    anomaly_threshold: float = 0.7  # 异常检测阈值
-
-    # 三引擎 Stacking 融合（规则 + 基线 + 孤立森林）
-    # 默认开启：三引擎全部无外部模型依赖，开箱即用
-    stacking_fusion_enabled: bool = True
-
-    # 规则引擎阈值
-    syn_flood_min_count: int = 80
-    syn_flood_high_count: int = 500
-    port_scan_min_ports: int = 15
-    port_scan_high_ports: int = 100
-    dns_tunnel_max_query_len: int = 30
-    dns_tunnel_min_count: int = 3
-    dns_tunnel_high_count: int = 20
-    large_flow_min_mb: float = 10.0
-    rst_storm_min_count: int = 30
-
-    # UDP/QUIC 攻击检测阈值（v3.4.0 新增）
-    udp_flood_min_packets: int = 100
-    udp_flood_high_packets: int = 500
-    dns_amp_min_ratio: float = 5.0
-    dns_amp_min_responses: int = 5
-    quic_flood_min_connections: int = 50
-    quic_long_flow_min_packets: int = 200
-    quic_initial_ratio_threshold: float = 0.3
-    quic_unknown_version_alert: bool = True
-
-    # EWMA 时序基线引擎
-    baseline_alpha: float = 0.1
-    baseline_sigma: float = 3.0
-    baseline_window_sec: int = 10
-    baseline_min_windows: int = 20
-    baseline_online_update: bool = True
-    baseline_drift_window: int = 10
-    baseline_drift_alpha: float = 0.05
-
-    # ML 检测引擎（孤立森林）
-    ml_engine_enabled: bool = True
-    ml_contamination: float = 0.10
-    ml_random_state: int = 42
-    ml_max_samples: int = 256
-    ml_n_jobs: int = 1
-
-
-class StorageSettings(BaseSettings):
-    """存储配置"""
-    chroma_persist_dir: str = ""
-    db_path: str = ""
-    reports_dir: str = ""
-    baselines_dir: str = ""
-    samples_dir: str = ""
-
-
-class SecuritySettings(BaseSettings):
-    """安全配置"""
-    secure_store_enabled: bool = True
-    capture_interface: Optional[str] = None
-    capture_filter: str = "tcp or udp or icmp"
-    capture_packet_limit: int = 1000
 
 
 class ProjectSettings(BaseSettings):

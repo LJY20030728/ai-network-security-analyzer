@@ -8,7 +8,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.141-green.svg)](https://fastapi.tiangolo.com/)
 [![Gradio](https://img.shields.io/badge/Gradio-6.x-orange.svg)](https://www.gradio.app/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-176%20passed-brightgreen.svg)](#测试)
+[![Tests](https://img.shields.io/badge/tests-370%20passed-brightgreen.svg)](#测试)
 [![CI](https://github.com/LJY20030728/ai-network-security-analyzer/actions/workflows/ci.yml/badge.svg)](https://github.com/LJY20030728/ai-network-security-analyzer/actions/workflows/ci.yml)
 
 **[中文版](#目录) | [English Version](README_EN.md)**
@@ -176,16 +176,20 @@
 │  src/report/    HTML 取证报告 + 摘要格式化（summary_formatter）       │
 ├─────────────────────────────────────────────────────────────────┤
 │                    基础层（被依赖，不反向依赖 UI）                     │
-│  config/settings.py（单一配置源）│ src/core/exceptions.py            │
+│  config/settings.py（单一配置源）│ src/utils/error_handler.py        │
 │  src/storage/（SQLite WAL / 取证知识库）│ src/security/（DPAPI）      │
 │  src/utils/（路径 / 日志 / 错误处理 / 文件哈希与上传校验）              │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-**关于 `src/api/routes/*` 与 `src/services/*`**：这两个目录保留了按领域拆分的
-实现（分析 / 基线 / 知识库 / 报告服务，以及 5 个 APIRouter），但目前未挂载。
-它们可以正常导入，且 `analysis_service` 已通过端到端验证；是否接入
-`gradio_app` 是待决策项，而非已知缺陷。接口契约见 `src/api/schemas.py`。
+**关于历史遗留的"未挂载路由"**：早期版本曾保留 `src/api/routes/*`（5 个
+APIRouter，12 端点）与按领域拆分的 `src/services/*`（analysis/baseline/
+knowledge/report/history），但始终未接入运行路径——实际生效的一直是
+`src/ui/gradio_app.py` 内直接声明的 33 条路由，以及
+`src/services/analysis_service.py` 这条唯一的分析流水线。
+为避免"看起来有两套架构、实则只有一套"的误导，这些**从未被调用的重复实现
+已在本轮清理中删除**（连同 `src/core/` 整套未接线的异常/中间件框架与其测试）。
+当前 `src/services/` 仅保留实际使用的 `analysis_service.py`。
 
 ### 配置与依赖管理
 
@@ -200,16 +204,19 @@
 
 | 目录 | 职责 | 是否在运行路径 |
 |------|------|------|
-| `src/ui/gradio_app.py` | 单一 app 装配点：FastAPI 实例、28 个路由、鉴权中间件、Gradio UI | ✅ 是 |
+| `src/ui/gradio_app.py` | 单一 app 装配点：FastAPI 实例、33 条路由、全 app 鉴权、Gradio UI | ✅ 是 |
 | `src/capture/` | PCAP 流式解析与单包字段提取 | ✅ 是 |
 | `src/analysis/` | 三引擎检测、Stacking 融合、时序基线 | ✅ 是 |
 | `src/ai/` | LLM 客户端、RAG 混合检索、幻觉控制、证据比对 | ✅ 是 |
 | `src/report/` | HTML 取证报告、摘要格式化（`summary_formatter.py`） | ✅ 是 |
-| `src/storage/` | SQLite（WAL）分析/对话/基线表、取证知识库 | ✅ 是 |
+| `src/storage/` | SQLite（WAL）分析/对话/基线表、取证知识库、基线名白名单 | ✅ 是 |
 | `src/security/` | DPAPI 加密存储（Windows-only，非 Windows 回退明文并告警） | ✅ 是 |
 | `src/utils/` | 路径、日志、错误处理、文件哈希与上传校验 | ✅ 是 |
 | `config/settings.py` | 集中配置（Pydantic Settings，可 `.env` 覆盖） | ✅ 是 |
-| `src/core/exceptions.py` | 业务异常体系 | ✅ 是 |
+| `src/api/` | 规范入口 `main.py`（re-export 唯一 app）、Pydantic 模型、历史存储、任务队列、审计 | ✅ 是 |
+| `src/services/analysis_service.py` | 唯一的分析流水线（UI 与 API 共用） | ✅ 是 |
+| `src/analysis/stacking_fusion.py` | 三引擎 Stacking 融合器（元学习器 + 固定权重回退） | ✅ 是 |
+| `src/api/routes/` | 按领域拆分的 APIRouter | 🗑️ 已于本轮清理删除（从未挂载） |
 | `src/api/routes/` | 按领域拆分的 APIRouter（12 端点） | ❌ **未挂载**（见上文诚实声明） |
 | `src/services/` | 领域服务层（analysis/baseline/knowledge/report/history） | ⚠️ 可导入且已端到端验证，但 UI 未调用 |
 | `src/analysis/stacking_fusion.py` | 三引擎 Stacking 融合器（元学习器 + 固定权重回退） | ✅ 是 |
@@ -481,7 +488,7 @@ docker compose up -d --build
 
 | 指标 | 数值 |
 |------|------|
-| 测试结果 | **265 passed / 0 skipped / 0 failed** |
+| 测试结果 | **370 passed / 0 skipped / 0 failed** |
 | 测试文件数 | 17 个 |
 | 覆盖模块 | 算法检测 / API 路由 / 存储 / 安全 / 服务层 / 工具 |
 
@@ -556,17 +563,14 @@ ai-network-security-analyzer/
 ├── config/                    # 配置层（v3.0.0 重构）
 │   └── settings.py           # Pydantic Settings，按功能分组
 ├── src/
-│   ├── core/                  # 核心层
-│   │   ├── errors.py          # 标准化错误码（ErrorCode 枚举）
-│   │   └── exceptions.py      # 业务异常体系（AppError 基类）
-│   ├── services/              # 服务层（仅保留有测试覆盖的历史记录服务）
-│   │   └── history_service.py # 历史记录服务（薄封装，供测试与外部复用）
 │   ├── api/                   # API 层（app 装配在 src/ui/gradio_app.py）
 │   │   ├── main.py            # 规范入口：re-export 唯一 app 实例
-│   │   ├── schemas.py         # Pydantic 响应模型
-│   │   ├── history_store.py   # 历史记录存储（SQLite）
+│   │   ├── schemas.py         # Pydantic 请求/响应模型（仅保留端点实际引用者）
+│   │   ├── history_store.py   # 历史记录存储（SQLite，WAL）
 │   │   ├── task_queue.py      # 异步任务队列
 │   │   └── audit.py           # 审计日志
+│   ├── services/              # 服务层（唯一的分析流水线入口）
+│   │   └── analysis_service.py
 │   ├── analysis/              # 分析引擎（三引擎 + Stacking 融合）
 │   │   ├── flow_extractor.py  # 流提取 + 三引擎集成 + Stacking 融合
 │   │   ├── stacking_fusion.py # 三引擎 Stacking 融合器（含引擎顺序校验与固定权重回退）
@@ -574,28 +578,35 @@ ai-network-security-analyzer/
 │   │   ├── stl_decomposer.py  # 零依赖轻量级 STL 时序分解
 │   │   └── isolation_detector.py  # 孤立森林无监督检测（默认启用）
 │   ├── ai/                    # AI 模块
-│   │   ├── llm_client.py      # 大模型客户端
-│   │   ├── threat_analyzer.py # 威胁分析器
-│   │   ├── rag_engine.py      # RAG 检索引擎（混合检索+重排序）
+│   │   ├── llm_client.py      # 大模型客户端（响应缓存 / 多温度采样开关）
+│   │   ├── threat_analyzer.py # 威胁分析器（结构化研判 + 多温度投票）
+│   │   ├── rag_engine.py      # RAG 检索引擎（混合检索 + 重排序）
+│   │   ├── retrieval_hybrid.py    # BM25 + RRF 融合 + 查询改写
 │   │   ├── hallucination_control.py  # 幻觉控制三件套
 │   │   ├── evidence_matcher.py      # 证据匹配
-│   │   └── embeddings/        # 嵌入模型（BGE ONNX）
+│   │   ├── prompts.py         # 提示词模板
+│   │   ├── schemas.py         # 结构化输出校验（Pydantic）
+│   │   └── embeddings/        # 嵌入模型（BGE ONNX，含 sha256 白名单校验）
 │   ├── capture/               # 抓包/解析
 │   │   ├── packet_parser.py   # 包解析
-│   │   └── pcap_parser.py     # PCAP 文件解析
+│   │   └── pcap_parser.py     # PCAP 流式解析（scapy PcapReader）
 │   ├── report/                # 报告生成
 │   │   ├── html_report.py     # HTML 取证报告（五要素）
 │   │   └── summary_formatter.py  # 摘要文本格式化（纯函数，可单测）
 │   ├── storage/               # 存储层
-│   │   ├── database.py        # SQLite 数据库（WAL，三表+索引）
+│   │   ├── database.py        # SQLite 数据库（WAL）
+│   │   ├── baseline_name.py   # 基线名称白名单校验（防存储型 XSS）
 │   │   └── forensic_kb.py     # 取证知识库（关联/趋势/缓存）
 │   ├── security/              # 安全层
 │   │   └── secure_store.py    # DPAPI 加密存储
 │   ├── ui/                    # UI 层
-│   │   ├── gradio_app.py      # Gradio UI + FastAPI app 装配（28 个 /api 路由）
-│   │   └── custom_style.css   # 蓝色二次元风格自定义 CSS
+│   │   ├── gradio_app.py      # Gradio UI + FastAPI app 装配（33 条路由）
+│   │   ├── charts.py          # SVG 图表生成（全量转义）
+│   │   ├── i18n_manager.py    # 中英文国际化
+│   │   ├── translations.json  # 翻译字典
+│   │   └── custom_style.css   # 自定义 CSS
 │   └── utils/                 # 工具函数
-│       ├── paths.py           # 路径管理
+│       ├── paths.py           # 路径管理（数据目录/资源目录分离）
 │       ├── helpers.py         # 通用工具
 │       ├── error_handler.py   # 错误处理三层
 │       └── log_observer.py    # 日志可观测性
@@ -607,26 +618,48 @@ ai-network-security-analyzer/
 │   ├── db/                    # SQLite 数据库
 │   ├── chroma_db/             # ChromaDB 向量库
 │   └── eval_perf/             # 评测结果
-├── tests/                     # 测试（265 个用例 / 18 个文件）
-│   ├── test_services/         # 服务层单元测试（v3.0.0 新增）
-│   ├── test_routes/           # 路由层单元测试（v3.0.0 新增）
-│   ├── test_new_features.py   # 新功能综合测试（34 个）
+├── tests/                     # pytest 测试（370 个用例 / 24 个文件）
+│   ├── test_rules.py          # 规则引擎与误报控制
+│   ├── test_streaming.py      # 流式解析
+│   ├── test_isolation_*.py    # 孤立森林语义与 13 维特征
+│   ├── test_security_hardening.py  # 安全四项回归（鉴权/SSRF/模型校验）
+│   ├── test_functional_fixes.py    # 投票/相似度/查询改写/取证趋势
+│   ├── test_version_consistency.py # 版本号单一来源契约
 │   └── ...
-├── tools/                     # 可复现实验脚本
-│   ├── generalization_eval.py # 泛化 / 跨域迁移评估
-│   ├── fusion_comparison.py   # 融合架构对比
-│   ├── benchmark.py           # 性能基准（time + tracemalloc）
-│   └── eval_rag_recall.py     # RAG Recall@k 评测
-├── feature_importance.py      # 置换重要性（真实数据）
-├── benchmark_performance.py   # 读取压测结果画图
-├── rag_real_comparison.py     # 直接 prompt vs RAG 真实对比
+├── tools/                     # 可复现实验与运维脚本
+│   ├── train_stacking.py           # 训练三引擎 Stacking 元学习器
+│   ├── verify_golden.py            # 黄金样本回归（CI 用，退出码即结论）
+│   ├── generate_mixed_samples.py   # 生成混合样本（按窗口打标）
+│   ├── verify_baseline_value.py    # 基线增量价值验证
+│   ├── eval_ml_engine.py           # 孤立森林 TPR/FPR 评测
+│   ├── eval_rag_recall.py          # RAG Recall@k 评测
+│   ├── evaluate_rag.py             # RAG 两组口径 Recall/MRR
+│   ├── evaluate_golden.py          # 黄金集端到端评测
+│   ├── evaluate_cicids.py          # CIC-IDS 数据集评测
+│   ├── bench_stream.py             # 流式解析性能基准（time + tracemalloc）
+│   ├── eval_window_sensitivity.py  # 滑窗大小敏感性
+│   ├── eval_llm_voting.py          # 多温度投票评测
+│   ├── eval_llm_judgment.py        # LLM 研判质量评测
+│   ├── eval_llm_ab.py / ablation_rag.py  # LLM 与 RAG 消融
+│   ├── eval_llm_vs_rules_lumma.py  # LLM vs 规则（Lumma 样本）
+│   ├── learn_default_baseline.py   # 学习并落盘默认基线
+│   ├── build_knowledge_base.py / _rebuild_index.py  # 知识库构建与索引重建
+│   ├── init_resources.py           # 资源初始化（首启种子）
+│   ├── fetch_real_pcap.py          # 抓取公开真实 PCAP
+│   └── generate_samples.py         # 生成合成样本
+├── benchmark_performance.py   # 读取压测结果画图（供 docs/performance_benchmark.*）
+├── rag_real_comparison.py     # 直接 prompt vs RAG 真实对比（供 docs/rag_real_comparison.*）
 ├── docs/                      # 文档与实验图表
 │   ├── 项目自述_REACT完整版.md
-│   └── DOCKER_DEPLOYMENT.md
+│   ├── DOCKER_DEPLOYMENT.md
+│   ├── performance_benchmark.csv / .png
+│   └── rag_real_comparison.csv / .png
 ├── desktop_app.py             # 桌面版入口（pywebview）
+├── run.py                     # 服务入口（Web UI + API）
+├── build_exe.bat              # 一键 PyInstaller 打包
+├── 制作安装程序.bat              # 一键 Inno Setup 生成安装包
 ├── requirements.txt           # Python 依赖
 ├── .env.example               # 环境变量示例
-├── .gitignore
 ├── LICENSE
 └── README.md
 ```
@@ -682,8 +715,9 @@ pytest tests --cov=src --cov-report=html
 ### 性能基准测试
 
 ```bash
-python tools/benchmark.py
-# 结果保存在 data/eval_perf/benchmark_result.json
+python tools/bench_stream.py
+# 结果保存在 data/eval_perf/perf_baseline.json
+# 由 benchmark_performance.py 读取并绘制 docs/performance_benchmark.{csv,png}
 ```
 
 ### RAG 评测
@@ -819,6 +853,34 @@ venv\Scripts\python.exe -m PyInstaller --noconfirm --clean --onedir --windowed ^
 
 详细更新记录请查看 [CHANGELOG.md](CHANGELOG.md)。
 
+> **阅读本段前请注意**：以下是各版本的**历史记录**，描述的是当时的状态。
+> 其中部分脚本、模块、产物与指标在后续版本中**已被删除**（例如 3.3.0 移除监督
+> 模型时一并删除了其配套脚本与无法复现的指标）。若某条记录提到的文件在当前仓库
+> 中不存在，属正常的"已删除"而非遗漏；**当前有效性**请以本文档上半部分的
+> "可复现指标"与文件树为准。
+
+### [3.4.2] - 2026-10-10
+
+**系统对抗性自审后的修复批次**（安全 / 可信度 / 功能正确性 / 可复现性 / 死代码清理）
+
+- **安全**：修复基线名存储型 XSS；Gradio UI 全 app 鉴权（此前 token 中间件只覆盖
+  `/api/*` 而 UI 挂在 `/`，叠加 `os.startfile` 与递归搜索桌面构成主机执行入口）；
+  API Key 不再明文落 `.env`（Windows 仅 DPAPI）；`/api/config/validate` 加 SSRF
+  防护且不回显响应；移除 `allowed_paths` 对取证报告的暴露；BGE 模型下载加 sha256
+  校验并移除会从 S3 拉第二个模型的默认 EF 降级。
+- **可信度**：修复 Stacking 标签污染（按窗口打标 + GroupKFold，CV F1 由虚高的
+  0.7747 变为真实的 0.7425 ± 0.2700）；孤立森林不再把"流量安静"当威胁（正常误报
+  5 → 1）；幻觉控制不再把 LLM 调用失败认证为合格输出；多温度投票由虚构做实。
+- **功能正确性**：相似度不再伪造且映射单调；`expand_terms` 不再损坏查询；
+  取证攻击趋势不再恒空。
+- **可复现性**：补回从未入库的 15 个 `__init__.py` 与 4 个入口/资源文件；评测脚本
+  不再覆盖 golden 样本；版本号五处统一为 3.4.2；修复 Docker 部署三处致命缺陷与
+  PyInstaller 构建失败（PyQt5 hook 不兼容）。
+- **死代码清理**：删除整套未接线的 `src/core/` 子系统与仅测试引用的
+  `history_service.py`；删除 `src/ai/rag_benchmark.py` 等零引用模块；
+  `src/api/schemas.py` 由 27 个模型精简为 7 个实际使用项；
+  `config/settings.py` 删除 5 个废弃配置类；README 目录树与声明全面对齐实测值。
+
 ### [3.4.1] - 2026-10-09
 
 **Hotfix：修复运行时孤立森林仍未执行的严重 bug（v3.4.0 发布后对抗性审查发现）**
@@ -887,7 +949,7 @@ venv\Scripts\python.exe -m PyInstaller --noconfirm --clean --onedir --windowed ^
 - `analysis_history` 表列 `supervised_verdict` / `supervised_confidence`
   自动迁移为 `stacking_verdict` / `stacking_confidence`（幂等，保留历史数据）
 
-**测试**：265 passed / 0 skipped / 0 failed
+**测试**：370 passed / 0 skipped / 0 failed
 
 ### [3.2.0] - 2026-10-08
 

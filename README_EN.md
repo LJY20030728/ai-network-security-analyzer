@@ -6,7 +6,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110-green.svg)](https://fastapi.tiangolo.com/)
 [![Gradio](https://img.shields.io/badge/Gradio-6.x-orange.svg)](https://www.gradio.app/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-265%20passed-brightgreen.svg)](#test-coverage)
+[![Tests](https://img.shields.io/badge/tests-370%20passed-brightgreen.svg)](#test-coverage)
 
 **[中文版 README](README.md) | English Version**
 
@@ -339,7 +339,7 @@ list.
 
 | Metric | Value |
 |---|---|
-| Test result | **265 passed / 0 skipped / 0 failed** |
+| Test result | **370 passed / 0 skipped / 0 failed** |
 | Test files | 18 |
 | Covered modules | Detection algorithms, API routes, storage, security, service layer, tooling |
 

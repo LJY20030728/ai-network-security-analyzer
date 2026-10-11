@@ -810,6 +810,13 @@ build_exe.bat        :: PyInstaller 打包 → dist\AI网络安全分析系统\
 前置条件：已执行 `安装依赖.bat` 建好 venv；做安装包还需 Inno Setup 6
 （`winget install JRSoftware.InnoSetup`）。
 
+> **关于 AI网络安全分析系统.spec**：它是 PyInstaller 在构建时**自动重新生成**
+> 的文件（--clean 会覆盖它），因此其中的行内注释不会保留 ——
+> 权威的构建配置是 uild_exe.bat，.spec 仅作为可读的构建产物一并入库。
+> 实测：即使 .spec 中不含 collect_all(''PyQt6'')，collect_all(''webview'')
+> 也会通过相应 hook 完整收集 QtWebEngine（PyQt6 目录约 521 MB、
+> 含 QtWebEngineProcess.exe 与 53 个 locale），故不影响产物完整性。
+
 两个关键约束（**手工执行 PyInstaller 时最易踩**）：
 
 1. **必须固定 `QT_API=pyqt6`**。桌面窗口经 pywebview → qtpy 选择 Qt 绑定，

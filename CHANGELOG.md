@@ -4,6 +4,52 @@
 
 ---
 
+## [3.4.3] - 2026-10-11 · 流式路径 UDP/QUIC 覆盖 + DNS 放大死规则
+
+### Fixed（取证正确性：大流量告警源/目的写反 + 时间窗为空）
+
+**问题**：`FlowExtractor.extract_flows()` 用 `sorted([ep1, ep2])` 做双向流规范化，
+于是 `NetworkFlow.src_ip/src_port` 是**字典序较小**的那个端点，**与真实发包方向无关**。
+`_detect_anomalies()` 的 `LARGE_DATA_TRANSFER` 规则直接采用它，产生两个错误。
+
+以 `data/samples/golden/largeflow.pcap` 为例（实测 8239 个包全部为
+`10.0.0.2:40000 -> 10.0.0.1:21`）：
+
+| 字段 | 修复前 | 修复后 |
+|---|---|---|
+| `src_ip` / `dst_ip` | `10.0.0.1` / `10.0.0.2`（**反的**） | `10.0.0.2` / `10.0.0.1` |
+| `src_port` / `dst_port` | 缺失 | `40000` / `21` |
+| `time_window` | **空字符串**（报告渲染成 "—"） | `2023-11-15 06:13:20 ~ 06:13:28` |
+| `description` | `10.0.0.1:21 -> 10.0.0.2:40000`（**反的**） | `10.0.0.2:40000 -> 10.0.0.1:21` |
+
+`time_window` 为空的根因：规则用
+`[p for p in packets if p.src_ip == flow.src_ip and p.dst_ip == flow.dst_ip]`
+过滤，方向相反时**匹配 0 个包**。该过滤同时还是“每条流一次 O(n) 全表扫描”。
+
+**对取证工具而言“源/目的写反”是实质性错误** —— 会让分析师追错方向。
+
+**修复**：
+
+- `NetworkFlow` 新增按**真实包方向**统计的主导方向字段
+  `dom_src_ip` / `dom_src_port` / `dom_dst_ip` / `dom_dst_port` /
+  `dom_bytes` / `dom_packet_count`；`src_ip`/`dst_ip` **保持原规范语义不变**
+  （`get_flows_by_ip` / `get_flows_by_port` / `get_top_flows_by_bytes`
+  等既有调用者不受影响）。
+- `LARGE_DATA_TRANSFER` 改用 `dom_*` 与流的起止时间，既真实又免除全表扫描。
+- 流式路径同步改用主导方向（新增按方向的 `dirs` 累积，tie-break 算法与
+  全量路径一致），确保两条路径对同一流量给出**相同方向**。
+  这一点很关键：只修全量路径会**反而引入新的路径分歧** ——
+  实测修完全量后 `test_stream_matches_full[largeflow]` 立即变红，
+  正说明该测试确实有效。
+
+### Tests（方向修复）
+- 新增 `tests/test_large_transfer_direction.py`（7 项）：锁定主导方向与真实包
+  一致、`time_window` 非空且等于流的起止时间、描述方向真实、`src_ip/dst_ip`
+  与描述自洽、`src/dst` 规范语义未被破坏、两条路径字段完全一致。
+- 另用字段级对照（13 个 golden 样本 × 10 字段）确认两条路径差异降为 **0**
+  （此前唯一差异即本条 `time_window`）。
+
+
 ### Fixed（严重：UDP/QUIC 攻击在 UI 运行时完全漏检）
 
 **问题**：`TrafficAnalyzer` 有两条检测路径，规则数不一致，而 UI 走的是那条少的。
@@ -65,7 +111,6 @@ UDP/QUIC 样本**，该断言恰好落在两条路径唯一相同的交集上。
   （生成器加进 `tools/generate_samples.py`，只新增、**未触碰任何已有 golden 文件**）。
 - 全量 392 → **408 passed**；`verify_golden.py` 攻击命中 5/5 → **8/8**，exit 0。
 
-## [3.4.3] - 2026-10-11
 
 **Hotfix：修复 glm-4.5-air 推理模型回答被截断的严重 bug（用户实测发现）**
 

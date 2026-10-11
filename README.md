@@ -8,7 +8,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.141-green.svg)](https://fastapi.tiangolo.com/)
 [![Gradio](https://img.shields.io/badge/Gradio-6.x-orange.svg)](https://www.gradio.app/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-408%20passed-brightgreen.svg)](#测试)
+[![Tests](https://img.shields.io/badge/tests-415%20passed-brightgreen.svg)](#测试)
 [![CI](https://github.com/LJY20030728/ai-network-security-analyzer/actions/workflows/ci.yml/badge.svg)](https://github.com/LJY20030728/ai-network-security-analyzer/actions/workflows/ci.yml)
 
 **[中文版](#目录) | [English Version](README_EN.md)**
@@ -488,8 +488,8 @@ docker compose up -d --build
 
 | 指标 | 数值 |
 |------|------|
-| 测试结果 | **408 passed / 0 skipped / 0 failed** |
-| 测试文件数 | 25 个 |
+| 测试结果 | **415 passed / 0 skipped / 0 failed** |
+| 测试文件数 | 26 个 |
 | 覆盖模块 | 算法检测 / API 路由 / 存储 / 安全 / 服务层 / 工具 / 版本一致性 |
 
 ---
@@ -949,7 +949,7 @@ venv\Scripts\python.exe -m PyInstaller --noconfirm --clean --onedir --windowed ^
 - `analysis_history` 表列 `supervised_verdict` / `supervised_confidence`
   自动迁移为 `stacking_verdict` / `stacking_confidence`（幂等，保留历史数据）
 
-**测试**：408 passed / 0 skipped / 0 failed
+**测试**：415 passed / 0 skipped / 0 failed
 
 ### [3.2.0] - 2026-10-08
 

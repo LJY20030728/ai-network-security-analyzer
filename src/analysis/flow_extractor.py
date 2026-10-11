@@ -15,7 +15,16 @@ from ..capture.packet_parser import PacketInfo
 
 @dataclass
 class NetworkFlow:
-    """网络流数据结构（按五元组聚合）"""
+    """网络流数据结构（按五元组聚合）
+
+    【关于 src/dst 的语义】本类做**双向流合并**：`src_*` / `dst_*` 只是流标识里
+    "字典序较小"的那个端点（见 extract_flows 的 `sorted([ep1, ep2])`），
+    **不代表真实发包方向**。既有调用者（get_flows_by_ip / get_flows_by_port /
+    get_top_flows_by_bytes）只做双向匹配，故保持该语义不变。
+
+    需要"真实方向"的场景请使用 `dom_*`（dominant direction）：按实际包数
+    占比确定的主导方向，由 extract_flows 统计填充。
+    """
     src_ip: str
     src_port: int
     dst_ip: str
@@ -28,6 +37,13 @@ class NetworkFlow:
     flag_counts: Dict[str, int] = field(default_factory=dict)
     payload_bytes: int = 0
     duration_seconds: float = 0.0
+    # ---- 主导方向（按真实包方向统计；用于告警描述与方向敏感的场景）----
+    dom_src_ip: str = ""
+    dom_src_port: int = 0
+    dom_dst_ip: str = ""
+    dom_dst_port: int = 0
+    dom_bytes: int = 0
+    dom_packet_count: int = 0
 
 
 class FlowExtractor:
@@ -91,6 +107,21 @@ class FlowExtractor:
                 if p.flags:
                     for flag in p.flags.split(","):
                         flow.flag_counts[flag] = flow.flag_counts.get(flag, 0) + 1
+
+            # 主导方向：按真实包方向统计（双向合并后 src/dst 只是排序端点，
+            # 不代表发包方向）。用于告警描述与方向敏感场景。
+            dir_bytes: Dict[tuple, int] = defaultdict(int)
+            dir_count: Dict[tuple, int] = defaultdict(int)
+            for p in pkts:
+                dk = (p.src_ip, p.src_port, p.dst_ip, p.dst_port)
+                dir_bytes[dk] += int(p.length)
+                dir_count[dk] += 1
+            if dir_count:
+                dom = max(dir_count.items(), key=lambda kv: (kv[1], kv[0]))[0]
+                flow.dom_src_ip, flow.dom_src_port = dom[0], dom[1]
+                flow.dom_dst_ip, flow.dom_dst_port = dom[2], dom[3]
+                flow.dom_bytes = dir_bytes[dom]
+                flow.dom_packet_count = dir_count[dom]
 
             self.flows[flow_key] = flow
 
@@ -545,10 +576,16 @@ class TrafficAnalyzer:
                     f = {"src_ip": lip, "src_port": int(lport),
                          "dst_ip": hip, "dst_port": int(hport),
                          "protocol": p.protocol, "bytes": 0,
-                         "first": p.timestamp, "last": p.timestamp}
+                         "first": p.timestamp, "last": p.timestamp,
+                         # 按方向的 (包数, 字节) 累积；_dom() 用它取主导方向
+                         "dirs": defaultdict(lambda: {"bytes": 0, "count": 0})}
                     flows[key] = f
                 f["bytes"] += int(p.length)
                 f["last"] = p.timestamp
+                # 按方向累积（用于确定主导方向，与全量路径 FlowExtractor 同口径）
+                dk = (p.src_ip, p.src_port, p.dst_ip, p.dst_port)
+                f["dirs"][dk]["bytes"] += int(p.length)
+                f["dirs"][dk]["count"] += 1
             # 基线窗口增量聚合
             if win_acc is not None:
                 win_acc.add(p)
@@ -557,6 +594,18 @@ class TrafficAnalyzer:
             if not ts_list:
                 return ""
             return f"{ts_list[0]} ~ {ts_list[1]}"
+
+        def _dom(f):
+            """主导方向：按真实包方向取包数最多者（tie-break 与全量路径一致）。
+
+            全量路径用 max(dir_count.items(), key=lambda kv: (kv[1], kv[0]))，
+            这里保持同一算法，确保两条路径对同一流量给出相同方向。
+            """
+            dirs = f.get("dirs") or {}
+            if not dirs:
+                return f["src_ip"], f["src_port"], f["dst_ip"], f["dst_port"]
+            dom = max(dirs.items(), key=lambda kv: (kv[1]["count"], kv[0]))[0]
+            return dom
 
         # ---------- 规则告警组装（字段与 _detect_anomalies 完全一致） ----------
         alerts = []
@@ -600,15 +649,20 @@ class TrafficAnalyzer:
                 })
         for f in flows.values():
             if f["bytes"] > t["large_flow_min_mb"] * 1024 * 1024:
+                # 方向用主导方向（按真实包统计），与全量路径 _detect_anomalies 的
+                # LARGE_DATA_TRANSFER 同口径 —— 两者必须给出相同的 src_ip/dst_ip，
+                # 否则同一流量在两条路径下会报出相反方向。
+                _ds, _dsp, _dd, _ddp = _dom(f)
                 alerts.append({
                     "type": "LARGE_DATA_TRANSFER",
                     "severity": "MEDIUM",
-                    "src_ip": f["src_ip"], "dst_ip": f["dst_ip"],
+                    "src_ip": _ds, "dst_ip": _dd,
+                    "src_port": _dsp, "dst_port": _ddp,
                     "bytes_transferred": f["bytes"],
                     "detector": self.RULE_NAMES["LARGE_DATA_TRANSFER"],
                     "rule_threshold": {"large_flow_min_mb": t["large_flow_min_mb"]},
                     "time_window": f"{f['first']} ~ {f['last']}",
-                    "description": f"流 {f['src_ip']}:{f['src_port']} -> {f['dst_ip']}:{f['dst_port']} "
+                    "description": f"流 {_ds}:{_dsp} -> {_dd}:{_ddp} "
                                    f"传输了 {f['bytes']/1024/1024:.1f}MB 数据，需关注是否为数据渗出",
                 })
         for src, count in rst.items():
@@ -1104,16 +1158,34 @@ class TrafficAnalyzer:
         for flow in flows:
             threshold_bytes = t["large_flow_min_mb"] * 1024 * 1024
             if flow.total_bytes > threshold_bytes:
+                # 【方向与时间窗修复】原实现有兩个错误：
+                #  (a) time_window 用
+                #      [p for p in packets if p.src_ip == flow.src_ip and p.dst_ip == flow.dst_ip]
+                #      过滤 —— 而 flow.src_ip 只是"字典序较小"的端点，与真实包方向
+                #      无关；方向相反时匹配 0 个包 → time_window 恒为空（报告里显示
+                #      "—"，证据链缺失一项）。且该过滤是每条流一次 O(n) 全表扫描。
+                #  (b) description 用 flow.src_ip/src_port 打印方向 —— 会把源/目的
+                #      写反（实测 largeflow.pcap：真实为 10.0.0.2:40000 -> 10.0.0.1:21，
+                #      却打印成 10.0.0.1:21 -> 10.0.0.2:40000）。对取证工具而言
+                #      这会让分析师追错方向。
+                # 现改用 flow.dom_*（按真实包统计的主导方向）与流的起止时间，
+                # 既真实又免除全表扫描。
+                d_src_ip = flow.dom_src_ip or flow.src_ip
+                d_src_port = flow.dom_src_port or flow.src_port
+                d_dst_ip = flow.dom_dst_ip or flow.dst_ip
+                d_dst_port = flow.dom_dst_port or flow.dst_port
                 alerts.append({
                     "type": "LARGE_DATA_TRANSFER",
                     "severity": "MEDIUM",
-                    "src_ip": flow.src_ip,
-                    "dst_ip": flow.dst_ip,
+                    "src_ip": d_src_ip,
+                    "dst_ip": d_dst_ip,
+                    "src_port": d_src_port,
+                    "dst_port": d_dst_port,
                     "bytes_transferred": flow.total_bytes,
                     "detector": self.RULE_NAMES["LARGE_DATA_TRANSFER"],
                     "rule_threshold": {"large_flow_min_mb": t["large_flow_min_mb"]},
-                    "time_window": _time_window([p for p in packets if p.src_ip == flow.src_ip and p.dst_ip == flow.dst_ip][:10]),
-                    "description": f"流 {flow.src_ip}:{flow.src_port} -> {flow.dst_ip}:{flow.dst_port} "
+                    "time_window": f"{flow.start_time} ~ {flow.end_time}",
+                    "description": f"流 {d_src_ip}:{d_src_port} -> {d_dst_ip}:{d_dst_port} "
                                    f"传输了 {flow.total_bytes/1024/1024:.1f}MB 数据，需关注是否为数据渗出"
                 })
 

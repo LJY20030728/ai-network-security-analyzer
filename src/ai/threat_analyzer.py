@@ -349,8 +349,11 @@ class ThreatAnalyzer:
         
         # 最后加上当前用户问题
         messages.append({"role": "user", "content": user_prompt})
-        # v1.4.0：问答 max_tokens 降到 1024 提速（原默认 2048 在弱网/免费档模型下可慢到 30s+）
-        return self.llm.chat(messages, temperature=0.3, max_tokens=1024)
+        # v3.4.3：问答 max_tokens 从 1024 提升到 4096
+        # 原因：glm-4.5-air 等推理模型先输出 reasoning_content 思维链（可占2000+ token），
+        # 再输出正式回答。1024 预算下思维链就耗尽了，回答被截断甚至为空。
+        # 实测：1024→等24秒换34字；2048→1409字仍截断；4096→3866字正常结束。
+        return self.llm.chat(messages, temperature=0.3, max_tokens=4096)
 
     def chat_about_security_stream(self, question: str, context: Optional[str] = None, chat_history: Optional[list] = None):
         """
@@ -418,7 +421,8 @@ class ThreatAnalyzer:
         
         # 最后加上当前用户问题
         messages.append({"role": "user", "content": user_prompt})
-        for chunk in self.llm.chat_stream(messages, temperature=0.3, max_tokens=1024):
+        # v3.4.3：流式问答 max_tokens 从 1024 提升到 4096（适配推理模型）
+        for chunk in self.llm.chat_stream(messages, temperature=0.3, max_tokens=4096):
             yield {"stage": "answer", "chunk": chunk}
 
     def _format_rag_results(self, results: List[Dict]) -> str:

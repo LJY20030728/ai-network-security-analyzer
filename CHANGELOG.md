@@ -4,6 +4,38 @@
 
 ---
 
+## [3.4.3] - 2026-10-11
+
+**Hotfix：修复 glm-4.5-air 推理模型回答被截断的严重 bug（用户实测发现）**
+
+### Fixed（用户实测发现的功能缺陷）
+- **大模型问答回答被截断（最严重）**：glm-4.5-air 是推理模型，先输出思维链
+  （`reasoning_content`，可占 2000+ token），再输出正式回答。但代码中问答路径
+  `chat_about_security()` 和 `chat_about_security_stream()` 只给 `max_tokens=1024`，
+  思维链就耗尽了预算，回答被截断甚至为空。
+  - 实测（同一问题）：1024→等24秒换34字；2048→1409字仍截断；4096→3866字正常结束
+  - 修复：所有 LLM 调用路径 `max_tokens` 从 1024/2048 统一提升到 4096
+- **`reasoning_content` 完全未处理**：代码中 `grep reasoning_content` 零命中，
+  推理模型的思维链被静默丢弃。修复：在 `chat()` 中读取并记录 `reasoning_content` 长度，
+  用于诊断截断问题
+- **`finish_reason == "length"` 截断无任何检测或告警**：模型输出被 max_tokens 截断时，
+  代码没有任何日志或告警。修复：添加 `finish_reason` 检测，截断时输出 `logger.warning`
+  包含 max_tokens、实际输出、reasoning_content 长度、content 长度等诊断信息
+- **空内容被当作正常结果缓存**：推理模型思维链耗尽预算时 `content` 可能为空字符串，
+  原代码 `if content and ...` 看似过滤了空内容，但空字符串 `""` 不以
+  `[大模型调用失败]` 开头，且在某些路径下会被缓存。修复：显式检测空内容，
+  返回明确错误信息且**不缓存**，避免后续相同问题命中空缓存
+
+### Technical Details
+- 修改文件：`src/ai/llm_client.py`（chat/chat_stream 默认 max_tokens=4096，
+  添加 finish_reason 检测、reasoning_content 处理、空内容不缓存）
+- 修改文件：`src/ai/threat_analyzer.py`（chat_about_security 和
+  chat_about_security_stream 的 max_tokens 从 1024 改为 4096）
+- 回归测试：359 passed（3 failed 为 Windows .pytest_tmp 目录清理问题，与本次修改无关；
+  8 errors 为预存 sqlite3 问题）
+
+---
+
 ## [3.4.2] - 2026-10-10
 
 **i18n 中英文双语切换功能完善（Tab标签翻译 + 下拉框info翻译 + 语言选择器info翻译）**

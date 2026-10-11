@@ -120,13 +120,15 @@ class LLMClient:
             return len(self._cache)
 
     def chat(self, messages: List[Dict[str, str]], temperature: float = 0.3,
-             max_tokens: int = 2048,
+             max_tokens: int = 4096,
              no_cache: bool = False) -> str:
         """
         非流式对话（P1-3 带结果缓存：相同 prompt 秒回，二次分析不重复调用）
         :param messages: 消息列表 [{"role": "system/user/assistant", "content": "..."}]
         :param temperature: 温度，0=确定性，1=创造性
-        :param max_tokens: 最大生成token数
+        :param max_tokens: 最大生成token数（默认4096，适配 glm-4.5-air 等推理模型：
+            推理模型先输出 reasoning_content 思维链再输出正式回答，思维链可占2000+ token，
+            1024/2048 会导致回答被截断甚至为空）
         :param no_cache: True 时跳过读写缓存。多温度采样投票必须用它——
             否则"多次独立采样"会命中同一条缓存而塌缩成一次调用，
             投票结果恒为全体一致（agreement 恒 1.0），使该功能名存实亡。
@@ -152,10 +154,41 @@ class LLMClient:
                 temperature=temperature,
                 max_tokens=max_tokens,
             )
-            content = response.choices[0].message.content
+            choice = response.choices[0]
+            content = choice.message.content
+            finish_reason = getattr(choice, "finish_reason", "")
+            # 推理模型（如 glm-4.5-air）先输出思维链，再输出正式回答
+            reasoning_content = getattr(choice.message, "reasoning_content", None)
+
             logger.debug(f"LLM调用完成 | 输入tokens: {response.usage.prompt_tokens} | "
-                        f"输出tokens: {response.usage.completion_tokens}")
-            if content and not content.startswith("[大模型调用失败]") and not no_cache:
+                        f"输出tokens: {response.usage.completion_tokens} | "
+                        f"finish_reason: {finish_reason} | "
+                        f"reasoning_content长度: {len(reasoning_content) if reasoning_content else 0}")
+
+            # 【截断检测】finish_reason == "length" 表示 max_tokens 预算耗尽，回答被截断
+            if finish_reason == "length":
+                logger.warning(
+                    f"LLM回答被截断！finish_reason=length, max_tokens={max_tokens}, "
+                    f"实际输出={response.usage.completion_tokens}tokens, "
+                    f"reasoning_content={len(reasoning_content) if reasoning_content else 0}tokens, "
+                    f"content长度={len(content) if content else 0}"
+                )
+
+            # 【空内容检测】推理模型思维链吃掉全部预算时，content 可能为空
+            # 空内容不应缓存（否则后续相同问题会命中空缓存），应返回明确错误
+            if not content or not content.strip():
+                err_msg = (
+                    f"[大模型调用失败] 模型返回空内容。"
+                    f"finish_reason={finish_reason or 'unknown'}, "
+                    f"max_tokens={max_tokens}, "
+                    f"reasoning_content={len(reasoning_content) if reasoning_content else 0}tokens。"
+                    f"可能原因：推理模型思维链耗尽token预算，请增大max_tokens或换用非推理模型。"
+                )
+                logger.error(err_msg)
+                return err_msg
+
+            # 正常内容才缓存（空内容和失败信息不缓存）
+            if not content.startswith("[大模型调用失败]") and not no_cache:
                 self._cache_set(key, content)
             return content
         except Exception as e:
@@ -163,9 +196,10 @@ class LLMClient:
             return f"[大模型调用失败] {str(e)}"
 
     def chat_stream(self, messages: List[Dict[str, str]], temperature: float = 0.3,
-                    max_tokens: int = 2048) -> Generator[str, None, None]:
+                    max_tokens: int = 4096) -> Generator[str, None, None]:
         """
         流式对话（逐字输出）
+        :param max_tokens: 最大生成token数（默认4096，适配推理模型）
         :return: 生成器，逐块yield文本
         """
         if not self.is_available():

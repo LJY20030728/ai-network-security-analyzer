@@ -4,6 +4,50 @@
 
 ---
 
+## [3.4.4] - 2026-10-12 · 规则检测模块共享化 + UDP/QUIC 端到端测试
+
+### Refactored（消除双路径规则检测重复代码）
+
+**问题**：`TrafficAnalyzer` 有两条检测路径，各维护一份相同的 11 条规则逻辑：
+
+- `analyze_packets()` → `_detect_anomalies()`：全量分析路径
+- `analyze_stream()`：UI 主入口的流式分析路径
+
+两条路径的规则阈值、告警字段、description 文案完全相同，但代码各写一份（约 170 行重复）。任何规则修改都需要同步两处，极易遗漏（v3.4.0 就曾因只改一处导致 UDP/QUIC 在流式路径完全失效）。
+
+**修复**：
+
+- 新增 `src/analysis/rule_detector.py`：提取 `RuleAccumulatorState` dataclass（所有累加器状态）和 `RuleDetector` 类（11 条规则纯函数检测，输入累加器状态+阈值，输出 alerts 列表）
+- `_detect_anomalies()` 重构为：统一遍历 packets 统计累加器 → 构造 `RuleAccumulatorState` → 调用 `RuleDetector.detect(state)`
+- `analyze_stream()` 重构为：直接复用已有的流式累加器 → 构造 `RuleAccumulatorState` → 调用 `RuleDetector.detect(state)`
+- 消除约 170 行重复代码，规则逻辑现在只有唯一真相源
+
+### Added（UDP/QUIC 端到端测试）
+
+新增 `tests/test_e2e_udp_quic.py`，7 个端到端测试用 scapy 生成真实 PCAP 文件，走 `PcapParser → analyze_stream → run_analysis` 完整流水线：
+
+| 测试 | 验证内容 |
+|---|---|
+| `test_udp_flood_triggers_alert` | 100 个 UDP 包 → 触发 UDP_FLOOD_SUSPECTED |
+| `test_normal_udp_no_false_positive` | 少量正常 UDP → 不误报 |
+| `test_dns_amplification_triggers_alert` | DNS 响应/请求比 >5x → 触发 DNS_AMPLIFICATION_SUSPECTED |
+| `test_quic_connection_flood_triggers_alert` | 50 个不同源端口 QUIC 连接 → 触发 QUIC_CONNECTION_FLOOD |
+| `test_quic_initial_ratio_alert` | 100% QUIC 大包 → 触发 QUIC_INITIAL_RATIO_ANOMALY |
+| `test_report_contains_evidence_chain` | 告警包含 detector/time_window/rule_threshold 证据链 |
+| `test_outcome_has_case_id_and_sha256` | AnalysisOutcome 包含 case_id 和 source_sha256 |
+
+不同于 `test_stream_udp_quic.py`（合成 PacketInfo 直接调用 TrafficAnalyzer），端到端测试覆盖解析层与服务层，锁定"PCAP 文件 → 报告告警"全链路不变量。
+
+### Test Results
+
+- 双路径一致性测试：13/13 通过
+- 流式测试：17/17 通过
+- 大流量方向测试：7/7 通过
+- UDP/QUIC 端到端测试：7/7 通过
+- 全量回归：357 passed，3 failed（预存 `.pytest_tmp` 目录问题，与本次重构无关）
+
+---
+
 ## [3.4.3] - 2026-10-11 · 流式路径 UDP/QUIC 覆盖 + DNS 放大死规则
 
 ### Fixed（取证正确性：大流量告警源/目的写反 + 时间窗为空）

@@ -8,7 +8,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.141-green.svg)](https://fastapi.tiangolo.com/)
 [![Gradio](https://img.shields.io/badge/Gradio-6.x-orange.svg)](https://www.gradio.app/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-415%20passed-brightgreen.svg)](#测试)
+[![Tests](https://img.shields.io/badge/tests-364%20passed-brightgreen.svg)](#测试)
 [![CI](https://github.com/LJY20030728/ai-network-security-analyzer/actions/workflows/ci.yml/badge.svg)](https://github.com/LJY20030728/ai-network-security-analyzer/actions/workflows/ci.yml)
 
 **[中文版](#目录) | [English Version](README_EN.md)**
@@ -64,7 +64,7 @@
 
 | 引擎 | 类型 | 运行时角色 | 说明 |
 |------|------|------|------|
-| **规则引擎** | 阈值规则 | 活跃 | 9 类规则（**流式与全量两条路径规则集一致，由测试锁定**）（SYN 洪水 / 端口扫描 / DNS 隧道 / 大流量传输 / RST 风暴 / **UDP 洪水 / DNS 放大 / QUIC 连接风暴 / QUIC 长流异常**），阈值全部来自 `config/settings.py`，可 `.env` 覆盖 |
+| **规则引擎** | 阈值规则 | 活跃 | 11 类规则（**v3.4.4 提取为共享 `rule_detector.py`，流式与全量两条路径调用同一模块，消除重复代码**）（SYN 洪水 / 端口扫描 / DNS 隧道 / 大流量传输 / RST 风暴 / **UDP 洪水 / DNS 放大 / QUIC 连接风暴 / QUIC 长流异常 / QUIC 初始包比例 / QUIC 未知版本**），阈值全部来自 `config/settings.py`，可 `.env` 覆盖 |
 | **时序基线** | EWMA + 中位数/MAD | 活跃 | 4 维度联合（窗口包数 / 字节数 / SYN 数 / 目的端口数），支持漂移检测与多维度联合告警。**预置默认基线**，首次开箱即用 |
 | **孤立森林** | 无监督异常检测 | 活跃（**默认开启**） | 与基线同窗口输入，捕获维度间耦合异常。v3.4.0 修复 `to_dict()` 不输出异常分的 bug，孤立森林特征从 3 维扩展到 6 维 |
 
@@ -488,8 +488,8 @@ docker compose up -d --build
 
 | 指标 | 数值 |
 |------|------|
-| 测试结果 | **415 passed / 0 skipped / 0 failed** |
-| 测试文件数 | 26 个 |
+| 测试结果 | **364 passed**（含 7 个新增 UDP/QUIC 端到端测试；3 个预存 `.pytest_tmp` 环境问题与本次重构无关） |
+| 测试文件数 | 27 个 |
 | 覆盖模块 | 算法检测 / API 路由 / 存储 / 安全 / 服务层 / 工具 / 版本一致性 |
 
 ---
@@ -573,6 +573,7 @@ ai-network-security-analyzer/
 │   │   └── analysis_service.py
 │   ├── analysis/              # 分析引擎（三引擎 + Stacking 融合）
 │   │   ├── flow_extractor.py  # 流提取 + 三引擎集成 + Stacking 融合
+│   │   ├── rule_detector.py   # 共享规则检测模块（11类规则，流式/全量共用）
 │   │   ├── stacking_fusion.py # 三引擎 Stacking 融合器（含引擎顺序校验与固定权重回退）
 │   │   ├── baseline.py        # EWMA 时序基线 + 多维度联合检测
 │   │   ├── stl_decomposer.py  # 零依赖轻量级 STL 时序分解
@@ -618,9 +619,11 @@ ai-network-security-analyzer/
 │   ├── db/                    # SQLite 数据库
 │   ├── chroma_db/             # ChromaDB 向量库
 │   └── eval_perf/             # 评测结果
-├── tests/                     # pytest 测试（408 个用例 / 24 个文件）
+├── tests/                     # pytest 测试（364 个用例 / 27 个文件）
 │   ├── test_rules.py          # 规则引擎与误报控制
 │   ├── test_streaming.py      # 流式解析
+│   ├── test_stream_udp_quic.py # UDP/QUIC 双路径一致性回归
+│   ├── test_e2e_udp_quic.py   # UDP/QUIC 端到端测试（PCAP→报告全链路）
 │   ├── test_isolation_*.py    # 孤立森林语义与 13 维特征
 │   ├── test_security_hardening.py  # 安全四项回归（鉴权/SSRF/模型校验）
 │   ├── test_functional_fixes.py    # 投票/相似度/查询改写/取证趋势

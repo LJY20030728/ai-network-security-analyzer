@@ -607,175 +607,23 @@ class TrafficAnalyzer:
             dom = max(dirs.items(), key=lambda kv: (kv[1]["count"], kv[0]))[0]
             return dom
 
-        # ---------- 规则告警组装（字段与 _detect_anomalies 完全一致） ----------
-        alerts = []
-        for src, count in syn_sent.items():
-            net = count - synack_recv.get(src, 0)
-            if net >= t["syn_flood_min_count"]:
-                alerts.append({
-                    "type": "SYN_FLOOD_SUSPECTED",
-                    "severity": "HIGH" if net > t["syn_flood_high_count"] else "MEDIUM",
-                    "src_ip": src, "syn_count": count,
-                    "syn_ack_received": synack_recv.get(src, 0),
-                    "unanswered_syn": net,
-                    "detector": self.RULE_NAMES["SYN_FLOOD_SUSPECTED"],
-                    "rule_threshold": {"syn_flood_min_count": t["syn_flood_min_count"]},
-                    "time_window": _tw(syn_ts.get(src, [])),
-                    "description": f"源IP {src} 发出 {count} 个SYN，仅收到 {synack_recv.get(src, 0)} 个SYN-ACK，"
-                                   f"未完成握手 {net} 个，疑似SYN洪水攻击",
-                })
-        for src, ports in ports_by_src.items():
-            if len(ports) >= t["port_scan_min_ports"]:
-                alerts.append({
-                    "type": "PORT_SCAN_SUSPECTED",
-                    "severity": "HIGH" if len(ports) > t["port_scan_high_ports"] else "MEDIUM",
-                    "src_ip": src, "unique_ports_scanned": len(ports),
-                    "sample_ports": sorted(list(ports))[:20],
-                    "detector": self.RULE_NAMES["PORT_SCAN_SUSPECTED"],
-                    "rule_threshold": {"port_scan_min_ports": t["port_scan_min_ports"]},
-                    "time_window": _tw(port_ts.get(src, [])),
-                    "description": f"源IP {src} 访问了 {len(ports)} 个不同端口，疑似端口扫描",
-                })
-        for src, count in dns_long.items():
-            if count >= t["dns_tunnel_min_count"]:
-                alerts.append({
-                    "type": "DNS_TUNNEL_SUSPECTED",
-                    "severity": "HIGH" if count > t["dns_tunnel_high_count"] else "MEDIUM",
-                    "src_ip": src, "suspicious_query_count": count,
-                    "detector": self.RULE_NAMES["DNS_TUNNEL_SUSPECTED"],
-                    "rule_threshold": {"dns_tunnel_max_query_len": t["dns_tunnel_max_query_len"]},
-                    "time_window": _tw(dns_ts.get(src, [])),
-                    "description": f"源IP {src} 发送了 {count} 个超长DNS查询（>{t['dns_tunnel_max_query_len']}字符），疑似DNS隧道",
-                })
-        for f in flows.values():
-            if f["bytes"] > t["large_flow_min_mb"] * 1024 * 1024:
-                # 方向用主导方向（按真实包统计），与全量路径 _detect_anomalies 的
-                # LARGE_DATA_TRANSFER 同口径 —— 两者必须给出相同的 src_ip/dst_ip，
-                # 否则同一流量在两条路径下会报出相反方向。
-                _ds, _dsp, _dd, _ddp = _dom(f)
-                alerts.append({
-                    "type": "LARGE_DATA_TRANSFER",
-                    "severity": "MEDIUM",
-                    "src_ip": _ds, "dst_ip": _dd,
-                    "src_port": _dsp, "dst_port": _ddp,
-                    "bytes_transferred": f["bytes"],
-                    "detector": self.RULE_NAMES["LARGE_DATA_TRANSFER"],
-                    "rule_threshold": {"large_flow_min_mb": t["large_flow_min_mb"]},
-                    "time_window": f"{f['first']} ~ {f['last']}",
-                    "description": f"流 {_ds}:{_dsp} -> {_dd}:{_ddp} "
-                                   f"传输了 {f['bytes']/1024/1024:.1f}MB 数据，需关注是否为数据渗出",
-                })
-        for src, count in rst.items():
-            if count >= t["rst_storm_min_count"]:
-                alerts.append({
-                    "type": "RST_STORM",
-                    "severity": "LOW",
-                    "src_ip": src, "rst_count": count,
-                    "detector": self.RULE_NAMES["RST_STORM"],
-                    "rule_threshold": {"rst_storm_min_count": t["rst_storm_min_count"]},
-                    "time_window": _tw(rst_ts.get(src, [])),
-                    "description": f"源IP {src} 发送了 {count} 个RST包，可能是扫描或异常连接",
-                })
-
-        # ---------- v3.4.3 新增：UDP / DNS放大 / QUIC 规则 ----------
-        # 以下 6 条规则此前只存在于 _detect_anomalies（analyze_packets 路径），
-        # 而 UI 实际调用 analyze_stream —— 导致 UDP/QUIC 攻击在运行时完全漏检。
-        # 现按"同阈值、同告警字段"补入流式路径；detector 字符串与
-        # _detect_anomalies 中的硬编码值保持逐字一致（注意它那里没用 RULE_NAMES）。
-
-        # 规则 6：UDP Flood
-        for dst, count in udp_by_dst.items():
-            if count >= t["udp_flood_min_packets"]:
-                alerts.append({
-                    "type": "UDP_FLOOD_SUSPECTED",
-                    "severity": "HIGH" if count > t["udp_flood_high_packets"] else "MEDIUM",
-                    "dst_ip": dst,
-                    "udp_packet_count": count,
-                    "detector": "rule-based-udp-flood",
-                    "rule_threshold": {"udp_flood_min_packets": t["udp_flood_min_packets"]},
-                    "time_window": _tw(udp_ts.get(dst, [])),
-                    "description": f"目标IP {dst} 收到 {count} 个UDP包，疑似UDP洪水攻击"
-                })
-
-        # 规则 7：DNS Amplification
-        for target, resp_bytes in dns_resp_bytes.items():
-            req_bytes = dns_req_bytes.get(target, 1)
-            ratio = resp_bytes / req_bytes if req_bytes > 0 else float(resp_bytes)
-            if (ratio >= t["dns_amp_min_ratio"]
-                    and dns_resp_count[target] >= t["dns_amp_min_responses"]):
-                alerts.append({
-                    "type": "DNS_AMPLIFICATION_SUSPECTED",
-                    "severity": "HIGH",
-                    "target_ip": target,
-                    "amplification_ratio": round(ratio, 2),
-                    "response_bytes": resp_bytes,
-                    "request_bytes": req_bytes,
-                    "response_count": dns_resp_count[target],
-                    "detector": "rule-based-dns-amplification",
-                    "rule_threshold": {"dns_amp_min_ratio": t["dns_amp_min_ratio"]},
-                    "time_window": _tw(dns_resp_ts.get(target, [])),
-                    "description": f"目标IP {target} DNS响应/请求字节比={ratio:.1f}x，"
-                                   f"响应{dns_resp_count[target]}个包，疑似DNS放大攻击"
-                })
-
-        # 规则 8：QUIC/HTTP3 异常（4 条子规则）
-        if quic_total:
-            # 8a. QUIC 连接风暴：大量不同源端口（每个源端口≈一条 QUIC 连接）
-            for src, ports in quic_src_ports.items():
-                if len(ports) >= t["quic_flood_min_connections"]:
-                    alerts.append({
-                        "type": "QUIC_CONNECTION_FLOOD",
-                        "severity": "HIGH",
-                        "src_ip": src,
-                        "unique_quic_connections": len(ports),
-                        "detector": "rule-based-quic-flood",
-                        "rule_threshold": {"quic_flood_min_connections": t["quic_flood_min_connections"]},
-                        "time_window": _tw(quic_src_ts.get(src, [])),
-                        "description": f"源IP {src} 发起 {len(ports)} 条不同QUIC连接（源端口），"
-                                       f"疑似QUIC连接洪水"
-                    })
-
-            # 8b. QUIC 长流异常：单条流包数过多（可能是加密隧道/数据外泄）
-            for flow_key, count in quic_flows.items():
-                if count >= t["quic_long_flow_min_packets"]:
-                    alerts.append({
-                        "type": "QUIC_LONG_FLOW_ANOMALY",
-                        "severity": "MEDIUM",
-                        "flow": flow_key,
-                        "packet_count": count,
-                        "detector": "rule-based-quic-long-flow",
-                        "rule_threshold": {"quic_long_flow_min_packets": t["quic_long_flow_min_packets"]},
-                        "time_window": _tw(quic_flow_ts.get(flow_key, [])),
-                        "description": f"QUIC流 {flow_key} 持续 {count} 个包，"
-                                       f"疑似加密隧道或数据外泄"
-                    })
-
-            # 8c. QUIC 初始包比例异常（初始包通常 >1200 字节；正常占比 <5%）
-            quic_initial_ratio = quic_large / quic_total if quic_total else 0
-            if quic_initial_ratio >= t["quic_initial_ratio_threshold"]:
-                alerts.append({
-                    "type": "QUIC_INITIAL_RATIO_ANOMALY",
-                    "severity": "MEDIUM",
-                    "large_packet_ratio": round(quic_initial_ratio, 3),
-                    "total_quic_packets": quic_total,
-                    "large_packet_count": quic_large,
-                    "detector": "rule-based-quic-initial-ratio",
-                    "rule_threshold": {"quic_initial_ratio_threshold": t["quic_initial_ratio_threshold"]},
-                    "time_window": _tw(quic_all_ts.get("_", [])),
-                    "description": f"QUIC大包（疑似初始包）占比={quic_initial_ratio:.1%}，"
-                                   f"正常应<5%，疑似QUIC隧道或异常握手"
-                })
-
-            # 8d. QUIC 版本号异常
-            if quic_unknown_versions:
-                alerts.append({
-                    "type": "QUIC_UNKNOWN_VERSION",
-                    "severity": "LOW",
-                    "unknown_versions": sorted(quic_unknown_versions),
-                    "detector": "rule-based-quic-version",
-                    "description": f"检测到未知QUIC版本号: {', '.join(sorted(quic_unknown_versions))}，"
-                                   f"可能是实验性协议或异常客户端"
-                })
+        # ---------- 规则告警组装（调用共享 RuleDetector，消除双路径不一致） ----------
+        from src.analysis.rule_detector import RuleDetector, RuleAccumulatorState
+        state = RuleAccumulatorState(
+            syn_sent=syn_sent, synack_recv=synack_recv, syn_ts=dict(syn_ts),
+            ports_by_src=ports_by_src, port_ts=dict(port_ts),
+            dns_long=dns_long, dns_ts=dict(dns_ts),
+            rst=rst, rst_ts=dict(rst_ts), flows=flows,
+            udp_by_dst=udp_by_dst, udp_ts=dict(udp_ts),
+            dns_req_bytes=dns_req_bytes, dns_resp_bytes=dns_resp_bytes,
+            dns_resp_count=dns_resp_count, dns_resp_ts=dict(dns_resp_ts),
+            quic_src_ports=quic_src_ports, quic_src_ts=dict(quic_src_ts),
+            quic_flows=quic_flows, quic_flow_ts=dict(quic_flow_ts),
+            quic_large=quic_large, quic_total=quic_total,
+            quic_all_ts=quic_all_ts.get("_", []),
+            quic_unknown_versions=quic_unknown_versions,
+        )
+        alerts = RuleDetector(t).detect(state)
 
         anomalies = {
             "total_alerts": len(alerts),
@@ -1065,293 +913,145 @@ class TrafficAnalyzer:
     def _detect_anomalies(self, packets: List[PacketInfo], flows: List[NetworkFlow]) -> Dict[str, Any]:
         """
         基于规则的异常检测（阈值全部参数化，支持 .env 覆盖）
-        检测：SYN flood、端口扫描、DNS隧道、异常大流量、RST风暴
+        检测：SYN flood、端口扫描、DNS隧道、异常大流量、RST风暴、UDP flood、DNS放大、QUIC异常
         告警结构含证据链字段：detector / time_window / rule_threshold
+
+        v3.4.4 重构：累加器统计与规则检测分离，规则检测调用共享 RuleDetector，
+        消除 analyze_packets 与 analyze_stream 双路径维护不一致风险。
         """
+        from src.analysis.rule_detector import RuleDetector, RuleAccumulatorState
         t = self._t
-        alerts = []
 
-        def _time_window(pkts):
-            if not pkts:
-                return ""
-            return f"{pkts[0].timestamp} ~ {pkts[-1].timestamp}"
+        # ---------- 第一遍：统一统计所有累加器（只存计数 + 首末时间戳） ----------
+        def _push(ts_map, key, ts):
+            if not ts_map.get(key):
+                ts_map[key] = [ts, ts]
+            else:
+                ts_map[key][1] = ts
 
-        # 1. SYN Flood检测（状态化握手校验）
-        # 特征：发出的SYN 远多于 收到的SYN-ACK（握手无法完成）
-        # net_syn = 发出SYN数 - 作为目标收到的SYN-ACK数，避免把正常浏览握手误判
         syn_sent: Dict[str, int] = defaultdict(int)
         synack_recv: Dict[str, int] = defaultdict(int)
-        syn_packets: Dict[str, List] = defaultdict(list)
+        syn_ts: Dict[str, list] = {}
+        ports_by_src: Dict[str, set] = defaultdict(set)
+        port_ts: Dict[str, list] = {}
+        dns_long: Dict[str, int] = defaultdict(int)
+        dns_ts: Dict[str, list] = {}
+        rst: Dict[str, int] = defaultdict(int)
+        rst_ts: Dict[str, list] = {}
+        udp_by_dst: Dict[str, int] = defaultdict(int)
+        udp_ts: Dict[str, list] = {}
+        dns_req_bytes: Dict[str, int] = defaultdict(int)
+        dns_resp_bytes: Dict[str, int] = defaultdict(int)
+        dns_resp_count: Dict[str, int] = defaultdict(int)
+        dns_resp_ts: Dict[str, list] = {}
+        quic_src_ports: Dict[str, set] = defaultdict(set)
+        quic_src_ts: Dict[str, list] = {}
+        quic_flows: Dict[str, int] = defaultdict(int)
+        quic_flow_ts: Dict[str, list] = {}
+        quic_total = 0
+        quic_large = 0
+        quic_all_ts: list = []
+        quic_unknown_versions: Set[str] = set()
+
         for p in packets:
+            # SYN Flood（状态化握手校验）
             if p.protocol == "TCP" and "SYN" in p.flags:
                 if "ACK" in p.flags:
-                    # SYN-ACK（响应方向）：其 dst_ip 是发起方
                     synack_recv[p.dst_ip] += 1
                 else:
                     syn_sent[p.src_ip] += 1
-                    syn_packets[p.src_ip].append(p)
-
-        for src, count in syn_sent.items():
-            net_syn = count - synack_recv.get(src, 0)
-            if net_syn >= t["syn_flood_min_count"]:
-                alerts.append({
-                    "type": "SYN_FLOOD_SUSPECTED",
-                    "severity": "HIGH" if net_syn > t["syn_flood_high_count"] else "MEDIUM",
-                    "src_ip": src,
-                    "syn_count": count,
-                    "syn_ack_received": synack_recv.get(src, 0),
-                    "unanswered_syn": net_syn,
-                    "detector": self.RULE_NAMES["SYN_FLOOD_SUSPECTED"],
-                    "rule_threshold": {"syn_flood_min_count": t["syn_flood_min_count"]},
-                    "time_window": _time_window(syn_packets[src]),
-                    "description": f"源IP {src} 发出 {count} 个SYN，仅收到 {synack_recv.get(src, 0)} 个SYN-ACK，"
-                                   f"未完成握手 {net_syn} 个，疑似SYN洪水攻击"
-                })
-
-        # 2. 端口扫描检测（方向化：只统计发起方向的 SYN 探测）
-        # 仅对 TCP SYN（无ACK）探测统计目的端口，响应方向的包（SA/PA等）不计数
-        ports_by_src = defaultdict(set)
-        port_packets: Dict[str, List] = defaultdict(list)
-        for p in packets:
-            if p.protocol == "TCP" and "SYN" in p.flags and "ACK" not in p.flags and p.src_ip and p.dst_port > 0:
+                    _push(syn_ts, p.src_ip, p.timestamp)
+            # 端口扫描（方向化：只统计发起方向的 SYN 探测）
+            if (p.protocol == "TCP" and "SYN" in p.flags and "ACK" not in p.flags
+                    and p.src_ip and p.dst_port > 0):
                 ports_by_src[p.src_ip].add(p.dst_port)
-                port_packets[p.src_ip].append(p)
-
-        for src, ports in ports_by_src.items():
-            if len(ports) >= t["port_scan_min_ports"]:
-                alerts.append({
-                    "type": "PORT_SCAN_SUSPECTED",
-                    "severity": "HIGH" if len(ports) > t["port_scan_high_ports"] else "MEDIUM",
-                    "src_ip": src,
-                    "unique_ports_scanned": len(ports),
-                    "sample_ports": sorted(list(ports))[:20],
-                    "detector": self.RULE_NAMES["PORT_SCAN_SUSPECTED"],
-                    "rule_threshold": {"port_scan_min_ports": t["port_scan_min_ports"]},
-                    "time_window": _time_window(port_packets[src]),
-                    "description": f"源IP {src} 访问了 {len(ports)} 个不同端口，疑似端口扫描"
-                })
-
-        # 3. DNS隧道检测
-        dns_long_queries = defaultdict(int)
-        dns_packets: Dict[str, List] = defaultdict(list)
-        for p in packets:
+                _push(port_ts, p.src_ip, p.timestamp)
+            # DNS 隧道
             if p.protocol == "DNS" and p.dns_query:
-                query = p.dns_query.rstrip('.')
-                if len(query) > t["dns_tunnel_max_query_len"]:
-                    dns_long_queries[p.src_ip] += 1
-                    dns_packets[p.src_ip].append(p)
-
-        for src, count in dns_long_queries.items():
-            if count >= t["dns_tunnel_min_count"]:
-                alerts.append({
-                    "type": "DNS_TUNNEL_SUSPECTED",
-                    "severity": "HIGH" if count > t["dns_tunnel_high_count"] else "MEDIUM",
-                    "src_ip": src,
-                    "suspicious_query_count": count,
-                    "detector": self.RULE_NAMES["DNS_TUNNEL_SUSPECTED"],
-                    "rule_threshold": {"dns_tunnel_max_query_len": t["dns_tunnel_max_query_len"]},
-                    "time_window": _time_window(dns_packets[src]),
-                    "description": f"源IP {src} 发送了 {count} 个超长DNS查询（>{t['dns_tunnel_max_query_len']}字符），疑似DNS隧道"
-                })
-
-        # 4. 异常大流量流检测
-        for flow in flows:
-            threshold_bytes = t["large_flow_min_mb"] * 1024 * 1024
-            if flow.total_bytes > threshold_bytes:
-                # 【方向与时间窗修复】原实现有兩个错误：
-                #  (a) time_window 用
-                #      [p for p in packets if p.src_ip == flow.src_ip and p.dst_ip == flow.dst_ip]
-                #      过滤 —— 而 flow.src_ip 只是"字典序较小"的端点，与真实包方向
-                #      无关；方向相反时匹配 0 个包 → time_window 恒为空（报告里显示
-                #      "—"，证据链缺失一项）。且该过滤是每条流一次 O(n) 全表扫描。
-                #  (b) description 用 flow.src_ip/src_port 打印方向 —— 会把源/目的
-                #      写反（实测 largeflow.pcap：真实为 10.0.0.2:40000 -> 10.0.0.1:21，
-                #      却打印成 10.0.0.1:21 -> 10.0.0.2:40000）。对取证工具而言
-                #      这会让分析师追错方向。
-                # 现改用 flow.dom_*（按真实包统计的主导方向）与流的起止时间，
-                # 既真实又免除全表扫描。
-                d_src_ip = flow.dom_src_ip or flow.src_ip
-                d_src_port = flow.dom_src_port or flow.src_port
-                d_dst_ip = flow.dom_dst_ip or flow.dst_ip
-                d_dst_port = flow.dom_dst_port or flow.dst_port
-                alerts.append({
-                    "type": "LARGE_DATA_TRANSFER",
-                    "severity": "MEDIUM",
-                    "src_ip": d_src_ip,
-                    "dst_ip": d_dst_ip,
-                    "src_port": d_src_port,
-                    "dst_port": d_dst_port,
-                    "bytes_transferred": flow.total_bytes,
-                    "detector": self.RULE_NAMES["LARGE_DATA_TRANSFER"],
-                    "rule_threshold": {"large_flow_min_mb": t["large_flow_min_mb"]},
-                    "time_window": f"{flow.start_time} ~ {flow.end_time}",
-                    "description": f"流 {d_src_ip}:{d_src_port} -> {d_dst_ip}:{d_dst_port} "
-                                   f"传输了 {flow.total_bytes/1024/1024:.1f}MB 数据，需关注是否为数据渗出"
-                })
-
-        # 5. RST风暴检测（可能是端口扫描或拒绝服务）
-        rst_by_src = defaultdict(int)
-        rst_packets: Dict[str, List] = defaultdict(list)
-        for p in packets:
+                q = p.dns_query.rstrip('.')
+                if len(q) > t["dns_tunnel_max_query_len"]:
+                    dns_long[p.src_ip] += 1
+                    _push(dns_ts, p.src_ip, p.timestamp)
+            # RST 风暴
             if p.protocol == "TCP" and "RST" in p.flags:
-                rst_by_src[p.src_ip] += 1
-                rst_packets[p.src_ip].append(p)
-
-        for src, count in rst_by_src.items():
-            if count >= t["rst_storm_min_count"]:
-                alerts.append({
-                    "type": "RST_STORM",
-                    "severity": "LOW",
-                    "src_ip": src,
-                    "rst_count": count,
-                    "detector": self.RULE_NAMES["RST_STORM"],
-                    "rule_threshold": {"rst_storm_min_count": t["rst_storm_min_count"]},
-                    "time_window": _time_window(rst_packets[src]),
-                    "description": f"源IP {src} 发送了 {count} 个RST包，可能是扫描或异常连接"
-                })
-
-        # 6. UDP Flood 检测（v3.4.0 新增）
-        udp_by_dst = defaultdict(int)
-        udp_packets_by_dst: Dict[str, List] = defaultdict(list)
-        for p in packets:
+                rst[p.src_ip] += 1
+                _push(rst_ts, p.src_ip, p.timestamp)
+            # UDP Flood
             if p.protocol == "UDP":
                 udp_by_dst[p.dst_ip] += 1
-                udp_packets_by_dst[p.dst_ip].append(p)
-        for dst, count in udp_by_dst.items():
-            if count >= t["udp_flood_min_packets"]:
-                alerts.append({
-                    "type": "UDP_FLOOD_SUSPECTED",
-                    "severity": "HIGH" if count > t["udp_flood_high_packets"] else "MEDIUM",
-                    "dst_ip": dst,
-                    "udp_packet_count": count,
-                    "detector": "rule-based-udp-flood",
-                    "rule_threshold": {"udp_flood_min_packets": t["udp_flood_min_packets"]},
-                    "time_window": _time_window(udp_packets_by_dst[dst]),
-                    "description": f"目标IP {dst} 收到 {count} 个UDP包，疑似UDP洪水攻击"
-                })
-
-        # 7. DNS Amplification 检测（v3.4.0 新增）
-        # 特征：DNS响应包字节数远大于请求包（放大攻击）
-        dns_req_bytes = defaultdict(int)
-        dns_resp_bytes = defaultdict(int)
-        dns_resp_count = defaultdict(int)
-        dns_pkts_by_src: Dict[str, List] = defaultdict(list)
-        for p in packets:
+                _push(udp_ts, p.dst_ip, p.timestamp)
+            # DNS Amplification（响应优先判断）
             if p.protocol == "DNS":
-                # 【顺序至关重要】响应优先：解析器对响应包同时填 dns_query 与
-                # dns_response（qd 段在响应里同样存在）。原实现先判 dns_query，
-                # 使响应一律归入"请求"，dns_resp_bytes/dns_resp_count 恒为空，
-                # 本规则在任何真实 PCAP 上永不触发（实测确认的死规则）。
-                if p.dns_response:  # 响应（含应答记录）
+                if p.dns_response:
                     dns_resp_bytes[p.dst_ip] += p.length
                     dns_resp_count[p.dst_ip] += 1
-                    dns_pkts_by_src[p.dst_ip].append(p)
-                elif p.dns_query:  # 请求（无应答记录）
+                    _push(dns_resp_ts, p.dst_ip, p.timestamp)
+                elif p.dns_query:
                     dns_req_bytes[p.src_ip] += p.length
-        for target, resp_bytes in dns_resp_bytes.items():
-            req_bytes = dns_req_bytes.get(target, 1)
-            ratio = resp_bytes / req_bytes if req_bytes > 0 else float(resp_bytes)
-            if (ratio >= t["dns_amp_min_ratio"]
-                    and dns_resp_count[target] >= t["dns_amp_min_responses"]):
-                alerts.append({
-                    "type": "DNS_AMPLIFICATION_SUSPECTED",
-                    "severity": "HIGH",
-                    "target_ip": target,
-                    "amplification_ratio": round(ratio, 2),
-                    "response_bytes": resp_bytes,
-                    "request_bytes": req_bytes,
-                    "response_count": dns_resp_count[target],
-                    "detector": "rule-based-dns-amplification",
-                    "rule_threshold": {"dns_amp_min_ratio": t["dns_amp_min_ratio"]},
-                    "time_window": _time_window(dns_pkts_by_src[target]),
-                    "description": f"目标IP {target} DNS响应/请求字节比={ratio:.1f}x，"
-                                   f"响应{dns_resp_count[target]}个包，疑似DNS放大攻击"
-                })
-
-        # 8. QUIC/HTTP3 异常检测（v3.4.0 新增，完整检测）
-        quic_packets = [p for p in packets if p.protocol == "UDP" and p.dst_port == 443]
-        if quic_packets:
-            # 8a. QUIC 连接风暴：大量不同源端口（每个源端口≈一条QUIC连接）
-            quic_src_ports = defaultdict(set)
-            quic_pkts_by_src: Dict[str, List] = defaultdict(list)
-            for p in quic_packets:
+            # QUIC/HTTP3（UDP/443）
+            if p.protocol == "UDP" and p.dst_port == 443:
+                quic_total += 1
+                if p.length > 1200:
+                    quic_large += 1
                 quic_src_ports[p.src_ip].add(p.src_port)
-                quic_pkts_by_src[p.src_ip].append(p)
-            for src, ports in quic_src_ports.items():
-                if len(ports) >= t["quic_flood_min_connections"]:
-                    alerts.append({
-                        "type": "QUIC_CONNECTION_FLOOD",
-                        "severity": "HIGH",
-                        "src_ip": src,
-                        "unique_quic_connections": len(ports),
-                        "detector": "rule-based-quic-flood",
-                        "rule_threshold": {"quic_flood_min_connections": t["quic_flood_min_connections"]},
-                        "time_window": _time_window(quic_pkts_by_src[src]),
-                        "description": f"源IP {src} 发起 {len(ports)} 条不同QUIC连接（源端口），"
-                                       f"疑似QUIC连接洪水"
-                    })
+                _push(quic_src_ts, p.src_ip, p.timestamp)
+                _qk = f"{p.src_ip}:{p.src_port}->{p.dst_ip}:{p.dst_port}"
+                quic_flows[_qk] += 1
+                _push(quic_flow_ts, _qk, p.timestamp)
+                if not quic_all_ts:
+                    quic_all_ts = [p.timestamp, p.timestamp]
+                else:
+                    quic_all_ts[1] = p.timestamp
+                # 未知 QUIC 版本（从 raw_summary 解析）
+                if t.get("quic_unknown_version_alert", True) and p.raw_summary \
+                        and "QUIC" in p.raw_summary:
+                    import re as _re
+                    _m = _re.search(r'Version[=:\s]+0x([0-9a-fA-F]+)', p.raw_summary)
+                    if _m:
+                        _ver = _m.group(1).lower()
+                        _known = {"00000001", "ff000020", "ff000021", "6b3343cf", "ff00001d"}
+                        if _ver not in _known and _ver != "00000000":
+                            quic_unknown_versions.add(_ver)
 
-            # 8b. QUIC 长流异常：单条流包数过多（可能是加密隧道/数据外泄）
-            quic_flows = defaultdict(int)
-            quic_flow_pkts: Dict[str, List] = defaultdict(list)
-            for p in quic_packets:
-                flow_key = f"{p.src_ip}:{p.src_port}->{p.dst_ip}:{p.dst_port}"
-                quic_flows[flow_key] += 1
-                quic_flow_pkts[flow_key].append(p)
-            for flow_key, count in quic_flows.items():
-                if count >= t["quic_long_flow_min_packets"]:
-                    alerts.append({
-                        "type": "QUIC_LONG_FLOW_ANOMALY",
-                        "severity": "MEDIUM",
-                        "flow": flow_key,
-                        "packet_count": count,
-                        "detector": "rule-based-quic-long-flow",
-                        "rule_threshold": {"quic_long_flow_min_packets": t["quic_long_flow_min_packets"]},
-                        "time_window": _time_window(quic_flow_pkts[flow_key]),
-                        "description": f"QUIC流 {flow_key} 持续 {count} 个包，"
-                                       f"疑似加密隧道或数据外泄"
-                    })
+        # ---------- 将 List[NetworkFlow] 转换为流式字典格式（供 RuleDetector 使用） ----------
+        flows_dict: Dict[tuple, dict] = {}
+        for flow in flows:
+            ep1 = f"{flow.src_ip}:{flow.src_port}"
+            ep2 = f"{flow.dst_ip}:{flow.dst_port}"
+            lo, hi = sorted([ep1, ep2])
+            key = (flow.protocol, lo, hi)
+            # 主导方向：优先用 dom_*，否则用字典序较小的端点
+            d_src = flow.dom_src_ip or flow.src_ip
+            d_sport = flow.dom_src_port or flow.src_port
+            d_dst = flow.dom_dst_ip or flow.dst_ip
+            d_dport = flow.dom_dst_port or flow.dst_port
+            flows_dict[key] = {
+                "src_ip": flow.src_ip, "src_port": flow.src_port,
+                "dst_ip": flow.dst_ip, "dst_port": flow.dst_port,
+                "protocol": flow.protocol,
+                "bytes": flow.total_bytes,
+                "first": flow.start_time, "last": flow.end_time,
+                # dirs 用于主导方向计算：key=(src_ip,src_port,dst_ip,dst_port), value={bytes,count}
+                "dirs": {(d_src, d_sport, d_dst, d_dport): {
+                    "bytes": flow.total_bytes, "count": flow.packet_count}},
+            }
 
-            # 8c. QUIC 初始包比例异常（初始包通常较大，>1200字节；正常连接初始包占比<5%）
-            quic_large_pkts = sum(1 for p in quic_packets if p.length > 1200)
-            quic_initial_ratio = quic_large_pkts / len(quic_packets) if quic_packets else 0
-            if quic_initial_ratio >= t["quic_initial_ratio_threshold"]:
-                alerts.append({
-                    "type": "QUIC_INITIAL_RATIO_ANOMALY",
-                    "severity": "MEDIUM",
-                    "large_packet_ratio": round(quic_initial_ratio, 3),
-                    "total_quic_packets": len(quic_packets),
-                    "large_packet_count": quic_large_pkts,
-                    "detector": "rule-based-quic-initial-ratio",
-                    "rule_threshold": {"quic_initial_ratio_threshold": t["quic_initial_ratio_threshold"]},
-                    "time_window": _time_window(quic_packets),
-                    "description": f"QUIC大包（疑似初始包）占比={quic_initial_ratio:.1%}，"
-                                   f"正常应<5%，疑似QUIC隧道或异常握手"
-                })
-
-            # 8d. QUIC 版本号异常（尝试从 raw_summary 解析未知版本）
-            if t.get("quic_unknown_version_alert", True):
-                unknown_versions = set()
-                for p in quic_packets:
-                    if p.raw_summary and "QUIC" in p.raw_summary:
-                        # 尝试提取版本号（raw_summary 可能包含 "Version=0x..."）
-                        import re
-                        m = re.search(r'Version[=:\s]+0x([0-9a-fA-F]+)', p.raw_summary)
-                        if m:
-                            ver = m.group(1).lower()
-                            # 已知版本：1=QUIC v1, 0xff000020=草案20, 0xff000021=草案21, 0x6b3343cf=v2
-                            known = {"00000001", "ff000020", "ff000021", "6b3343cf", "ff00001d"}
-                            if ver not in known and ver != "00000000":
-                                unknown_versions.add(ver)
-                if unknown_versions:
-                    alerts.append({
-                        "type": "QUIC_UNKNOWN_VERSION",
-                        "severity": "LOW",
-                        "unknown_versions": list(unknown_versions),
-                        "detector": "rule-based-quic-version",
-                        "description": f"检测到未知QUIC版本号: {', '.join(unknown_versions)}，"
-                                       f"可能是实验性协议或异常客户端"
-                    })
+        # ---------- 调用共享 RuleDetector ----------
+        state = RuleAccumulatorState(
+            syn_sent=syn_sent, synack_recv=synack_recv, syn_ts=syn_ts,
+            ports_by_src=ports_by_src, port_ts=port_ts,
+            dns_long=dns_long, dns_ts=dns_ts,
+            rst=rst, rst_ts=rst_ts, flows=flows_dict,
+            udp_by_dst=udp_by_dst, udp_ts=udp_ts,
+            dns_req_bytes=dns_req_bytes, dns_resp_bytes=dns_resp_bytes,
+            dns_resp_count=dns_resp_count, dns_resp_ts=dns_resp_ts,
+            quic_src_ports=quic_src_ports, quic_src_ts=quic_src_ts,
+            quic_flows=quic_flows, quic_flow_ts=quic_flow_ts,
+            quic_large=quic_large, quic_total=quic_total,
+            quic_all_ts=quic_all_ts,
+            quic_unknown_versions=quic_unknown_versions,
+        )
+        alerts = RuleDetector(t).detect(state)
 
         return {
             "total_alerts": len(alerts),

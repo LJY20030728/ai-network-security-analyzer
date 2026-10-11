@@ -33,7 +33,7 @@ SolidCompression=yes
 WizardStyle=modern
 SetupIconFile=assets\app_icon.ico
 UninstallDisplayIcon={app}\AI网络安全分析系统.exe
-VersionInfoVersion=3.4.2.0
+VersionInfoVersion=3.4.3.0
 VersionInfoDescription=AI网络安全智能分析系统 安装程序
 ArchitecturesInstallIn64BitMode=x64compatible
 

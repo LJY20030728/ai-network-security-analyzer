@@ -8,7 +8,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.141-green.svg)](https://fastapi.tiangolo.com/)
 [![Gradio](https://img.shields.io/badge/Gradio-6.x-orange.svg)](https://www.gradio.app/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-370%20passed-brightgreen.svg)](#测试)
+[![Tests](https://img.shields.io/badge/tests-392%20passed-brightgreen.svg)](#测试)
 [![CI](https://github.com/LJY20030728/ai-network-security-analyzer/actions/workflows/ci.yml/badge.svg)](https://github.com/LJY20030728/ai-network-security-analyzer/actions/workflows/ci.yml)
 
 **[中文版](#目录) | [English Version](README_EN.md)**
@@ -488,9 +488,9 @@ docker compose up -d --build
 
 | 指标 | 数值 |
 |------|------|
-| 测试结果 | **370 passed / 0 skipped / 0 failed** |
-| 测试文件数 | 17 个 |
-| 覆盖模块 | 算法检测 / API 路由 / 存储 / 安全 / 服务层 / 工具 |
+| 测试结果 | **392 passed / 0 skipped / 0 failed** |
+| 测试文件数 | 24 个 |
+| 覆盖模块 | 算法检测 / API 路由 / 存储 / 安全 / 服务层 / 工具 / 版本一致性 |
 
 ---
 
@@ -618,7 +618,7 @@ ai-network-security-analyzer/
 │   ├── db/                    # SQLite 数据库
 │   ├── chroma_db/             # ChromaDB 向量库
 │   └── eval_perf/             # 评测结果
-├── tests/                     # pytest 测试（370 个用例 / 24 个文件）
+├── tests/                     # pytest 测试（392 个用例 / 24 个文件）
 │   ├── test_rules.py          # 规则引擎与误报控制
 │   ├── test_streaming.py      # 流式解析
 │   ├── test_isolation_*.py    # 孤立森林语义与 13 维特征
@@ -949,7 +949,7 @@ venv\Scripts\python.exe -m PyInstaller --noconfirm --clean --onedir --windowed ^
 - `analysis_history` 表列 `supervised_verdict` / `supervised_confidence`
   自动迁移为 `stacking_verdict` / `stacking_confidence`（幂等，保留历史数据）
 
-**测试**：370 passed / 0 skipped / 0 failed
+**测试**：392 passed / 0 skipped / 0 failed
 
 ### [3.2.0] - 2026-10-08
 

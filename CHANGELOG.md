@@ -31,8 +31,50 @@
   添加 finish_reason 检测、reasoning_content 处理、空内容不缓存）
 - 修改文件：`src/ai/threat_analyzer.py`（chat_about_security 和
   chat_about_security_stream 的 max_tokens 从 1024 改为 4096）
-- 回归测试：359 passed（3 failed 为 Windows .pytest_tmp 目录清理问题，与本次修改无关；
-  8 errors 为预存 sqlite3 问题）
+- 回归测试：实测 **369 passed / 1 failed / 0 errors**。本条目初稿曾记为
+  "359 passed（3 failed 为 Windows .pytest_tmp 目录清理问题，8 errors 为预存
+  sqlite3 问题）"，经复核不成立：`.pytest_tmp` 不产生 WinError 145，也复现不出
+  8 个 sqlite3 error。那 1 个 failed 是**版本号漂移**——
+  `installer.iss` 的 `AppVersion=3.4.3` 与 `settings.version=3.4.2` 不一致，
+  被版本一致性测试正确抓到（同一文件内 `VersionInfoVersion` 也仍是 3.4.2.0）。
+
+### Fixed（严重：不可恢复的数据丢失）· API Key 被掩码值覆盖
+
+**症状**：所有 LLM 调用立即失败，报
+`UnicodeEncodeError: 'ascii' codec can't encode character '\u2026'`。
+
+**事故经过**：
+
+1. `load_api_config_ui()` 把已配置的 Key 以**掩码**返回
+   （`current[:4] + "…" + current[-4:]`，形如 `0bf7…4U3u`）。
+2. Gradio 把该返回值当作**组件的 value** 填入密码输入框——它并非"占位提示"，
+   而是真实可提交的表单值。
+3. 用户在设置页点「保存」→ 浏览器把输入框里的掩码原样提交回
+   `save_api_config_ui(key='0bf7…4U3u')`。
+4. 旧校验只判断 `"xxxx" in key`，掩码通过 → 被写进 DPAPI 加密存储。
+5. 同一函数在 `dpapi_ok=True` 时**清除 `.env` 中的明文 Key**
+   → 真实 Key 的唯一完整副本被删除，**无法从任何文件或 git 历史恢复**
+   （已确认 `.env` 从未被提交，故也未泄露）。
+6. 掩码含 U+2026（非 ASCII），此后每次调用都在 `openai` 的
+   `_build_headers` 处抛错 —— 表现为"AI 功能静默不可用"。
+
+**三层防护修复**：
+
+- **层 1（输入框真正留空）**：`load_api_config_ui` 的 Key 位恒返回 `""`，
+  掩码只写入 debug 日志。掩码**绝不作为组件 `value`**，不输入就不会提交。
+- **层 2（主动拒绝非法 Key）**：新增 `_looks_like_real_api_key()`，要求
+  长度 ≥ 20、纯 ASCII、无空白、不含 `…` / `...` / `***` / `xxxx`。
+  两条写入路径（UI 的 `save_api_config_ui` 与 REST 的
+  `/api/config/save_secure`）**都**先校验后写入，被拒时说明具体原因。
+  新增 `mask_key()` 仅供展示，对已是掩码的输入返回空串。
+- **层 3（条件清除明文）**：DPAPI 写入后**回读比对**（不再只信
+  `is_encrypted()`）；仅当回读一致时才清除 `.env` 明文，否则保留并提示。
+  避免"加密副本无效 + 明文被删"的双重丢失。
+
+### Tests
+- 新增 `tests/test_api_key_mask_incident.py`：锁定上述三层防护，
+  用例包含事故发生时的真实掩码 `0bf7…4U3u` 与旧代码的"已配置"回退值，
+  并印证掩码在 HTTP 头 ASCII 编码处必然抛错（事故的直接症状）。
 
 ---
 

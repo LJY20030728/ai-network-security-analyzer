@@ -356,6 +356,47 @@ def _open_path_with_shell(path: str) -> tuple:
         return False, f"❌ 打开失败：{e}\n📌 路径：`{real}`"
 
 
+def _looks_like_real_api_key(value: str) -> bool:
+    """判断字符串是否"看起来是真实 API Key"。
+
+    【为什么要这个函数】曾发生真实数据丢失：UI 的掩码 `'0bf7…4U3u'`（含 U+2026）
+    被当作 Key 写进 DPAPI，而 `.env` 的明文同时被清除 —— 真实 Key 就此不可恢复；
+    且掩码的非 ASCII 字符让后续每次 LLM 调用都在 HTTP 头 ASCII 编码处失败。
+
+    掩码/占位符/被截断的值必须被**主动拒绝**，而不是只检查 `'xxxx'`。
+    判定标准（全部满足才算真实）：
+      · 非空且长度 ≥ 20（真实 Key 通常 30+ 字符，掩码只有 9）
+      · 纯 ASCII（掩码含 U+2026，非 ASCII 会在 HTTP 头编码时抛异常）
+      · 不含空白字符
+      · 不含省略号/U+2026 等掩码标记
+    """
+    if not value:
+        return False
+    v = value.strip()
+    if len(v) < 20:
+        return False
+    if not v.isascii():
+        return False
+    if any(c.isspace() for c in v):
+        return False
+    if "\u2026" in v or "..." in v or "***" in v:
+        return False
+    if "xxxx" in v.lower():
+        return False
+    return True
+
+
+def mask_key(value: str) -> str:
+    """把 Key 变成仅用于**展示**的掩码（返回空串表示无有效 Key）。
+
+    只应出现在 info / placeholder / 日志里，**绝不能作为组件的 value**。
+    """
+    if not _looks_like_real_api_key(value):
+        return ""
+    v = value.strip()
+    return f"{v[:4]}…{v[-4:]}"
+
+
 @app.middleware("http")
 async def api_token_middleware(request: Request, call_next):
     """鉴权 + API 审计日志（健康检查豁免鉴权与审计噪声；请求体不落库）"""
@@ -1195,11 +1236,22 @@ async def config_save_secure(api_key: str = Form(...), base_url: str = Form(""),
         import sys
         if sys.platform != "win32":
             raise HTTPException(status_code=400, detail="DPAPI 仅支持 Windows")
+        # 【防数据丢失】与 UI 保存路径同样的校验：拒绝掩码/被截断/非 ASCII 的 Key。
+        # 见 _looks_like_real_api_key 的说明（曾因掩码被存入而永久丢失真实 Key）。
+        if not _looks_like_real_api_key(api_key):
+            raise HTTPException(
+                status_code=400,
+                detail="api_key 不像真实密钥（可能是界面掩码、被截断或含非 ASCII 字符），已拒绝保存",
+            )
         from src.security.secure_store import get_secure_store
         ss = get_secure_store()
         ss.set("LLM_API_KEY", api_key.strip())
         ss.set("LLM_BASE_URL", base_url.strip())
         ss.set("LLM_MODEL", model.strip())
+        # 回读校验：不能只信 is_encrypted 的返回值
+        if ss.get("LLM_API_KEY") != api_key.strip():
+            logger.error("⚠️ DPAPI 写入后回读不一致，密钥可能未正确保存")
+            raise HTTPException(status_code=500, detail="DPAPI 写入后回读不一致，密钥未保存")
         # 重置 LLM 客户端
         try:
             from src.ai.llm_client import reset_llm_client
@@ -2600,13 +2652,19 @@ def create_gradio_interface():
                 def load_api_config_ui():
                     """读取当前配置用于预填。
 
-                    【安全】**绝不回显真实 API Key**。此前该函数把 `.env` 里的明文
-                    Key 直接返回并填入密码框，而它由 `demo.load(...)` 在**每次页面
-                    加载**时调用——等于把密钥反复推送到浏览器（任何能加载页面的人
-                    都能从网络响应里读到它）。
+                    【安全·绝不回显真实 API Key】此前该函数把 `.env` 里的明文 Key
+                    直接返回并填入密码框，而它由 `demo.load(...)` 在**每次页面加载**
+                    时调用——等于把密钥反复推送到浏览器（任何能加载页面的人都能从
+                    网络响应里读到它）。
 
-                    现改为：Key 输入框保持为空，仅通过 placeholder 提示"已配置"。
-                    用户只有在想更换时才需重新输入。
+                    【关键修复】Key 位**必须返回空字符串**，掩码只能放进 `info`
+                    （提示文本），绝不能作为组件的 `value`：
+                      组件 value 会被浏览器填入输入框，用户点保存时会被当作表单数据
+                      原样提交回 `save_api_config_ui`。曾因此把掩码 `'0bf7…4U3u'`
+                      当成真实 Key 写进 DPAPI，并因掩码含 U+2026 导致后续每次 LLM
+                      调用在 HTTP 头 ASCII 编码处失败，同时 `.env` 的明文被清除
+                      —— 真实 Key 就此丢失（不可从任何文件恢复）。
+                    用户只有在想更换 Key 时才需重新输入。
                     """
                     vals = {"LLM_BASE_URL": "", "LLM_MODEL": ""}
                     try:
@@ -2622,16 +2680,16 @@ def create_gradio_interface():
                     except Exception as e:
                         logger.debug(f"读取 .env 失败（不影响预填基础 URL/模型）: {e}")
 
-                    # 已配置的 Key 只以掩码形式提示，不回传明文
-                    key_display = ""
+                    # Key 位一律置空；仅在 info 里以掩码形式说明"已配置"。
+                    # 注意：这里返回的是 (key, url, model) 的组件 value，
+                    # 掩码绝不能进入第一个位置。
                     try:
                         current = settings.llm_api_key or ""
-                        if current and "xxxx" not in current:
-                            key_display = (current[:4] + "…" + current[-4:]) \
-                                if len(current) > 10 else "已配置"
+                        if mask_key(current):
+                            logger.debug(f"已配置 API Key（{mask_key(current)}），输入框保持为空")
                     except Exception:
                         pass
-                    return key_display, vals["LLM_BASE_URL"], vals["LLM_MODEL"]
+                    return "", vals["LLM_BASE_URL"], vals["LLM_MODEL"]
 
                 def save_api_config_ui(key, url, model):
                     """保存 API 配置：Windows 仅写 DPAPI；其他平台写 .env 并明确告知未加密。
@@ -2646,6 +2704,21 @@ def create_gradio_interface():
                         return "⚠️ API Key 不能为空"
                     if "xxxx" in key:
                         return "⚠️ API Key 仍是占位符（sk-xxxx），请填写真实 Key"
+                    # 【防数据丢失】拒绝掩码/被截断/含非 ASCII 的值。
+                    # 这条校验是本次"掩码被当成真实 Key 存入 DPAPI，同时 .env 明文
+                    # 被清除，导致真实 Key 永久丢失"事故的直接防线。
+                    if not _looks_like_real_api_key(key):
+                        raw = (key or "").strip()
+                        hint = ""
+                        if "\u2026" in raw or "..." in raw:
+                            hint = "检测到省略号：这看起来是**界面显示的掩码**，不是真实 Key。"
+                        elif len(raw) < 20:
+                            hint = f"长度仅 {len(raw)} 位（真实 Key 通常 30 位以上）。"
+                        elif not raw.isascii():
+                            hint = "含非 ASCII 字符（会导致 HTTP 请求头编码失败）。"
+                        return (f"❌ 拒绝保存：该值不像真实 API Key。{hint}\n"
+                                f"请到服务商控制台重新复制**完整**密钥后粘贴。\n"
+                                f"（输入框留空即表示不修改已保存的 Key）")
                     try:
                         import sys as _sys
 
@@ -2655,7 +2728,7 @@ def create_gradio_interface():
                         dpapi_ok = False
                         secure_msg = ""
 
-                        # 1) Windows：DPAPI 加密存储（唯一持有明文 Key 的地方）
+                        # 1) Windows：DPAPI 加密存储
                         if _sys.platform == "win32":
                             try:
                                 from src.security.secure_store import get_secure_store
@@ -2663,15 +2736,31 @@ def create_gradio_interface():
                                 ss.set("LLM_API_KEY", key_val)
                                 ss.set("LLM_BASE_URL", url_val)
                                 ss.set("LLM_MODEL", model_val)
-                                dpapi_ok = bool(ss.is_encrypted("LLM_API_KEY"))
+                                # 回读校验：不能只看 is_encrypted（它可能为 True 但内容错）
+                                back = ss.get("LLM_API_KEY")
+                                dpapi_ok = bool(ss.is_encrypted("LLM_API_KEY")) and back == key_val
                                 secure_msg = ("🔒 Key 已加密存储（DPAPI），未写入 .env 明文\n"
                                               if dpapi_ok else
-                                              "⚠️ DPAPI 加密失败，Key 未能安全保存\n")
+                                              "⚠️ DPAPI 写入后回读不一致，本次不清除 .env 明文\n")
                             except Exception as se:
                                 secure_msg = f"⚠️ DPAPI 加密存储失败: {se}\n"
 
                         # 2) 非 Windows 或 DPAPI 不可用：写 .env（并明确告知未加密）
                         env = find_env_file()
+                        # 【关键】仅当 DPAPI **确认**存有有效 Key 时才清除 .env 明文。
+                        # 原实现只看 dpapi_ok 就直接清除，一旦 DPAPI 里被写入无效值
+                        # （如掩码），明文就成了唯一副本而被删掉 —— 不可恢复。
+                        env_key = None
+                        if os.path.exists(env):
+                            try:
+                                with open(env, encoding="utf-8") as f:
+                                    for line in f:
+                                        st = line.strip()
+                                        if st.startswith("LLM_API_KEY="):
+                                            env_key = st.split("=", 1)[1].strip()
+                                            break
+                            except Exception:
+                                env_key = None
                         write_env_key = (not dpapi_ok)
                         new_entries = {
                             "LLM_BASE_URL": url_val,
@@ -2693,7 +2782,9 @@ def create_gradio_interface():
                                     if k in new_entries:
                                         lines[i] = f"{k}={new_entries[k]}\n"
                         else:
-                            # 已由 DPAPI 保存：把 .env 中的明文 Key 清除，避免明文残留
+                            # DPAPI 已验证有效：清除 .env 明文 Key，避免明文残留。
+                            # 注：清除前 DPAPI 已完成 write→read 一致性校验（见上），
+                            # 且当前值已通过 _looks_like_real_api_key 检查。
                             kept = []
                             for line in lines:
                                 st = line.strip()

@@ -427,6 +427,24 @@ class TrafficAnalyzer:
         dns_ts = defaultdict(list)
         rst = defaultdict(int)
         rst_ts = defaultdict(list)
+        # v3.4.3：UDP/DNS放大/QUIC 规则的增量累加器。
+        # 每条规则与 _detect_anomalies 中同名规则同阈值、同告警字段；
+        # 因流式路径不持有全量包，这里只累积"计数 + 首末时间戳"，
+        # 用 _ts 字典替代原实现中 `X_pkts_by_Y` 的包列表（两者只为算 time_window）。
+        udp_by_dst = defaultdict(int)
+        udp_ts = defaultdict(list)
+        dns_req_bytes = defaultdict(int)
+        dns_resp_bytes = defaultdict(int)
+        dns_resp_count = defaultdict(int)
+        dns_resp_ts = defaultdict(list)
+        quic_src_ports = defaultdict(set)
+        quic_src_ts = defaultdict(list)
+        quic_flows = defaultdict(int)
+        quic_flow_ts = defaultdict(list)
+        quic_total = 0
+        quic_large = 0
+        quic_all_ts = defaultdict(list)    # QUIC 整体时间窗（对应 quic_packets）
+        quic_unknown_versions = set()
         flows: Dict[tuple, Dict[str, Any]] = {}
         protocol_dist = defaultdict(int)
         total_bytes = 0
@@ -476,6 +494,44 @@ class TrafficAnalyzer:
             if p.protocol == "TCP" and "RST" in p.flags:
                 rst[p.src_ip] += 1
                 _push(rst_ts, p.src_ip, p.timestamp)
+            # UDP Flood（v3.4.3：与 _detect_anomalies 规则 6 同口径）
+            if p.protocol == "UDP":
+                udp_by_dst[p.dst_ip] += 1
+                _push(udp_ts, p.dst_ip, p.timestamp)
+            # DNS Amplification（v3.4.3：与规则 7 同口径）
+            # 【顺序至关重要】响应必须优先判断：解析器对 DNS 响应包会**同时**填写
+            # dns_query（qd 段在响应中同样存在）与 dns_response（an 段 rdata）。
+            # 若先判 dns_query，响应包一律被算作"请求"，dns_resp_* 恒为空，
+            # 规则永不触发（原实现即为此缺陷）。查询包无 an 段，故不受影响。
+            if p.protocol == "DNS":
+                if p.dns_response:                   # 响应（含应答记录）
+                    dns_resp_bytes[p.dst_ip] += int(p.length)
+                    dns_resp_count[p.dst_ip] += 1
+                    _push(dns_resp_ts, p.dst_ip, p.timestamp)
+                elif p.dns_query:                    # 请求（无应答记录）
+                    dns_req_bytes[p.src_ip] += int(p.length)
+            # QUIC/HTTP3（v3.4.3：与规则 8 同口径；QUIC 走 UDP/443）
+            if p.protocol == "UDP" and p.dst_port == 443:
+                quic_total += 1
+                if p.length > 1200:
+                    quic_large += 1
+                quic_src_ports[p.src_ip].add(p.src_port)
+                _push(quic_src_ts, p.src_ip, p.timestamp)
+                _qk = f"{p.src_ip}:{p.src_port}->{p.dst_ip}:{p.dst_port}"
+                quic_flows[_qk] += 1
+                _push(quic_flow_ts, _qk, p.timestamp)
+                _push(quic_all_ts, "_", p.timestamp)
+                # 8d：未知 QUIC 版本（从 raw_summary 解析）
+                if t.get("quic_unknown_version_alert", True) and p.raw_summary \
+                        and "QUIC" in p.raw_summary:
+                    import re as _re
+                    _m = _re.search(r'Version[=:\s]+0x([0-9a-fA-F]+)', p.raw_summary)
+                    if _m:
+                        _ver = _m.group(1).lower()
+                        # 已知：1=QUIC v1, 0xff000020/21=草案20/21, 0x6b3343cf=v2, 0xff00001d=草案29
+                        _known = {"00000001", "ff000020", "ff000021", "6b3343cf", "ff00001d"}
+                        if _ver not in _known and _ver != "00000000":
+                            quic_unknown_versions.add(_ver)
             # 流聚合（大流量检测，双向流规范化，与 FlowExtractor 同口径）
             if p.protocol in ("TCP", "UDP") and p.src_ip and p.dst_ip:
                 ep1 = f"{p.src_ip}:{p.src_port}"
@@ -565,6 +621,106 @@ class TrafficAnalyzer:
                     "rule_threshold": {"rst_storm_min_count": t["rst_storm_min_count"]},
                     "time_window": _tw(rst_ts.get(src, [])),
                     "description": f"源IP {src} 发送了 {count} 个RST包，可能是扫描或异常连接",
+                })
+
+        # ---------- v3.4.3 新增：UDP / DNS放大 / QUIC 规则 ----------
+        # 以下 6 条规则此前只存在于 _detect_anomalies（analyze_packets 路径），
+        # 而 UI 实际调用 analyze_stream —— 导致 UDP/QUIC 攻击在运行时完全漏检。
+        # 现按"同阈值、同告警字段"补入流式路径；detector 字符串与
+        # _detect_anomalies 中的硬编码值保持逐字一致（注意它那里没用 RULE_NAMES）。
+
+        # 规则 6：UDP Flood
+        for dst, count in udp_by_dst.items():
+            if count >= t["udp_flood_min_packets"]:
+                alerts.append({
+                    "type": "UDP_FLOOD_SUSPECTED",
+                    "severity": "HIGH" if count > t["udp_flood_high_packets"] else "MEDIUM",
+                    "dst_ip": dst,
+                    "udp_packet_count": count,
+                    "detector": "rule-based-udp-flood",
+                    "rule_threshold": {"udp_flood_min_packets": t["udp_flood_min_packets"]},
+                    "time_window": _tw(udp_ts.get(dst, [])),
+                    "description": f"目标IP {dst} 收到 {count} 个UDP包，疑似UDP洪水攻击"
+                })
+
+        # 规则 7：DNS Amplification
+        for target, resp_bytes in dns_resp_bytes.items():
+            req_bytes = dns_req_bytes.get(target, 1)
+            ratio = resp_bytes / req_bytes if req_bytes > 0 else float(resp_bytes)
+            if (ratio >= t["dns_amp_min_ratio"]
+                    and dns_resp_count[target] >= t["dns_amp_min_responses"]):
+                alerts.append({
+                    "type": "DNS_AMPLIFICATION_SUSPECTED",
+                    "severity": "HIGH",
+                    "target_ip": target,
+                    "amplification_ratio": round(ratio, 2),
+                    "response_bytes": resp_bytes,
+                    "request_bytes": req_bytes,
+                    "response_count": dns_resp_count[target],
+                    "detector": "rule-based-dns-amplification",
+                    "rule_threshold": {"dns_amp_min_ratio": t["dns_amp_min_ratio"]},
+                    "time_window": _tw(dns_resp_ts.get(target, [])),
+                    "description": f"目标IP {target} DNS响应/请求字节比={ratio:.1f}x，"
+                                   f"响应{dns_resp_count[target]}个包，疑似DNS放大攻击"
+                })
+
+        # 规则 8：QUIC/HTTP3 异常（4 条子规则）
+        if quic_total:
+            # 8a. QUIC 连接风暴：大量不同源端口（每个源端口≈一条 QUIC 连接）
+            for src, ports in quic_src_ports.items():
+                if len(ports) >= t["quic_flood_min_connections"]:
+                    alerts.append({
+                        "type": "QUIC_CONNECTION_FLOOD",
+                        "severity": "HIGH",
+                        "src_ip": src,
+                        "unique_quic_connections": len(ports),
+                        "detector": "rule-based-quic-flood",
+                        "rule_threshold": {"quic_flood_min_connections": t["quic_flood_min_connections"]},
+                        "time_window": _tw(quic_src_ts.get(src, [])),
+                        "description": f"源IP {src} 发起 {len(ports)} 条不同QUIC连接（源端口），"
+                                       f"疑似QUIC连接洪水"
+                    })
+
+            # 8b. QUIC 长流异常：单条流包数过多（可能是加密隧道/数据外泄）
+            for flow_key, count in quic_flows.items():
+                if count >= t["quic_long_flow_min_packets"]:
+                    alerts.append({
+                        "type": "QUIC_LONG_FLOW_ANOMALY",
+                        "severity": "MEDIUM",
+                        "flow": flow_key,
+                        "packet_count": count,
+                        "detector": "rule-based-quic-long-flow",
+                        "rule_threshold": {"quic_long_flow_min_packets": t["quic_long_flow_min_packets"]},
+                        "time_window": _tw(quic_flow_ts.get(flow_key, [])),
+                        "description": f"QUIC流 {flow_key} 持续 {count} 个包，"
+                                       f"疑似加密隧道或数据外泄"
+                    })
+
+            # 8c. QUIC 初始包比例异常（初始包通常 >1200 字节；正常占比 <5%）
+            quic_initial_ratio = quic_large / quic_total if quic_total else 0
+            if quic_initial_ratio >= t["quic_initial_ratio_threshold"]:
+                alerts.append({
+                    "type": "QUIC_INITIAL_RATIO_ANOMALY",
+                    "severity": "MEDIUM",
+                    "large_packet_ratio": round(quic_initial_ratio, 3),
+                    "total_quic_packets": quic_total,
+                    "large_packet_count": quic_large,
+                    "detector": "rule-based-quic-initial-ratio",
+                    "rule_threshold": {"quic_initial_ratio_threshold": t["quic_initial_ratio_threshold"]},
+                    "time_window": _tw(quic_all_ts.get("_", [])),
+                    "description": f"QUIC大包（疑似初始包）占比={quic_initial_ratio:.1%}，"
+                                   f"正常应<5%，疑似QUIC隧道或异常握手"
+                })
+
+            # 8d. QUIC 版本号异常
+            if quic_unknown_versions:
+                alerts.append({
+                    "type": "QUIC_UNKNOWN_VERSION",
+                    "severity": "LOW",
+                    "unknown_versions": sorted(quic_unknown_versions),
+                    "detector": "rule-based-quic-version",
+                    "description": f"检测到未知QUIC版本号: {', '.join(sorted(quic_unknown_versions))}，"
+                                   f"可能是实验性协议或异常客户端"
                 })
 
         anomalies = {
@@ -1010,12 +1166,16 @@ class TrafficAnalyzer:
         dns_pkts_by_src: Dict[str, List] = defaultdict(list)
         for p in packets:
             if p.protocol == "DNS":
-                if p.dns_query:  # 请求
-                    dns_req_bytes[p.src_ip] += p.length
-                elif p.dns_response:  # 响应
+                # 【顺序至关重要】响应优先：解析器对响应包同时填 dns_query 与
+                # dns_response（qd 段在响应里同样存在）。原实现先判 dns_query，
+                # 使响应一律归入"请求"，dns_resp_bytes/dns_resp_count 恒为空，
+                # 本规则在任何真实 PCAP 上永不触发（实测确认的死规则）。
+                if p.dns_response:  # 响应（含应答记录）
                     dns_resp_bytes[p.dst_ip] += p.length
                     dns_resp_count[p.dst_ip] += 1
                     dns_pkts_by_src[p.dst_ip].append(p)
+                elif p.dns_query:  # 请求（无应答记录）
+                    dns_req_bytes[p.src_ip] += p.length
         for target, resp_bytes in dns_resp_bytes.items():
             req_bytes = dns_req_bytes.get(target, 1)
             ratio = resp_bytes / req_bytes if req_bytes > 0 else float(resp_bytes)

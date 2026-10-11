@@ -28,5 +28,20 @@
     "description": "RST 风暴",
     "packets": 80,
     "file": "data/samples/golden\\rststorm.pcap"
+  },
+  "udpflood": {
+    "description": "UDP 洪水（v3.4.3 新增）",
+    "packets": 400,
+    "file": "data/samples/golden\\udpflood.pcap"
+  },
+  "dnsamp": {
+    "description": "DNS 放大（v3.4.3 新增）",
+    "packets": 80,
+    "file": "data/samples/golden\\dnsamp.pcap"
+  },
+  "quicflood": {
+    "description": "QUIC 连接风暴（v3.4.3 新增）",
+    "packets": 80,
+    "file": "data/samples/golden\\quicflood.pcap"
   }
 }

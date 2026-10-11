@@ -34,7 +34,7 @@ import random
 import time as time_mod
 from typing import List
 
-from scapy.all import IP, TCP, UDP, DNS, DNSQR, Raw, wrpcap, PcapWriter
+from scapy.all import IP, TCP, UDP, DNS, DNSQR, DNSRR, Raw, wrpcap, PcapWriter
 
 # Windows 控制台默认 GBK，直接打印中文/emoji 会抛 UnicodeEncodeError
 try:
@@ -180,6 +180,68 @@ def gen_rststorm_packets(count: int = 80) -> List:
     return pkts
 
 
+# ----------------------------------------------------------------------
+# UDP / QUIC 样本（v3.4.3 新增）
+#
+# 为什么必须补这几个样本：此前 golden 集**完全没有 UDP/QUIC 流量**，
+# 导致 tests/test_streaming.py::test_stream_matches_full（断言"流式与全量
+# 告警一致"）恰好落在两条路径唯一相同的交集上 —— UDP/QUIC 规则只加进了
+# _detect_anomalies（analyze_packets 路径），而 UI 实际调用的 analyze_stream
+# 漏检了 6 条规则，CI 却全绿。补齐样本后该断言才真正覆盖这些规则。
+# ----------------------------------------------------------------------
+
+def gen_udpflood_packets(count: int = 400) -> List:
+    """UDP 洪水：大量单向 UDP 包打向同一目标 IP"""
+    pkts = []
+    for i in range(count):
+        t = START_TS + (i / count) * 30
+        pkts.append(_set_time(IP(src="10.10.10.50", dst="10.10.10.99") /
+                              UDP(sport=random.randint(1024, 65535), dport=random.choice([53, 123, 161])) /
+                              Raw(load=b"\x00" * 1358), t))
+    return pkts
+
+
+def gen_dnsamp_packets(n_queries: int = 40) -> List:
+    """DNS 放大：响应包字节数远大于请求包（放大比 > 阈值）。
+
+    注意：响应必须带**真实的 `an` 应答记录**（DNSRR），不能用
+    `ancount=1` + Raw 填充伪造 —— 解析器 `_first_dns_rdata()` 是从
+    `dns.an`（scapy 2.7 里是 PacketListField）取 rdata 的，
+    没有 an 记录时 `dns_response` 恒为空，而 DNS 放大规则用的是
+    `elif p.dns_response` 分支，于是规则永不触发。
+    （此前的 golden 样本正是用 ancount 伪造的，所以 dns_response 全空。）
+    """
+    pkts = []
+    for i in range(n_queries):
+        t = START_TS + i * 0.5
+        qname = f"host{i}.example.com"
+        # 请求：小包
+        pkts.append(_set_time(IP(src="10.10.10.60", dst="8.8.8.8") /
+                              UDP(sport=50000 + i, dport=53) /
+                              DNS(id=i, qr=0, qd=DNSQR(qname=qname)), t))
+        # 响应：带真实应答记录 + 大体积附加数据（制造放大比）
+        pkts.append(_set_time(IP(src="8.8.8.8", dst="10.10.10.60") /
+                              UDP(sport=53, dport=50000 + i) /
+                              DNS(id=i, qr=1, qd=DNSQR(qname=qname),
+                                  an=DNSRR(rrname=qname + ".", type="TXT",
+                                           rdata=b"x" * 3000)), t + 0.05))
+    return pkts
+
+
+def gen_quicflood_packets(count: int = 80) -> List:
+    """QUIC 连接风暴：同源用大量不同源端口打向 443/UDP。
+
+    同时会触发 QUIC 长流/初始包比例等其它 QUIC 子规则，属预期。
+    """
+    pkts = []
+    for i in range(count):
+        t = START_TS + i * 0.2
+        pkts.append(_set_time(IP(src="10.10.10.70", dst="1.1.1.1") /
+                              UDP(sport=30000 + i, dport=443) /
+                              Raw(load=b"\xc0" + b"\x00" * 1349), t))
+    return pkts
+
+
 GENERATORS = {
     "normal": (gen_normal_packets, "正常流量（HTTP+DNS+UDP）"),
     "synflood": (gen_synflood_packets, "SYN Flood 攻击"),
@@ -187,6 +249,9 @@ GENERATORS = {
     "dnstunnel": (gen_dnstunnel_packets, "DNS 隧道"),
     "largeflow": (gen_largeflow_packets, "异常大流量"),
     "rststorm": (gen_rststorm_packets, "RST 风暴"),
+    "udpflood": (gen_udpflood_packets, "UDP 洪水（v3.4.3 新增）"),
+    "dnsamp": (gen_dnsamp_packets, "DNS 放大（v3.4.3 新增）"),
+    "quicflood": (gen_quicflood_packets, "QUIC 连接风暴（v3.4.3 新增）"),
 }
 
 

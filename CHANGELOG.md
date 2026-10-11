@@ -4,6 +4,67 @@
 
 ---
 
+### Fixed（严重：UDP/QUIC 攻击在 UI 运行时完全漏检）
+
+**问题**：`TrafficAnalyzer` 有两条检测路径，规则数不一致，而 UI 走的是那条少的。
+
+| 路径 | 调用方 | 规则数 |
+|---|---|---|
+| `analyze_packets()` → `_detect_anomalies()` | 脚本、CI（`verify_golden.py`） | **11 条** |
+| `analyze_stream()` → 内联组装 | `analysis_service` → **UI 实际运行** | **5 条** |
+
+`analyze_stream` 的文档字符串声称"规则累加器与 `_detect_anomalies` 同阈值、
+同告警字段"，但**没有任何机制强制一致**。UDP/QUIC 规则于 `ebfe80a`(v3.4.0)
+只加进 `_detect_anomalies`，流式路径漏掉 6 条：
+`UDP_FLOOD_SUSPECTED`、`DNS_AMPLIFICATION_SUSPECTED`、
+`QUIC_CONNECTION_FLOOD`、`QUIC_LONG_FLOW_ANOMALY`、
+`QUIC_INITIAL_RATIO_ANOMALY`、`QUIC_UNKNOWN_VERSION`。
+
+**用户侧后果**：运行时 UDP/QUIC 攻击**完全检测不到**（README 却宣称 9 类规则
+含 UDP flood / DNS amplification / QUIC），且 CI 全绿。
+
+**为什么 CI 没抓到**：`tests/test_streaming.py::test_stream_matches_full`
+遍历所有 golden 样本断言两条路径告警一致 —— 但 **golden 集里没有任何
+UDP/QUIC 样本**，该断言恰好落在两条路径唯一相同的交集上。
+
+**修复（按 TDD 顺序，每步都有验证）**：
+
+1. 先写复现测试 `tests/test_stream_udp_quic.py`，用合成包断言两条路径一致
+   → **13 项失败**，精确复现 6 条规则全缺。
+2. 为 `analyze_stream` 增加增量累加器（`udp_by_dst`/`dns_req_bytes`/
+   `dns_resp_bytes`/`quic_src_ports`/`quic_flows`/`quic_all_ts` 等）——
+   流式路径**不持有全量包**，故只累积"计数 + 首末时间戳"，
+   用 `_ts` 字典替代原实现中 `X_pkts_by_Y` 的包列表（两者只为算 time_window）。
+3. 移植 6 条规则，**detector 字符串与告警字段逐字对齐** `_detect_anomalies`
+   （注意后者用的是硬编码 detector 名，而非 `self.RULE_NAMES`）。
+4. 补 3 个 golden 样本 `udpflood/dnsamp/quicflood`，让
+   `test_stream_matches_full` 真正覆盖这些规则。
+5. `tools/verify_golden.py` 的 `EXPECTED` 加入这 3 个样本 → 攻击命中 5/5 → **8/8**。
+
+### Fixed（另一条死规则：DNS 放大检测在任何真实 PCAP 上都不触发）
+
+移植过程中实测发现 `DNS_AMPLIFICATION_SUSPECTED` 是**死规则**：
+
+- 解析器对 DNS **响应**包会**同时**填写 `dns_query`（qd 段在响应中同样存在）
+  与 `dns_response`（an 段 rdata）；
+- 而规则实现是 `if p.dns_query: ... elif p.dns_response:` ——
+  **请求分支排在前面**，于是响应包一律被算作"请求"，
+  `dns_resp_bytes` / `dns_resp_count` **恒为空**，规则永不触发。
+
+**修复**：两处（全量 `_detect_anomalies` 与流式路径）都改为**响应优先**判断。
+查询包不含 an 段，故 `dns_response` 为空，交换顺序不会误判查询。
+实测 `dnsamp.pcap`（响应/请求字节比 48.7x、40 个响应）修复后两条路径均能命中。
+
+### Tests
+- 新增 `tests/test_stream_udp_quic.py`（16 项）：6 条规则逐条断言两条路径一致，
+  并做"每个用例两条路径规则告警集合完全相同"的交叉校验。
+  该文件的 `_rule_alert_types()` 只比**规则引擎**告警（detector 以 `rule-based-`
+  开头）：`BASELINE_DEVIATION` 在两条路径上的差异**早于本次修复就存在**
+  （已用改动前的代码实测确认），属另一个问题，混进来只会让本测试因无关原因变红。
+- 新增 3 个 golden 样本：`udpflood.pcap` / `dnsamp.pcap` / `quicflood.pcap`
+  （生成器加进 `tools/generate_samples.py`，只新增、**未触碰任何已有 golden 文件**）。
+- 全量 392 → **408 passed**；`verify_golden.py` 攻击命中 5/5 → **8/8**，exit 0。
+
 ## [3.4.3] - 2026-10-11
 
 **Hotfix：修复 glm-4.5-air 推理模型回答被截断的严重 bug（用户实测发现）**

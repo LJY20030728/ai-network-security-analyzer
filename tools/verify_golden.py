@@ -44,6 +44,13 @@ EXPECTED = {
     "dnstunnel": ["DNS_TUNNEL_SUSPECTED"],
     "largeflow": ["LARGE_DATA_TRANSFER"],
     "rststorm": ["RST_STORM"],
+    # v3.4.3 新增：UDP/QUIC 样本。
+    # 这三个样本是为补上"golden 集没有 UDP/QUIC 流量"的覆盖盲区而加的 ——
+    # 正因为此前没有这类样本，UDP/QUIC 规则只加进 _detect_anomalies 而
+    # analyze_stream（UI 实际调用）漏检 6 条规则，CI 却一直全绿。
+    "udpflood": ["UDP_FLOOD_SUSPECTED"],
+    "dnsamp": ["DNS_AMPLIFICATION_SUSPECTED"],
+    "quicflood": ["QUIC_CONNECTION_FLOOD"],
 }
 
 

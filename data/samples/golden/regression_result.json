@@ -61,6 +61,46 @@
       ],
       "missing": [],
       "pass": true
+    },
+    {
+      "sample": "udpflood",
+      "packets": 400,
+      "alerts": 13,
+      "hit": [
+        "BASELINE_DEVIATION",
+        "BASELINE_MULTI_DIM",
+        "ML_ANOMALY",
+        "UDP_FLOOD_SUSPECTED"
+      ],
+      "missing": [],
+      "pass": true
+    },
+    {
+      "sample": "dnsamp",
+      "packets": 80,
+      "alerts": 11,
+      "hit": [
+        "BASELINE_DEVIATION",
+        "BASELINE_MULTI_DIM",
+        "DNS_AMPLIFICATION_SUSPECTED",
+        "ML_ANOMALY"
+      ],
+      "missing": [],
+      "pass": true
+    },
+    {
+      "sample": "quicflood",
+      "packets": 80,
+      "alerts": 10,
+      "hit": [
+        "BASELINE_DEVIATION",
+        "BASELINE_MULTI_DIM",
+        "ML_ANOMALY",
+        "QUIC_CONNECTION_FLOOD",
+        "QUIC_INITIAL_RATIO_ANOMALY"
+      ],
+      "missing": [],
+      "pass": true
     }
   ],
   "baseline_profile": {

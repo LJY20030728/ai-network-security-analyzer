@@ -103,8 +103,12 @@ test_zhipu_api.py
 # 被忽略会导致 clone 后缺少入口文件，故已移出忽略列表并纳入版本控制。
 
 # 运行期/构建期残留（此前未忽略，导致仓库内堆积 660MB 垃圾）
-gradio/                      # Gradio 上传与缓存目录
-*.runtimeconfig.json         # pythonnet 运行时配置（生成物）
+# 注：.gitignore 不支持行尾注释——`pattern  # 注释` 会被整体当作模式，
+# 导致规则静默失效。以下注释一律独占一行。
+# Gradio 上传与缓存目录
+gradio/
+# pythonnet 运行时配置（生成物）
+*.runtimeconfig.json
 .pytest_cache/
 __pycache__/
 .coverage
@@ -114,10 +118,15 @@ htmlcov/
 *.manifest
 warn-*.txt
 xref-*.html
-/[0-9a-z_]{8}                # pyinstaller 在仓库根留下的 8 字符临时文件
+# pyinstaller 在仓库根留下的 8 字符无名临时文件
+# 注：gitignore 不支持 `{n}` 量词（`/[0-9a-z_]{8}` 实测从不匹配），
+# 但支持 `?` 单字符通配，故用 8 个 `?`。
+/????????
 /tmp*
 /pip-*
 /pytest-of-*
+# pytest --basetemp 目录（见 pyproject.toml 的 [tool.pytest.ini_options] 说明）
+/.pytest_tmp/
 
 # Temporary files
 *.tmp

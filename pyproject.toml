@@ -82,7 +82,12 @@ packages = ["config", "src"]
 [tool.pytest.ini_options]
 minversion = "8.0"
 testpaths = ["tests"]
-addopts = "-q --strict-markers"
+# --basetemp：把 pytest 的临时目录固定在项目内，避免污染仓库根目录。
+# 背景：当 `tempfile.gettempdir()` 无法在系统临时目录创建文件时（受限环境 /
+# 沙箱，实测发生在 Windows 沙箱下），Python 会回退到当前工作目录，于是
+# pytest 的 tmp_path 生成 `<repo>/pytest-of-<user>/`（实测单次跑测试可达 270+ MB）。
+# 固定 basetemp 后位置可预期，且该目录已加入 .gitignore。
+addopts = "-q --strict-markers --basetemp=.pytest_tmp"
 filterwarnings = [
     "ignore::DeprecationWarning:scapy.*",
 ]

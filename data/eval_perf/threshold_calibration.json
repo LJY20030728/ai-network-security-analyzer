@@ -1,0 +1,846 @@
+{
+  "experiment": "规则阈值校准",
+  "method": "对11条规则的关键阈值在golden样本上扫描，计算TPR/FPR",
+  "samples_used": {
+    "normal": 1480,
+    "synflood": 200,
+    "portscan": 50,
+    "dnstunnel": 10,
+    "largeflow": 8239,
+    "rststorm": 80,
+    "udpflood": 400,
+    "dnsamp": 80,
+    "quicflood": 80
+  },
+  "total_thresholds_scanned": 10,
+  "results": [
+    {
+      "threshold_key": "syn_flood_min_count",
+      "label": "SYN Flood 最小包数",
+      "current_default": 80,
+      "attack_sample": "synflood",
+      "rule_type": "SYN_FLOOD_SUSPECTED",
+      "scan_range": [
+        20,
+        40,
+        60,
+        80,
+        100,
+        150,
+        200
+      ],
+      "roc_points": [
+        {
+          "threshold": 20,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 1,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": false
+        },
+        {
+          "threshold": 40,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 1,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": false
+        },
+        {
+          "threshold": 60,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 1,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": false
+        },
+        {
+          "threshold": 80,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 1,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": true
+        },
+        {
+          "threshold": 100,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 1,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": false
+        },
+        {
+          "threshold": 150,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 1,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": false
+        },
+        {
+          "threshold": 200,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 1,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": false
+        }
+      ],
+      "optimal_threshold": 20,
+      "current_status": "合理（TPR=1,FPR=0）"
+    },
+    {
+      "threshold_key": "port_scan_min_ports",
+      "label": "端口扫描 最小端口数",
+      "current_default": 15,
+      "attack_sample": "portscan",
+      "rule_type": "PORT_SCAN_SUSPECTED",
+      "scan_range": [
+        5,
+        8,
+        10,
+        15,
+        20,
+        25,
+        30
+      ],
+      "roc_points": [
+        {
+          "threshold": 5,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 1,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": false
+        },
+        {
+          "threshold": 8,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 1,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": false
+        },
+        {
+          "threshold": 10,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 1,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": false
+        },
+        {
+          "threshold": 15,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 1,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": true
+        },
+        {
+          "threshold": 20,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 1,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": false
+        },
+        {
+          "threshold": 25,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 1,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": false
+        },
+        {
+          "threshold": 30,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 1,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": false
+        }
+      ],
+      "optimal_threshold": 5,
+      "current_status": "合理（TPR=1,FPR=0）"
+    },
+    {
+      "threshold_key": "dns_tunnel_max_query_len",
+      "label": "DNS隧道 最大查询长度",
+      "current_default": 40,
+      "attack_sample": "dnstunnel",
+      "rule_type": "DNS_TUNNEL_SUSPECTED",
+      "scan_range": [
+        20,
+        25,
+        30,
+        35,
+        40,
+        45,
+        50
+      ],
+      "roc_points": [
+        {
+          "threshold": 20,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 1,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": false
+        },
+        {
+          "threshold": 25,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 1,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": false
+        },
+        {
+          "threshold": 30,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 1,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": false
+        },
+        {
+          "threshold": 35,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 1,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": false
+        },
+        {
+          "threshold": 40,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 1,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": true
+        },
+        {
+          "threshold": 45,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 1,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": false
+        },
+        {
+          "threshold": 50,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 1,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": false
+        }
+      ],
+      "optimal_threshold": 20,
+      "current_status": "合理（TPR=1,FPR=0）"
+    },
+    {
+      "threshold_key": "large_flow_min_bytes",
+      "label": "大流量 最小字节数",
+      "current_default": 10000000,
+      "attack_sample": "largeflow",
+      "rule_type": "LARGE_DATA_TRANSFER",
+      "scan_range": [
+        1000000,
+        5000000,
+        10000000,
+        20000000,
+        50000000
+      ],
+      "roc_points": [
+        {
+          "threshold": 1000000,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 1,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": false
+        },
+        {
+          "threshold": 5000000,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 1,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": false
+        },
+        {
+          "threshold": 10000000,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 1,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": true
+        },
+        {
+          "threshold": 20000000,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 1,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": false
+        },
+        {
+          "threshold": 50000000,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 1,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": false
+        }
+      ],
+      "optimal_threshold": 1000000,
+      "current_status": "合理（TPR=1,FPR=0）"
+    },
+    {
+      "threshold_key": "rst_storm_min_count",
+      "label": "RST风暴 最小包数",
+      "current_default": 50,
+      "attack_sample": "rststorm",
+      "rule_type": "RST_STORM",
+      "scan_range": [
+        10,
+        20,
+        30,
+        50,
+        80,
+        100
+      ],
+      "roc_points": [
+        {
+          "threshold": 10,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 1,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": false
+        },
+        {
+          "threshold": 20,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 1,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": false
+        },
+        {
+          "threshold": 30,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 1,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": false
+        },
+        {
+          "threshold": 50,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 1,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": true
+        },
+        {
+          "threshold": 80,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 1,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": false
+        },
+        {
+          "threshold": 100,
+          "tpr": 0.0,
+          "fpr": 0.0,
+          "attack_alerts": 0,
+          "attack_triggered": false,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": false
+        }
+      ],
+      "optimal_threshold": 10,
+      "current_status": "合理（TPR=1,FPR=0）"
+    },
+    {
+      "threshold_key": "udp_flood_min_count",
+      "label": "UDP Flood 最小包数",
+      "current_default": 100,
+      "attack_sample": "udpflood",
+      "rule_type": "UDP_FLOOD_SUSPECTED",
+      "scan_range": [
+        20,
+        50,
+        80,
+        100,
+        150,
+        200
+      ],
+      "roc_points": [
+        {
+          "threshold": 20,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 1,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": false
+        },
+        {
+          "threshold": 50,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 1,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": false
+        },
+        {
+          "threshold": 80,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 1,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": false
+        },
+        {
+          "threshold": 100,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 1,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": true
+        },
+        {
+          "threshold": 150,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 1,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": false
+        },
+        {
+          "threshold": 200,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 1,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": false
+        }
+      ],
+      "optimal_threshold": 20,
+      "current_status": "合理（TPR=1,FPR=0）"
+    },
+    {
+      "threshold_key": "dns_amp_min_ratio",
+      "label": "DNS放大 最小响应/请求比",
+      "current_default": 3.0,
+      "attack_sample": "dnsamp",
+      "rule_type": "DNS_AMPLIFICATION_SUSPECTED",
+      "scan_range": [
+        1.5,
+        2.0,
+        2.5,
+        3.0,
+        4.0,
+        5.0
+      ],
+      "roc_points": [
+        {
+          "threshold": 1.5,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 1,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": false
+        },
+        {
+          "threshold": 2.0,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 1,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": false
+        },
+        {
+          "threshold": 2.5,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 1,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": false
+        },
+        {
+          "threshold": 3.0,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 1,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": true
+        },
+        {
+          "threshold": 4.0,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 1,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": false
+        },
+        {
+          "threshold": 5.0,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 1,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": false
+        }
+      ],
+      "optimal_threshold": 1.5,
+      "current_status": "合理（TPR=1,FPR=0）"
+    },
+    {
+      "threshold_key": "quic_flood_min_connections",
+      "label": "QUIC连接洪水 最小连接数",
+      "current_default": 10,
+      "attack_sample": "quicflood",
+      "rule_type": "QUIC_CONNECTION_FLOOD",
+      "scan_range": [
+        2,
+        5,
+        8,
+        10,
+        15,
+        20,
+        30
+      ],
+      "roc_points": [
+        {
+          "threshold": 2,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 2,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": false
+        },
+        {
+          "threshold": 5,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 2,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": false
+        },
+        {
+          "threshold": 8,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 2,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": false
+        },
+        {
+          "threshold": 10,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 2,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": true
+        },
+        {
+          "threshold": 15,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 2,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": false
+        },
+        {
+          "threshold": 20,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 2,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": false
+        },
+        {
+          "threshold": 30,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 2,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": false
+        }
+      ],
+      "optimal_threshold": 2,
+      "current_status": "合理（TPR=1,FPR=0）"
+    },
+    {
+      "threshold_key": "quic_initial_ratio_threshold",
+      "label": "QUIC初始包比例 阈值",
+      "current_default": 0.05,
+      "attack_sample": "quicflood",
+      "rule_type": "QUIC_INITIAL_RATIO_ANOMALY",
+      "scan_range": [
+        0.01,
+        0.05,
+        0.1,
+        0.2,
+        0.3,
+        0.5
+      ],
+      "roc_points": [
+        {
+          "threshold": 0.01,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 2,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": false
+        },
+        {
+          "threshold": 0.05,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 2,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": true
+        },
+        {
+          "threshold": 0.1,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 2,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": false
+        },
+        {
+          "threshold": 0.2,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 2,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": false
+        },
+        {
+          "threshold": 0.3,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 2,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": false
+        },
+        {
+          "threshold": 0.5,
+          "tpr": 1.0,
+          "fpr": 0.0,
+          "attack_alerts": 2,
+          "attack_triggered": true,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": false
+        }
+      ],
+      "optimal_threshold": 0.01,
+      "current_status": "合理（TPR=1,FPR=0）"
+    },
+    {
+      "threshold_key": "quic_long_flow_min_packets",
+      "label": "QUIC长流异常 最小包数",
+      "current_default": 100,
+      "attack_sample": "quicflood",
+      "rule_type": "QUIC_LONG_FLOW_ANOMALY",
+      "scan_range": [
+        10,
+        20,
+        30,
+        50,
+        80,
+        100
+      ],
+      "roc_points": [
+        {
+          "threshold": 10,
+          "tpr": 0.0,
+          "fpr": 0.0,
+          "attack_alerts": 2,
+          "attack_triggered": false,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": false
+        },
+        {
+          "threshold": 20,
+          "tpr": 0.0,
+          "fpr": 0.0,
+          "attack_alerts": 2,
+          "attack_triggered": false,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": false
+        },
+        {
+          "threshold": 30,
+          "tpr": 0.0,
+          "fpr": 0.0,
+          "attack_alerts": 2,
+          "attack_triggered": false,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": false
+        },
+        {
+          "threshold": 50,
+          "tpr": 0.0,
+          "fpr": 0.0,
+          "attack_alerts": 2,
+          "attack_triggered": false,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": false
+        },
+        {
+          "threshold": 80,
+          "tpr": 0.0,
+          "fpr": 0.0,
+          "attack_alerts": 2,
+          "attack_triggered": false,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": false
+        },
+        {
+          "threshold": 100,
+          "tpr": 0.0,
+          "fpr": 0.0,
+          "attack_alerts": 2,
+          "attack_triggered": false,
+          "normal_alerts": 0,
+          "normal_alert_types": [],
+          "is_current_default": true
+        }
+      ],
+      "optimal_threshold": null,
+      "current_status": "需关注（当前阈值下 TPR或FPR不理想）"
+    }
+  ],
+  "summary_stats": {
+    "合理阈值数": 9,
+    "需关注阈值数": 1,
+    "有最优建议数": 9
+  }
+}

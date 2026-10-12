@@ -77,6 +77,14 @@ jobs:
           if not exist models\bge-small-zh-v1.5 mkdir models\bge-small-zh-v1.5
           curl -L -o models\bge-small-zh-v1.5\model.onnx "https://hf-mirror.com/Xenova/bge-small-zh-v1.5/resolve/main/onnx/model.onnx"
           curl -L -o models\bge-small-zh-v1.5\tokenizer.json "https://hf-mirror.com/Xenova/bge-small-zh-v1.5/resolve/main/tokenizer.json"
+      - name: 校验模型 sha256（供应链完整性）
+        # 【为什么必需】上面两个 curl 从第三方镜像下载二进制，随后会被 PyInstaller
+        # 打进安装包、并在用户机器上交给 onnxruntime 执行。不校验就等于信任任意远端内容。
+        # 期望哈希**从仓库自身的白名单常量读取**（src/ai/embeddings/bge_onnx.py 的
+        # MODEL_SHA256），而不是在本文件里再硬编码一份 —— 否则上游更新白名单后，
+        # CI 会继续用旧值通过，形成"CI 绿但应用拒绝加载"的分裂状态。
+        shell: cmd
+        run: venv\Scripts\python.exe tools\verify_model_integrity.py --require
       - name: PyInstaller 打包（约 10-30 分钟）
         shell: cmd
         run: build_exe.bat < nul

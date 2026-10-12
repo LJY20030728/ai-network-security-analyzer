@@ -237,13 +237,19 @@ class TrafficAnalyzer:
     整合流提取、规则异常检测、EWMA时序基线检测、统计分析
     """
 
-    # 规则元信息（证据链标注用）
+    # 规则元信息（证据链标注用）—— 与 RuleDetector.RULE_NAMES 保持一致，额外包含基线
     RULE_NAMES = {
-        "SYN_FLOOD_SUSPECTED": "syn-flood-rate",
-        "PORT_SCAN_SUSPECTED": "port-scan-distinct-ports",
-        "DNS_TUNNEL_SUSPECTED": "dns-tunnel-query-length",
-        "LARGE_DATA_TRANSFER": "large-flow-bytes",
-        "RST_STORM": "rst-storm-rate",
+        "SYN_FLOOD_SUSPECTED": "rule-based-syn-flood",
+        "PORT_SCAN_SUSPECTED": "rule-based-port-scan",
+        "DNS_TUNNEL_SUSPECTED": "rule-based-dns-tunnel",
+        "LARGE_DATA_TRANSFER": "rule-based-large-transfer",
+        "RST_STORM": "rule-based-rst-storm",
+        "UDP_FLOOD_SUSPECTED": "rule-based-udp-flood",
+        "DNS_AMPLIFICATION_SUSPECTED": "rule-based-dns-amplification",
+        "QUIC_CONNECTION_FLOOD": "rule-based-quic-connection-flood",
+        "QUIC_LONG_FLOW_ANOMALY": "rule-based-quic-long-flow",
+        "QUIC_INITIAL_RATIO_ANOMALY": "rule-based-quic-initial-ratio",
+        "QUIC_UNKNOWN_VERSION": "rule-based-quic-version",
         "BASELINE_DEVIATION": "ewma-statistical-baseline",
     }
 

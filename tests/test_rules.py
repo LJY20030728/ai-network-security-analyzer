@@ -89,7 +89,7 @@ class TestAlertQuality:
         pkts = [mk(i * 0.001, flags="SYN") for i in range(120)]
         rep = detect(analyzer, pkts)
         a = next(x for x in rep["alerts"] if x["type"] == "SYN_FLOOD_SUSPECTED")
-        assert a["detector"] == "syn-flood-rate"
+        assert a["detector"] == "rule-based-syn-flood"
         assert "syn_flood_min_count" in a["rule_threshold"]
         assert a["time_window"] != ""
 

@@ -68,18 +68,23 @@ def _tw(ts_list: list) -> str:
 class RuleDetector:
     """共享规则检测器：11 条阈值规则，输入累加器状态，输出 alerts。
 
-    与 TrafficAnalyzer.RULE_NAMES 保持一致的 detector 命名；
-    UDP/QUIC 规则的 detector 使用硬编码字符串（与原实现逐字一致）。
+    RULE_NAMES 为全部 11 条规则的 detector 标识，统一使用 rule-based- 前缀。
+    detect() 中所有告警的 detector 字段均通过 RULE_NAMES 引用，禁止硬编码。
     """
 
-    # 与 TrafficAnalyzer.RULE_NAMES 保持一致
+    # 全部 11 条规则的 detector 标识（统一 rule-based- 前缀）
     RULE_NAMES = {
-        "SYN_FLOOD_SUSPECTED": "syn-flood-rate",
-        "PORT_SCAN_SUSPECTED": "port-scan-distinct-ports",
-        "DNS_TUNNEL_SUSPECTED": "dns-tunnel-query-length",
-        "LARGE_DATA_TRANSFER": "large-flow-bytes",
-        "RST_STORM": "rst-storm-rate",
-        "BASELINE_DEVIATION": "ewma-statistical-baseline",
+        "SYN_FLOOD_SUSPECTED": "rule-based-syn-flood",
+        "PORT_SCAN_SUSPECTED": "rule-based-port-scan",
+        "DNS_TUNNEL_SUSPECTED": "rule-based-dns-tunnel",
+        "LARGE_DATA_TRANSFER": "rule-based-large-transfer",
+        "RST_STORM": "rule-based-rst-storm",
+        "UDP_FLOOD_SUSPECTED": "rule-based-udp-flood",
+        "DNS_AMPLIFICATION_SUSPECTED": "rule-based-dns-amplification",
+        "QUIC_CONNECTION_FLOOD": "rule-based-quic-connection-flood",
+        "QUIC_LONG_FLOW_ANOMALY": "rule-based-quic-long-flow",
+        "QUIC_INITIAL_RATIO_ANOMALY": "rule-based-quic-initial-ratio",
+        "QUIC_UNKNOWN_VERSION": "rule-based-quic-version",
     }
 
     def __init__(self, thresholds: Dict[str, Any]):
@@ -183,7 +188,7 @@ class RuleDetector:
                     "severity": "HIGH" if count > t["udp_flood_high_packets"] else "MEDIUM",
                     "dst_ip": dst,
                     "udp_packet_count": count,
-                    "detector": "rule-based-udp-flood",
+                    "detector": self.RULE_NAMES["UDP_FLOOD_SUSPECTED"],
                     "rule_threshold": {"udp_flood_min_packets": t["udp_flood_min_packets"]},
                     "time_window": _tw(state.udp_ts.get(dst, [])),
                     "description": f"目标IP {dst} 收到 {count} 个UDP包，疑似UDP洪水攻击",
@@ -203,7 +208,7 @@ class RuleDetector:
                     "response_bytes": resp_bytes,
                     "request_bytes": req_bytes,
                     "response_count": state.dns_resp_count[target],
-                    "detector": "rule-based-dns-amplification",
+                    "detector": self.RULE_NAMES["DNS_AMPLIFICATION_SUSPECTED"],
                     "rule_threshold": {"dns_amp_min_ratio": t["dns_amp_min_ratio"]},
                     "time_window": _tw(state.dns_resp_ts.get(target, [])),
                     "description": f"目标IP {target} DNS响应/请求字节比={ratio:.1f}x，"
@@ -220,7 +225,7 @@ class RuleDetector:
                         "severity": "HIGH",
                         "src_ip": src,
                         "unique_quic_connections": len(ports),
-                        "detector": "rule-based-quic-flood",
+                        "detector": self.RULE_NAMES["QUIC_CONNECTION_FLOOD"],
                         "rule_threshold": {"quic_flood_min_connections": t["quic_flood_min_connections"]},
                         "time_window": _tw(state.quic_src_ts.get(src, [])),
                         "description": f"源IP {src} 发起 {len(ports)} 条不同QUIC连接（源端口），"
@@ -235,7 +240,7 @@ class RuleDetector:
                         "severity": "MEDIUM",
                         "flow": flow_key,
                         "packet_count": count,
-                        "detector": "rule-based-quic-long-flow",
+                        "detector": self.RULE_NAMES["QUIC_LONG_FLOW_ANOMALY"],
                         "rule_threshold": {"quic_long_flow_min_packets": t["quic_long_flow_min_packets"]},
                         "time_window": _tw(state.quic_flow_ts.get(flow_key, [])),
                         "description": f"QUIC流 {flow_key} 持续 {count} 个包，"
@@ -251,7 +256,7 @@ class RuleDetector:
                     "large_packet_ratio": round(quic_initial_ratio, 3),
                     "total_quic_packets": state.quic_total,
                     "large_packet_count": state.quic_large,
-                    "detector": "rule-based-quic-initial-ratio",
+                    "detector": self.RULE_NAMES["QUIC_INITIAL_RATIO_ANOMALY"],
                     "rule_threshold": {"quic_initial_ratio_threshold": t["quic_initial_ratio_threshold"]},
                     "time_window": _tw(state.quic_all_ts),
                     "description": f"QUIC大包（疑似初始包）占比={quic_initial_ratio:.1%}，"
@@ -264,7 +269,7 @@ class RuleDetector:
                     "type": "QUIC_UNKNOWN_VERSION",
                     "severity": "LOW",
                     "unknown_versions": sorted(state.quic_unknown_versions),
-                    "detector": "rule-based-quic-version",
+                    "detector": self.RULE_NAMES["QUIC_UNKNOWN_VERSION"],
                     "description": f"检测到未知QUIC版本号: {', '.join(sorted(state.quic_unknown_versions))}，"
                                    f"可能是实验性协议或异常客户端",
                 })

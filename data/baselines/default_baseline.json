@@ -1,0 +1,41 @@
+{
+  "name": "",
+  "created_at": "2026-10-09 21:00:10",
+  "packets_used": 2729,
+  "alpha": 0.1,
+  "sigma": 3.0,
+  "window_sec": 10,
+  "learned": true,
+  "dimensions": [
+    "window_packets",
+    "window_bytes",
+    "window_syn",
+    "window_dports"
+  ],
+  "profile": {
+    "window_packets": {
+      "median": 61.0,
+      "mad": 18.3,
+      "raw_mad": 9.0,
+      "samples": 45
+    },
+    "window_bytes": {
+      "median": 13773.0,
+      "mad": 6886.5,
+      "raw_mad": 2224.0,
+      "samples": 45
+    },
+    "window_syn": {
+      "median": 0.0,
+      "mad": 1.0,
+      "raw_mad": 0.0,
+      "samples": 45
+    },
+    "window_dports": {
+      "median": 1.0,
+      "mad": 1.0,
+      "raw_mad": 0.0,
+      "samples": 45
+    }
+  }
+}

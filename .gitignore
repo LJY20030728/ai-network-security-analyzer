@@ -43,8 +43,11 @@ data/config/
 *.log
 logs/
 
-# Runtime-generated baselines (user-learned, default example in data/baselines/default/)
+# Runtime-generated baselines (user-learned)
 data/baselines/*.json
+# 预置默认基线随安装包分发，必须入库（CI 依赖此文件）
+!data/baselines/default_baseline.json
+!data/baselines/base-attack.json
 
 # IDE
 .vscode/

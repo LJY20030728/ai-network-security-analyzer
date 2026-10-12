@@ -1043,7 +1043,7 @@ venv\Scripts\python.exe -m PyInstaller --noconfirm --clean --onedir --windowed ^
 ### [2.0.0] - 2026-09-11
 
 - P0-P3完整重构：三引擎 Stacking 融合检测 + LLM幻觉控制 + RAG混合检索 + 取证知识库 + DPAPI加密
-- 141个单元测试全绿，平均分析耗时5.9s/文件，内存峰值23MB
+- 306个单元测试全绿，平均分析耗时5.9s/文件，内存峰值23MB
 
 ---
 

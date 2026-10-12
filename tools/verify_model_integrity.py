@@ -19,6 +19,14 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# 必须在任何 print 之前：本脚本输出中文与 ✅ 符号，而 Windows 控制台的 stdout
+# 编码取自当前代码页（CI 重定向时为 cp1252，本地中文为 gbk）→ UnicodeEncodeError。
+# 复用 helpers 的既有实现（tools/ 下 21 个脚本均如此），不新造轮子。
+# 实测事故：GitHub Actions 的 Windows build job 在本脚本第一行中文标题处崩溃。
+from src.utils.helpers import force_utf8_stdout  # noqa: E402
+
+force_utf8_stdout()
+
 
 def sha256_of(path: str, chunk: int = 1024 * 1024) -> str:
     h = hashlib.sha256()

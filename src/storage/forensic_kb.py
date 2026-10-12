@@ -153,10 +153,30 @@ class ForensicKnowledgeBase:
         """
         趋势分析：分析历史记录的攻击趋势
         返回：按日统计、攻击类型分布、严重度趋势、主引擎判定趋势
+
+        【契约】无论有无历史数据，返回**同一组字段**（空态取零值/空容器）。
+        此前空态返回 `{"total": 0, "message": "无历史数据"}` —— 只有 2 个字段，
+        而有数据时返回 12 个字段。于是消费者（如 UI 趋势分析端点）必须先判断
+        "有没有数据"才能取字段，否则全新安装第一次调用即字段缺失。
+        改为同构返回；`message` 作为提示性附加信息保留。
         """
         records = self._db.list_analysis(limit=500)
         if not records:
-            return {"total": 0, "message": "无历史数据"}
+            return {
+                "total_records": 0,
+                "attack_records": 0,
+                "normal_records": 0,
+                "attack_rate": 0,
+                "total_alerts": 0,
+                "avg_alerts_per_record": 0,
+                "daily_stats": {},
+                "severity_trend": {},
+                "verdict_trend": {},
+                "top_attack_types": [],
+                "needs_review_count": 0,
+                "high_risk_count": 0,
+                "message": "无历史数据",
+            }
 
         # 按日统计
         daily_stats = defaultdict(lambda: {"total": 0, "attack": 0, "normal": 0, "alerts": 0})

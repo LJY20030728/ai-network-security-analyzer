@@ -168,6 +168,13 @@ class TestForensicKnowledgeBase:
         assert "baseline_count" in stats
 
     def test_get_trend_analysis(self):
+        """有历史数据时返回完整趋势结构。
+
+        注：本测试断言的是"有数据"分支的字段集。**"无数据"分支必须返回同构字段**
+        由 tests/test_trend_analysis_contract.py 单独锁定 —— 此前该分支只返回
+        `{"total", "message"}`，导致全新安装（CI 干净 checkout 即此状态）调用
+        趋势分析端点时字段缺失。
+        """
         from src.storage.forensic_kb import get_forensic_kb
         trend = get_forensic_kb().get_trend_analysis(days=7)
         assert "total_records" in trend

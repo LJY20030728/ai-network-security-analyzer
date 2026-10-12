@@ -28,6 +28,30 @@ rem 会使 PyInstaller 的 PyQt5 hook 取不到 Qt 路径并直接报
 rem "Qt plugin directory ... does not exist!"。故排除 PyQt5 相关模块。
 set "QT_API=pyqt6"
 
+rem ---- 预构建向量库 data\chroma_db 的条件化打包 ----
+rem 背景：该目录被 .gitignore 忽略（66MB 二进制），因此**干净的 CI checkout 里不存在**，
+rem 而 --add-data 引用不存在的路径会让 PyInstaller 直接报
+rem   ERROR: Unable to find '...\data\chroma_db' when adding binary and data files.
+rem 使打包步骤必然失败（实测：CI 首次执行到该步即中断）。
+rem
+rem 为何可以缺省：应用具备自愈能力 —— RAGEngine._ensure_seeded() 在集合为空时会从
+rem 随包分发的 data\knowledge\docs（1.4MB，已入库）自动播种。
+rem 代价：运行时重建的块数少于预构建库（内置知识源约 63 块 vs 预构建 1687 块，
+rem 后者含 build_knowledge_base.py 导入的 MITRE 外部文档），即**首启动知识量较少**。
+rem 故本地与正式发布仍应带上它；CI 仅验证"能否打包成功"。
+rem
+rem 注：这里用 goto 而非 if(...) 块 —— cmd 会在解析整个括号块时一次性展开
+rem %VAR%，块内 set 的值在同块内不可见（实测会得到空参数）。
+set "CHROMA_ARG="
+if exist "data\chroma_db" goto have_chroma
+echo [警告] 未找到 data\chroma_db —— 跳过预构建向量库。
+echo         产物首启动将按内置知识源自愈重建，知识量少于预构建库。
+echo         正式发布前请先执行: venv\Scripts\python.exe tools\build_knowledge_base.py
+goto chroma_done
+:have_chroma
+set "CHROMA_ARG=--add-data data\chroma_db;data\chroma_db"
+:chroma_done
+
 "venv\Scripts\python.exe" -m PyInstaller ^
     --noconfirm ^
     --clean ^
@@ -37,7 +61,7 @@ set "QT_API=pyqt6"
     --add-data "config;config" ^
     --add-data "src;src" ^
     --add-data "data\baselines;data\baselines" ^
-    --add-data "data\chroma_db;data\chroma_db" ^
+    %CHROMA_ARG% ^
     --add-data "data\knowledge\docs;data\knowledge\docs" ^
     --add-data "data\knowledge\attack_types;data\knowledge\attack_types" ^
     --add-data "models\bge-small-zh-v1.5;models\bge-small-zh-v1.5" ^

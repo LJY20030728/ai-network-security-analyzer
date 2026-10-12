@@ -1,0 +1,286 @@
+{
+  "experiment": "three_engine_ablation",
+  "window_sec": 10,
+  "n_samples": 20,
+  "n_windows": 1732,
+  "n_attack_windows": 805,
+  "n_normal_windows": 927,
+  "global_metrics": {
+    "rule_only": {
+      "precision": 0.69,
+      "recall": 0.7466,
+      "f1": 0.7172,
+      "accuracy": 0.7263,
+      "tp": 601,
+      "fp": 270,
+      "fn": 204,
+      "tn": 657,
+      "total": 1732
+    },
+    "baseline_only": {
+      "precision": 0.6879,
+      "recall": 0.7391,
+      "f1": 0.7126,
+      "accuracy": 0.7229,
+      "tp": 595,
+      "fp": 270,
+      "fn": 210,
+      "tn": 657,
+      "total": 1732
+    },
+    "isolation_only": {
+      "precision": 0.4697,
+      "recall": 1.0,
+      "f1": 0.6391,
+      "accuracy": 0.4752,
+      "tp": 805,
+      "fp": 909,
+      "fn": 0,
+      "tn": 18,
+      "total": 1732
+    },
+    "stacking": {
+      "precision": 0.7368,
+      "recall": 0.9391,
+      "f1": 0.8258,
+      "accuracy": 0.8158,
+      "tp": 756,
+      "fp": 270,
+      "fn": 49,
+      "tn": 657,
+      "total": 1732
+    }
+  },
+  "loo_average": {
+    "precision": 0.6948,
+    "recall": 0.6731,
+    "f1": 0.5646,
+    "accuracy": 0.5506
+  },
+  "loo_per_sample": {
+    "baseline_demo_attack": {
+      "precision": 1.0,
+      "recall": 0.9333,
+      "f1": 0.9655,
+      "accuracy": 0.9333,
+      "tp": 56,
+      "fp": 0,
+      "fn": 4,
+      "tn": 0,
+      "total": 60
+    },
+    "baseline_demo_normal": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "accuracy": 0.0444,
+      "tp": 0,
+      "fp": 43,
+      "fn": 0,
+      "tn": 2,
+      "total": 45
+    },
+    "burst": {
+      "precision": 1.0,
+      "recall": 0.1489,
+      "f1": 0.2593,
+      "accuracy": 0.1489,
+      "tp": 35,
+      "fp": 0,
+      "fn": 200,
+      "tn": 0,
+      "total": 235
+    },
+    "dnsamp": {
+      "precision": 1.0,
+      "recall": 0.5,
+      "f1": 0.6667,
+      "accuracy": 0.5,
+      "tp": 1,
+      "fp": 0,
+      "fn": 1,
+      "tn": 0,
+      "total": 2
+    },
+    "dnstunnel": {
+      "precision": 1.0,
+      "recall": 0.5,
+      "f1": 0.6667,
+      "accuracy": 0.5,
+      "tp": 1,
+      "fp": 0,
+      "fn": 1,
+      "tn": 0,
+      "total": 2
+    },
+    "largeflow": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "accuracy": 1.0,
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "tn": 0,
+      "total": 1
+    },
+    "lightscan": {
+      "precision": 1.0,
+      "recall": 0.5253,
+      "f1": 0.6888,
+      "accuracy": 0.5253,
+      "tp": 114,
+      "fp": 0,
+      "fn": 103,
+      "tn": 0,
+      "total": 217
+    },
+    "mix_normal_burst": {
+      "precision": 0.5238,
+      "recall": 0.1872,
+      "f1": 0.2759,
+      "accuracy": 0.175,
+      "tp": 44,
+      "fp": 40,
+      "fn": 191,
+      "tn": 5,
+      "total": 280
+    },
+    "mix_normal_dnstunnel": {
+      "precision": 0.0227,
+      "recall": 1.0,
+      "f1": 0.0444,
+      "accuracy": 0.0652,
+      "tp": 1,
+      "fp": 43,
+      "fn": 0,
+      "tn": 2,
+      "total": 46
+    },
+    "mix_normal_portscan": {
+      "precision": 0.1042,
+      "recall": 1.0,
+      "f1": 0.1887,
+      "accuracy": 0.14,
+      "tp": 5,
+      "fp": 43,
+      "fn": 0,
+      "tn": 2,
+      "total": 50
+    },
+    "mix_normal_rststorm": {
+      "precision": 0.1224,
+      "recall": 1.0,
+      "f1": 0.2182,
+      "accuracy": 0.1569,
+      "tp": 6,
+      "fp": 43,
+      "fn": 0,
+      "tn": 2,
+      "total": 51
+    },
+    "mix_normal_synflood": {
+      "precision": 0.1224,
+      "recall": 1.0,
+      "f1": 0.2182,
+      "accuracy": 0.1569,
+      "tp": 6,
+      "fp": 43,
+      "fn": 0,
+      "tn": 2,
+      "total": 51
+    },
+    "mix_short_normal_portscan": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "accuracy": 1.0,
+      "tp": 6,
+      "fp": 0,
+      "fn": 0,
+      "tn": 219,
+      "total": 225
+    },
+    "mix_short_normal_synflood": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "accuracy": 1.0,
+      "tp": 6,
+      "fp": 0,
+      "fn": 0,
+      "tn": 219,
+      "total": 225
+    },
+    "normal": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "accuracy": 1.0,
+      "tp": 0,
+      "fp": 0,
+      "fn": 0,
+      "tn": 219,
+      "total": 219
+    },
+    "portscan": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "accuracy": 1.0,
+      "tp": 6,
+      "fp": 0,
+      "fn": 0,
+      "tn": 0,
+      "total": 6
+    },
+    "quicflood": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "accuracy": 1.0,
+      "tp": 2,
+      "fp": 0,
+      "fn": 0,
+      "tn": 0,
+      "total": 2
+    },
+    "rststorm": {
+      "precision": 1.0,
+      "recall": 0.6667,
+      "f1": 0.8,
+      "accuracy": 0.6667,
+      "tp": 4,
+      "fp": 0,
+      "fn": 2,
+      "tn": 0,
+      "total": 6
+    },
+    "synflood": {
+      "precision": 1.0,
+      "recall": 0.6667,
+      "f1": 0.8,
+      "accuracy": 0.6667,
+      "tp": 4,
+      "fp": 0,
+      "fn": 2,
+      "tn": 0,
+      "total": 6
+    },
+    "udpflood": {
+      "precision": 1.0,
+      "recall": 0.3333,
+      "f1": 0.5,
+      "accuracy": 0.3333,
+      "tp": 1,
+      "fp": 0,
+      "fn": 2,
+      "tn": 0,
+      "total": 3
+    }
+  },
+  "best_single_engine": "rule_only",
+  "best_single_f1": 0.7172,
+  "stacking_f1": 0.8258,
+  "fusion_gain": 0.1086
+}

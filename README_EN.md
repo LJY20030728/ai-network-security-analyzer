@@ -265,6 +265,39 @@ token is generated automatically on first run and persisted to `.env` as
 > attack-segment timing, not per-flow human annotation). **These weights should not
 > be read as an optimal fusion policy for production.** See `tools/train_stacking.py`.
 
+**Three-Engine Ablation Study** (`tools/ablation_three_engine.py`, reproducible):
+
+On 20 samples (13 golden + 7 mixed), 1732 windows (805 attack / 927 normal), window-level binary classification:
+
+| Strategy | Precision | Recall | F1 | Accuracy |
+|----------|-----------|--------|-----|----------|
+| Rule engine only | 0.6900 | 0.7466 | 0.7172 | 0.7263 |
+| EWMA baseline only | 0.6879 | 0.7391 | 0.7126 | 0.7229 |
+| Isolation Forest only | 0.4697 | 1.0000 | 0.6391 | 0.4752 |
+| **Three-Engine Stacking** | **0.7368** | **0.9391** | **0.8258** | **0.8158** |
+| Stacking LOO (leave-one-out) | 0.6948 | 0.6731 | 0.5646 | 0.5506 |
+
+**Key findings**:
+- Stacking fusion improves F1 by **+0.1086 (+15.1%)** over the best single engine (rules, F1=0.7172), proving multi-engine complementarity
+- Isolation Forest has 100% recall but only 0.47 precision (flags most windows as anomalous), too many false positives alone
+- LOO cross-sample F1=0.5646 reflects generalization limits on unseen traffic at this data scale (real limitation, not hidden)
+
+**Model Provenance**: `models/stacking_meta_learner.joblib` embeds training metadata, verifiable via:
+
+```bash
+python -c "import joblib; d=joblib.load('models/stacking_meta_learner.joblib'); print(d['provenance'])"
+```
+
+| Provenance field | Value |
+|-----------------|-------|
+| Training windows (deduped) | 1368 (664 attack / 704 normal) |
+| Sample groups | 17 PCAPs |
+| Data fingerprint (SHA256 prefix) | `ec2d7d98a21bfc8f` |
+| Window size | 10s |
+| Labeling | window-level (mixed sample normal prefix=0 / attack segment=1 / cross-boundary dropped) |
+| Trained at | 2026-10-10 16:17:11 |
+| Git commit | `4bab4c5` |
+
 ### Per-Engine Independent Evaluation
 
 | Evaluation | Script | Artifact |

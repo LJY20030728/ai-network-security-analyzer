@@ -8,7 +8,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.141-green.svg)](https://fastapi.tiangolo.com/)
 [![Gradio](https://img.shields.io/badge/Gradio-6.x-orange.svg)](https://www.gradio.app/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-306%20passed-brightgreen.svg)](#测试)
+[![Tests](https://img.shields.io/badge/tests-471%20passed-brightgreen.svg)](#测试)
 [![CI](https://github.com/LJY20030728/ai-network-security-analyzer/actions/workflows/ci.yml/badge.svg)](https://github.com/LJY20030728/ai-network-security-analyzer/actions/workflows/ci.yml)
 
 **[中文版](#目录) | [English Version](README_EN.md)**
@@ -488,9 +488,15 @@ docker compose up -d --build
 
 | 指标 | 数值 |
 |------|------|
-| 测试结果 | **306 passed**（含 7 个新增 UDP/QUIC 端到端测试；3 个预存 `.pytest_tmp` 环境问题与本次重构无关） |
-| 测试文件数 | 27 个 |
-| 覆盖模块 | 算法检测 / API 路由 / 存储 / 安全 / 服务层 / 工具 / 版本一致性 |
+| 测试结果 | **471 passed / 0 failed**（本地与 CI 一致；CI 三个平台：Linux 3.11 / Linux 3.13 / Windows 3.11） |
+| 测试文件数 | 29 个 |
+| 覆盖模块 | 算法检测 / API 路由 / 存储 / 安全 / 服务层 / 工具 / 版本一致性 / 资源完整性 |
+| CI | 全流程绿：三平台测试 → 模型 sha256 校验 → PyInstaller 打包 → Inno Setup 生成安装包 → 上传 artifact |
+
+> **关于测试资源**：`tests/test_required_assets.py` 是一道**元测试**，断言"测试与打包依赖的资源必须在 git 中"。
+> 它防的是一类反复发作的系统性缺陷：`.gitignore` 把**产品资源**当**用户数据**忽略，
+> 导致开发机本地全绿、CI 干净 checkout 必红（历史上曾因此 48 次 CI 运行全部失败）。
+> 新增依赖资源时，需同时登记到该文件的 `REQUIRED_ASSETS`。
 
 ---
 
@@ -812,6 +818,13 @@ build_exe.bat        :: PyInstaller 打包 → dist\AI网络安全分析系统\
 
 前置条件：已执行 `安装依赖.bat` 建好 venv；做安装包还需 Inno Setup 6
 （`winget install JRSoftware.InnoSetup`）。
+
+> **打包前置条件 data/chroma_db**：uild_exe.bat 会**条件化**打包预构建向量库
+> （66MB，被 .gitignore 忽略）。目录存在时照常内置；不存在时跳过并打印告警，
+> 产物在首启动由 RAGEngine._ensure_seeded() 从随包分发的 data/knowledge/docs
+> 自愈重建。**CI 走的就是后一条路径**（干净 checkout 无该目录），
+> 故 CI 打包成功不等于预构建库已内置；正式发布前请先执行
+> env\Scripts\python.exe tools\build_knowledge_base.py 生成它。
 
 > **关于 AI网络安全分析系统.spec**：它是 PyInstaller 在构建时**自动重新生成**
 > 的文件（--clean 会覆盖它），因此其中的行内注释不会保留 ——

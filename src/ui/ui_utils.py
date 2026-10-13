@@ -3,16 +3,12 @@
 UI 层工具函数集合
 
 从 gradio_app.py 拆出的独立工具函数，降低主文件复杂度。
-包含：API Key 校验、路径安全、文件上传校验、基线路径管理等。
+仅包含不依赖全局状态的纯函数：API Key 校验、掩码、回环地址检测。
+
+注意：_baseline_path 和 _check_upload_file 依赖 gradio_app.py 的全局状态
+（settings、BASELINE_DIR、validate_upload_file），保留在主文件中，未拆分。
 """
 import os
-import re
-from typing import List, Dict, Any, Optional
-
-from loguru import logger
-
-from src.utils.paths import data_dir
-from src.storage.baseline_name import safe_baseline_name
 
 
 def _looks_like_real_api_key(value: str) -> bool:
@@ -69,29 +65,3 @@ def _is_loopback_host(host: str) -> bool:
         return ipaddress.ip_address(h.strip("[]")).is_loopback
     except ValueError:
         return False
-
-
-def _baseline_path(name: str) -> str:
-    """根据基线名称生成安全的 JSON 文件路径（防路径穿越 + 长度限制）。"""
-    safe = safe_baseline_name(name)
-    return os.path.join(data_dir("baselines"), f"{safe}.json")
-
-
-def _check_upload_file(filename: str, size: int):
-    """校验上传文件：扩展名白名单 + 大小限制，不通过则抛 HTTPException。"""
-    from fastapi import HTTPException
-
-    ALLOWED_EXT = {".pcap", ".pcapng", ".cap"}
-    MAX_SIZE = 200 * 1024 * 1024  # 200MB
-
-    ext = os.path.splitext(filename)[1].lower()
-    if ext not in ALLOWED_EXT:
-        raise HTTPException(
-            status_code=400,
-            detail=f"不支持的文件类型: {ext}（仅支持 {', '.join(sorted(ALLOWED_EXT))}）"
-        )
-    if size > MAX_SIZE:
-        raise HTTPException(
-            status_code=413,
-            detail=f"文件过大: {size / 1024 / 1024:.1f}MB（上限 {MAX_SIZE // 1024 // 1024}MB）"
-        )

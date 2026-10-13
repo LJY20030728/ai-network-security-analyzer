@@ -79,7 +79,6 @@ from src.api.task_queue import get_task_queue
 from src.ui.charts import _build_baseline_compare_svg, _build_baseline_profile_svg
 from src.ui.ui_utils import (
     _looks_like_real_api_key, mask_key, _is_loopback_host,
-    _baseline_path, _check_upload_file,
 )
 from src.storage.baseline_name import safe_baseline_name, validate_baseline_name
 # 分析流水线已抽到服务层（唯一实现，UI/API 共用），见 §4c 重构

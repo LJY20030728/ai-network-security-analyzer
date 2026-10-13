@@ -45,15 +45,10 @@ EXPECTED_FIELDS = [
 ]
 
 
-def _kb_with_empty_db(tmp_path) -> ForensicKnowledgeBase:
-    """构造一个指向**空数据库**的 ForensicKnowledgeBase（不碰真实 data/db）。"""
-    db_path = os.path.join(str(tmp_path), "empty.db")
-    db = Database.__new__(Database)          # 绕过单例，拿到独立实例
-    db._db_path = db_path
-    import threading
-    db._local = threading.local()
-    db._lock = threading.Lock()
-    db._init_tables()
+def _kb_with_empty_db() -> ForensicKnowledgeBase:
+    """构造一个指向**空内存数据库**的 ForensicKnowledgeBase（不碰真实 data/db，避免防病毒拦截SQLite文件写入）。"""
+    Database.reset_for_testing()
+    db = Database(":memory:")
     assert db.list_analysis(limit=10) == [], "测试前提：该库必须为空"
 
     kb = ForensicKnowledgeBase.__new__(ForensicKnowledgeBase)
@@ -62,9 +57,9 @@ def _kb_with_empty_db(tmp_path) -> ForensicKnowledgeBase:
 
 
 @pytest.mark.parametrize("field", EXPECTED_FIELDS)
-def test_empty_db_returns_all_contract_fields(tmp_path, field):
+def test_empty_db_returns_all_contract_fields(field):
     """★ 核心断言：空库也必须返回全部 12 个字段。"""
-    kb = _kb_with_empty_db(tmp_path)
+    kb = _kb_with_empty_db()
     trend = kb.get_trend_analysis(days=7)
     assert field in trend, (
         f"空态缺少字段 '{field}' —— 返回结构随数据存在与否而变。\n"
@@ -74,9 +69,9 @@ def test_empty_db_returns_all_contract_fields(tmp_path, field):
     )
 
 
-def test_empty_db_values_are_zero_not_missing(tmp_path):
+def test_empty_db_values_are_zero_not_missing():
     """空态取值应为零值/空容器，而不是 None 或缺失。"""
-    kb = _kb_with_empty_db(tmp_path)
+    kb = _kb_with_empty_db()
     t = kb.get_trend_analysis(days=7)
     assert t["total_records"] == 0
     assert t["attack_records"] == 0
@@ -89,9 +84,9 @@ def test_empty_db_values_are_zero_not_missing(tmp_path):
     assert t["top_attack_types"] == []
 
 
-def test_empty_and_populated_have_identical_key_sets(tmp_path):
+def test_empty_and_populated_have_identical_key_sets():
     """两种状态的**键集合必须完全一致**（同构契约）。"""
-    kb = _kb_with_empty_db(tmp_path)
+    kb = _kb_with_empty_db()
     empty_keys = set(kb.get_trend_analysis(days=7)) - {"message"}
 
     # 造一条记录，让函数走"有数据"分支
@@ -110,9 +105,9 @@ def test_empty_and_populated_have_identical_key_sets(tmp_path):
     )
 
 
-def test_message_only_appears_in_empty_state(tmp_path):
+def test_message_only_appears_in_empty_state():
     """`message` 是空态的提示性附加字段；有数据时不应出现（避免误导）。"""
-    kb = _kb_with_empty_db(tmp_path)
+    kb = _kb_with_empty_db()
     assert kb.get_trend_analysis(days=7).get("message") == "无历史数据"
 
     kb._db.add_analysis({

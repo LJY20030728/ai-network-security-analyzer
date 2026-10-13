@@ -11,8 +11,9 @@ from src.api.audit import AuditLogger
 
 
 @pytest.fixture
-def audit(tmp_path):
-    return AuditLogger(os.path.join(str(tmp_path), "audit.db"))
+def audit():
+    # 使用内存数据库避免防病毒软件拦截SQLite文件写入（Windows环境问题）
+    return AuditLogger(":memory:")
 
 
 class TestAudit:

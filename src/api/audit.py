@@ -39,7 +39,9 @@ class AuditLogger:
 
     def __init__(self, db_path: str):
         self.db_path = db_path
-        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        # 内存数据库（:memory:）无需创建目录
+        if db_path != ":memory:":
+            os.makedirs(os.path.dirname(db_path), exist_ok=True)
         self._conn = sqlite3.connect(db_path, timeout=0.1, check_same_thread=False)
         self._conn.execute("PRAGMA journal_mode=WAL;")
         self._conn.execute("PRAGMA synchronous=NORMAL;")

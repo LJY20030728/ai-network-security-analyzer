@@ -288,19 +288,17 @@ def test_list_analysis_includes_raw():
     assert 'd["raw"]' in src, "未解析为 raw 字段"
 
 
-def test_list_analysis_tolerates_corrupt_json(tmp_path, monkeypatch):
+def test_list_analysis_tolerates_corrupt_json():
     """单行 JSON 损坏不得让整批查询失败。
 
     直接写入损坏的 severity 字符串（绕过 add_analysis 的 json.dumps 归一化，
     以模拟真实的脏数据/旧版本写入）。
+    使用内存数据库避免防病毒软件拦截SQLite文件写入。
     """
-    import threading
     from src.storage.database import Database
 
-    db = Database()
-    monkeypatch.setattr(db, "_db_path", str(tmp_path / "t.db"), raising=False)
-    monkeypatch.setattr(db, "_local", threading.local(), raising=False)
-    db._init_tables()
+    Database.reset_for_testing()
+    db = Database(":memory:")
     db.add_analysis({
         "id": "broken-1", "ts": "2026-01-01 00:00:00", "file": "x.pcap",
         "packets": 1, "flows": 1, "bytes": 1, "alerts": 1,
@@ -318,15 +316,14 @@ def test_list_analysis_tolerates_corrupt_json(tmp_path, monkeypatch):
     assert isinstance(rows[0]["raw"], dict), rows[0]["raw"]
 
 
-def test_forensic_trend_reads_raw_alerts(tmp_path, monkeypatch):
-    """取证统计的攻击类型应能真正读到告警（此前恒为空）。"""
-    import threading
+def test_forensic_trend_reads_raw_alerts():
+    """取证统计的攻击类型应能真正读到告警（此前恒为空）。
+    使用内存数据库避免防病毒软件拦截SQLite文件写入。
+    """
     from src.storage.database import Database
 
-    db = Database()
-    monkeypatch.setattr(db, "_db_path", str(tmp_path / "t2.db"), raising=False)
-    monkeypatch.setattr(db, "_local", threading.local(), raising=False)
-    db._init_tables()
+    Database.reset_for_testing()
+    db = Database(":memory:")
     db.add_analysis({
         "id": "a1", "ts": "2026-01-01 00:00:00", "file": "x.pcap",
         "packets": 1, "flows": 1, "bytes": 1, "alerts": 1,

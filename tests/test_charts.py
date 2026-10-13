@@ -185,14 +185,12 @@ def test_safe_baseline_name_falls_back_instead_of_raising():
 # ----------------------------------------------------------------------
 
 @pytest.fixture
-def temp_db(tmp_path, monkeypatch):
-    """把 Database 单例临时指向 tmp 库（monkeypatch 自动还原）。"""
+def temp_db():
+    """把 Database 单例临时指向内存库（避免防病毒软件拦截SQLite文件写入）。"""
     from src.storage.database import Database
 
-    db = Database()
-    monkeypatch.setattr(db, "_db_path", str(tmp_path / "test.db"), raising=False)
-    monkeypatch.setattr(db, "_local", __import__("threading").local(), raising=False)
-    db._init_tables()
+    Database.reset_for_testing()
+    db = Database(":memory:")
     return db
 
 

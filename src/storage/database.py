@@ -41,10 +41,18 @@ class Database:
             return
         self._initialized = True
         self._db_path = db_path or os.path.join(data_dir("db"), "analyzer.db")
-        ensure_dir(os.path.dirname(self._db_path))
+        # 内存数据库（:memory:）无需创建目录
+        if self._db_path != ":memory:":
+            ensure_dir(os.path.dirname(self._db_path))
         self._local = threading.local()
         self._init_tables()
         logger.info(f"SQLite 数据库初始化完成: {self._db_path}")
+
+    @classmethod
+    def reset_for_testing(cls):
+        """测试用：重置单例，允许创建新的Database实例（如内存数据库）"""
+        with cls._lock:
+            cls._instance = None
 
     def _get_conn(self) -> sqlite3.Connection:
         """获取线程本地连接"""

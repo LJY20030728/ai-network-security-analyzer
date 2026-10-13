@@ -6,7 +6,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110-green.svg)](https://fastapi.tiangolo.com/)
 [![Gradio](https://img.shields.io/badge/Gradio-6.x-orange.svg)](https://www.gradio.app/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-471%20passed-brightgreen.svg)](#test-coverage)
+[![Tests](https://img.shields.io/badge/tests-475%20passed-brightgreen.svg)](#test-coverage)
 
 **[中文版 README](README.md) | English Version**
 
@@ -454,7 +454,7 @@ list.
 
 | Metric | Value |
 |---|---|
-| Test result | **471 passed** (incl. 7 new UDP/QUIC e2e tests; 3 pre-existing `.pytest_tmp` env issues unrelated to this refactor) |
+| Test result | **475 passed** (incl. 7 new UDP/QUIC e2e tests; 3 pre-existing `.pytest_tmp` env issues unrelated to this refactor) |
 | Test files | 27 |
 | Covered modules | Detection algorithms, API routes, storage, security, service layer, tooling |
 

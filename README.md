@@ -8,7 +8,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.141-green.svg)](https://fastapi.tiangolo.com/)
 [![Gradio](https://img.shields.io/badge/Gradio-6.x-orange.svg)](https://www.gradio.app/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-471%20passed-brightgreen.svg)](#测试)
+[![Tests](https://img.shields.io/badge/tests-475%20passed-brightgreen.svg)](#测试)
 [![CI](https://github.com/LJY20030728/ai-network-security-analyzer/actions/workflows/ci.yml/badge.svg)](https://github.com/LJY20030728/ai-network-security-analyzer/actions/workflows/ci.yml)
 
 **[中文版](#目录) | [English Version](README_EN.md)**
@@ -694,7 +694,7 @@ python tools/threshold_calibration.py
 
 | 指标 | 数值 |
 |------|------|
-| 测试结果 | **471 passed / 0 failed**（本地与 CI 一致；CI 三个平台：Linux 3.11 / Linux 3.13 / Windows 3.11） |
+| 测试结果 | **475 passed / 0 failed**（本地与 CI 一致；CI 三个平台：Linux 3.11 / Linux 3.13 / Windows 3.11） |
 | 测试文件数 | 29 个 |
 | 覆盖模块 | 算法检测 / API 路由 / 存储 / 安全 / 服务层 / 工具 / 版本一致性 / 资源完整性 |
 | CI | 全流程绿：三平台测试 → 模型 sha256 校验 → PyInstaller 打包 → Inno Setup 生成安装包 → 上传 artifact |

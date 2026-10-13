@@ -77,6 +77,10 @@ from src.api.task_queue import get_task_queue
 # 图表构建已抽到 src/ui/charts.py（所有插值在模块内统一 html.escape）
 # 名称规范绑定到本地，调用点无需改动
 from src.ui.charts import _build_baseline_compare_svg, _build_baseline_profile_svg
+from src.ui.ui_utils import (
+    _looks_like_real_api_key, mask_key, _is_loopback_host,
+    _baseline_path, _check_upload_file,
+)
 from src.storage.baseline_name import safe_baseline_name, validate_baseline_name
 # 分析流水线已抽到服务层（唯一实现，UI/API 共用），见 §4c 重构
 from src.services.analysis_service import (
@@ -215,21 +219,6 @@ def get_audit_logger() -> AuditLogger:
     return _audit_logger
 
 
-def _is_loopback_host(host: str) -> bool:
-    """主机名/IP 是否为回环地址"""
-    import ipaddress
-
-    h = (host or "").strip().lower()
-    if not h:
-        return False
-    if h in ("localhost", "::1", "[::1]"):
-        return True
-    try:
-        return ipaddress.ip_address(h.strip("[]")).is_loopback
-    except ValueError:
-        return False
-
-
 def _request_is_local(request: Request) -> bool:
     """请求是否来自本机（回环）。
 
@@ -354,47 +343,6 @@ def _open_path_with_shell(path: str) -> tuple:
     except Exception as e:
         logger.warning(f"打开路径失败: {e}")
         return False, f"❌ 打开失败：{e}\n📌 路径：`{real}`"
-
-
-def _looks_like_real_api_key(value: str) -> bool:
-    """判断字符串是否"看起来是真实 API Key"。
-
-    【为什么要这个函数】曾发生真实数据丢失：UI 的掩码 `'0bf7…4U3u'`（含 U+2026）
-    被当作 Key 写进 DPAPI，而 `.env` 的明文同时被清除 —— 真实 Key 就此不可恢复；
-    且掩码的非 ASCII 字符让后续每次 LLM 调用都在 HTTP 头 ASCII 编码处失败。
-
-    掩码/占位符/被截断的值必须被**主动拒绝**，而不是只检查 `'xxxx'`。
-    判定标准（全部满足才算真实）：
-      · 非空且长度 ≥ 20（真实 Key 通常 30+ 字符，掩码只有 9）
-      · 纯 ASCII（掩码含 U+2026，非 ASCII 会在 HTTP 头编码时抛异常）
-      · 不含空白字符
-      · 不含省略号/U+2026 等掩码标记
-    """
-    if not value:
-        return False
-    v = value.strip()
-    if len(v) < 20:
-        return False
-    if not v.isascii():
-        return False
-    if any(c.isspace() for c in v):
-        return False
-    if "\u2026" in v or "..." in v or "***" in v:
-        return False
-    if "xxxx" in v.lower():
-        return False
-    return True
-
-
-def mask_key(value: str) -> str:
-    """把 Key 变成仅用于**展示**的掩码（返回空串表示无有效 Key）。
-
-    只应出现在 info / placeholder / 日志里，**绝不能作为组件的 value**。
-    """
-    if not _looks_like_real_api_key(value):
-        return ""
-    v = value.strip()
-    return f"{v[:4]}…{v[-4:]}"
 
 
 @app.middleware("http")

@@ -66,6 +66,7 @@ desktop.ini
 
 # Testing
 .pytest_cache/
+.pytest_tmp/
 .coverage
 htmlcov/
 
@@ -112,10 +113,6 @@ test_zhipu_api.py
 gradio/
 # pythonnet 运行时配置（生成物）
 *.runtimeconfig.json
-.pytest_cache/
-__pycache__/
-.coverage
-htmlcov/
 
 # PyInstaller 中间产物与锁文件（blat 为 4 字节锁）
 *.manifest

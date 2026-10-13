@@ -147,3 +147,7 @@ build_log*.txt
 
 # 评测脚本生成的临时样本（verify_baseline_value.py 默认写这里，不改动 golden）
 data/samples/generated/
+
+# 测试残留数据库文件
+_test_*.db
+_test_*.db-journal

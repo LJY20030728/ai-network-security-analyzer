@@ -21,7 +21,7 @@ import matplotlib.pyplot as plt
 plt.rcParams["font.sans-serif"] = ["Microsoft YaHei", "SimHei", "DejaVu Sans"]
 plt.rcParams["axes.unicode_minus"] = False
 
-ROOT = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # 项目根目录
 JSON_PATH = os.path.join(ROOT, "data", "eval_perf", "benchmark_result.json")
 DOCS = os.path.join(ROOT, "docs")
 

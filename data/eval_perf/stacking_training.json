@@ -177,8 +177,8 @@
     "dataset_hash": "ec2d7d98a21bfc8f",
     "window_sec": 10,
     "labeling": "per_window(混合样本正常前缀=0/攻击段=1/跨界窗丢弃)",
-    "trained_at": "2026-10-10 16:17:11",
-    "git_sha": "4bab4c5"
+    "trained_at": "2026-10-13 18:10:17",
+    "git_sha": "6aea06f"
   },
   "limitations": [
     "训练数据来自合成 golden 样本 + 时间混合样本，非真实生产流量",

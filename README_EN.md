@@ -295,8 +295,24 @@ python -c "import joblib; d=joblib.load('models/stacking_meta_learner.joblib'); 
 | Data fingerprint (SHA256 prefix) | `ec2d7d98a21bfc8f` |
 | Window size | 10s |
 | Labeling | window-level (mixed sample normal prefix=0 / attack segment=1 / cross-boundary dropped) |
-| Trained at | 2026-10-10 16:17:11 |
-| Git commit | `4bab4c5` |
+| Trained at | 2026-10-13 18:10:17 |
+| Git commit | `6aea06f` |
+
+> **Model stability verified (retrain comparison)**: after v3.4.3 the codebase received
+> 14 commits of changes (isolation-forest semantics fix, rule-module extraction,
+> dual-path unification), so the model was retrained to refresh provenance. Result:
+>
+> | Item | Before | After |
+> |---|---|---|
+> | Weight sha256(16) | `80b3f23d48743911` | `80b3f23d48743911` |
+> | Coefficients / intercept | — | **bit-for-bit identical** |
+> | GroupKFold F1 | 0.7424766967302312 | 0.7424766967302312 |
+> | git_sha | `4bab4c5` (stale) | `6aea06f` |
+>
+> **Conclusion**: those code changes did **not** alter feature semantics, so the
+> original model remained valid; retraining only refreshed provenance metadata.
+> This also serves as a useful verification that the model's detection behaviour
+> was unaffected by that batch of changes.
 
 ### Rule Threshold Calibration
 

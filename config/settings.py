@@ -101,6 +101,8 @@ class Settings(BaseSettings):
 
     # ===== API 安全（平铺，向后兼容）=====
     api_auth_token: str = ""
+    # 默认禁用 shell 打开文件（安全策略），需在 .env 中显式 ALLOW_OPEN_FILE=true 开启
+    allow_open_file: bool = False
 
     # ===== 上传与资源限制（平铺，向后兼容）=====
     max_upload_mb: int = 200

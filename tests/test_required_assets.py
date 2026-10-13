@@ -85,8 +85,20 @@ REQUIRED_ASSETS = {
     ),
 }
 
-# 各包的结构文件：曾被 `.gitignore` 的 `_*.py` 误伤，导致 clone 后包结构缺失
-PACKAGE_MARKERS = [
+# 代码模块的结构性文件：包 `__init__.py` + 「被 import 但易漏提交」的业务模块。
+#
+# 两类都曾被真实漏掉：
+#   · `_*.py` 无前导斜杠的 .gitignore 规则误匹配**所有**包的 `__init__.py`
+#     → 15 个包结构文件从未入库，clone 后包结构缺失
+#   · v3.4.4 从 gradio_app.py 拆出的 4 个模块（auth_utils / baseline_utils /
+#     ui_helpers / analysis_task）已 `import` 但从未 `git add`
+#     → 干净 checkout 下 `ModuleNotFoundError: No module named 'src.ui.analysis_task'`
+#     → 整个测试收集阶段中断（实测：Interrupted: 1 error during collection）
+#
+# 共同特征：**代码已被引用，文件却不在版本库里** —— 本地因为文件就在磁盘上而完全正常，
+# CI 一 clone 就崩。人靠记忆维护这种关系必然会漏，所以由本测试强制。
+REQUIRED_CODE_MODULES = [
+    # 包结构
     "config/__init__.py",
     "src/__init__.py",
     "src/ai/__init__.py",
@@ -101,6 +113,11 @@ PACKAGE_MARKERS = [
     "src/storage/__init__.py",
     "src/ui/__init__.py",
     "src/utils/__init__.py",
+    # v3.4.4 从 gradio_app.py 拆分的模块（gradio_app.py 已 import 它们）
+    "src/ui/analysis_task.py",
+    "src/ui/auth_utils.py",
+    "src/ui/baseline_utils.py",
+    "src/ui/ui_helpers.py",
 ]
 
 
@@ -156,17 +173,38 @@ def test_required_asset_is_git_tracked(rel):
 
 
 # ----------------------------------------------------------------------
-# 2) 包结构文件（`_*.py` 误伤事件的回归锁）
+# 2) 代码模块（两起漏提交事件的回归锁）
 # ----------------------------------------------------------------------
 
-@pytest.mark.parametrize("rel", PACKAGE_MARKERS)
-def test_package_marker_is_tracked(rel):
+@pytest.mark.parametrize("rel", REQUIRED_CODE_MODULES)
+def test_required_code_module_is_tracked(rel):
+    """被引用的代码文件必须已在版本库中。
+
+    失败信息按文件类型给出不同的后果说明，因为两类事件的机制不同：
+      · 包 `__init__.py` 被 `_*.py` 规则误伤 → clone 后包结构缺失
+      · 拆分出的业务模块忘了 `git add` → 干净 checkout 下 import 直接失败
+    """
     if TRACKED is None:
         pytest.skip("非 git 环境")
+
+    is_pkg_marker = rel.endswith("__init__.py")
+    if is_pkg_marker:
+        consequence = (
+            "clone 后包结构缺失，import 可能失败\n"
+            "  历史: 曾被 .gitignore 的 `_*.py`（无前导斜杠）误匹配，15 个此类文件从未入库"
+        )
+    else:
+        consequence = (
+            "干净 checkout 下该模块不存在，而引用它的代码已在仓库里\n"
+            "  → `ModuleNotFoundError`，且 pytest **收集阶段**即中断（不只是某个用例失败）\n"
+            "  历史: v3.4.4 从 gradio_app.py 拆出的 4 个模块曾被 gradio_app.py import\n"
+            "        但从未 `git add`，本地因文件在磁盘上而完全正常"
+        )
+
     assert rel in TRACKED, (
-        f"包结构文件未被跟踪: {rel}\n"
-        f"  后果: clone 后包结构缺失，import 可能失败\n"
-        f"  历史: 曾被 .gitignore 的 `_*.py`（无前导斜杠）误匹配，15 个此类文件从未入库"
+        f"代码文件未被 git 跟踪: {rel}\n"
+        f"  后果: {consequence}\n"
+        f"  处理: git add {rel}"
     )
 
 
@@ -218,7 +256,7 @@ def test_gitignore_does_not_ignore_required_assets():
         pytest.skip("非 git 环境，无法调用 git check-ignore")
 
     ignored = []
-    for rel in list(REQUIRED_ASSETS) + PACKAGE_MARKERS:
+    for rel in list(REQUIRED_ASSETS) + REQUIRED_CODE_MODULES:
         try:
             r = subprocess.run(["git", "check-ignore", "-q", rel], cwd=ROOT,
                                capture_output=True, timeout=30)

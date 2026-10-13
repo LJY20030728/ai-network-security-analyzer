@@ -80,6 +80,32 @@ from src.ui.charts import _build_baseline_compare_svg, _build_baseline_profile_s
 from src.ui.ui_utils import (
     _looks_like_real_api_key, mask_key, _is_loopback_host,
 )
+# P0-3: gradio_app.py 模块化拆分 — 独立业务逻辑函数移到子模块
+from src.ui.analysis_task import analyze_pcap_task as _analyze_pcap_task
+from src.ui.auth_utils import (
+    generate_and_persist_token as _generate_and_persist_token,
+    get_audit_logger,
+    request_is_local as _request_is_local,
+    require_token_for_external_access,
+    open_path_with_shell as _open_path_with_shell,
+)
+# 兼容旧引用：部分代码/测试使用下划线前缀名
+_require_token_for_external_access = require_token_for_external_access
+from src.ui.baseline_utils import (
+    baseline_path as _baseline_path,
+    list_baselines as _list_baselines,
+    baseline_names as _baseline_names,
+    BASELINE_DIR,
+)
+from src.ui.ui_helpers import (
+    check_upload_file as _check_upload_file,
+    assert_safe_llm_base_url as _assert_safe_llm_base_url,
+    render_app_header as _render_app_header,
+    load_custom_css as _load_custom_css,
+    init_gradio_ui_kwargs as _init_gradio_ui_kwargs,
+    get_ui_kwargs as _get_ui_kwargs,
+    get_gradio_major as _get_gradio_major,
+)
 from src.storage.baseline_name import safe_baseline_name, validate_baseline_name
 # 分析流水线已抽到服务层（唯一实现，UI/API 共用），见 §4c 重构
 from src.services.analysis_service import (
@@ -87,6 +113,13 @@ from src.services.analysis_service import (
     quick_sha256 as _quick_sha256,
     run_analysis as _run_analysis,
 )
+
+# P0-3: 包装函数 — 确保测试 monkeypatch(ga.find_env_file) 能生效
+# 原因：_generate_and_persist_token 已拆到 auth_utils.py，其模块级 find_env_file
+# 与 ga.find_env_file 是两个引用；测试 mock ga.find_env_file 不会影响 auth_utils。
+def _generate_and_persist_token():
+    from src.ui.auth_utils import generate_and_persist_token as _impl
+    return _impl(find_env_file_fn=find_env_file)
 
 # 初始化日志（同时输出到控制台和文件，文件路径与 LogObserver 一致）
 import os as _os
@@ -155,193 +188,8 @@ _knowledge_loaded = False
 # ===== 本地 API 鉴权 =====
 
 
-def _generate_and_persist_token() -> str:
-    """生成随机访问令牌并写入 .env（保留原有配置项）"""
-    token = secrets.token_hex(16)
-    # 与 settings 使用同一探测逻辑（exe同级 → cwd → 项目根）
-    env_path = find_env_file()
-    lines = []
-    env_existed = os.path.exists(env_path)
-    read_ok = True
-    if env_existed:
-        try:
-            with open(env_path, "r", encoding="utf-8") as f:
-                lines = f.readlines()
-        except Exception as e:
-            # 【数据安全】原实现此处 lines = [] 并继续向下写回文件，
-            # 效果是：.env 无法读取时（编码/权限/被占用），
-            # 整个 .env 会被覆盖成只剩 API_AUTH_TOKEN 一行，
-            # 用户的 LLM_API_KEY / BASE_URL / MODEL 全部丢失。
-            # 且因为 token 已生成、鉴权看起来正常，故障被自我掩盖。
-            read_ok = False
-            lines = []
-            logger.error(
-                f"⚠️ 读取 .env 失败（{type(e).__name__}: {e}）。"
-                f"为避免覆盖并丢失现有配置，本次跳过令牌落盘。"
-            )
-    replaced = False
-    for i, line in enumerate(lines):
-        stripped = line.strip()
-        if stripped and not stripped.startswith("#") and "=" in stripped:
-            key = stripped.split("=", 1)[0].strip()
-            if key == "API_AUTH_TOKEN":
-                lines[i] = f"API_AUTH_TOKEN={token}\n"
-                replaced = True
-                break
-    if not replaced:
-        lines.append(f"API_AUTH_TOKEN={token}\n")
-
-    # 仅当"文件本来不存在"或"成功读取了原内容"时才写回，避免破坏用户配置
-    if env_existed and not read_ok:
-        logger.error(
-            "已跳过写入 .env：原文件存在但读取失败。"
-            "本次生成的 API_AUTH_TOKEN 仅在本次运行内存中有效，"
-            "请修复 .env 权限/编码后重启应用以持久化。"
-        )
-        return token
-    try:
-        with open(env_path, "w", encoding="utf-8") as f:
-            f.writelines(lines)
-    except Exception as e:
-        logger.warning(f"无法写入 API 令牌到 .env: {e}")
-    return token
 
 
-_audit_logger: Optional[AuditLogger] = None
-
-
-def get_audit_logger() -> AuditLogger:
-    """延迟初始化审计日志（首次 /api 请求时创建，DB 落在用户数据目录）"""
-    global _audit_logger
-    if _audit_logger is None:
-        _audit_logger = AuditLogger.get(os.path.join(data_dir("audit"), "audit.db"))
-    return _audit_logger
-
-
-def _request_is_local(request: Request) -> bool:
-    """请求是否来自本机（回环）。
-
-    同时检查客户端地址与 Host 头：Docker 端口映射下，局域网请求的客户端 IP 会是
-    网桥地址（非回环），但如果只看客户端 IP，某些反代/宿主场景会误判为本地；
-    反向检查 Host 头能兜住这种情况——真正的本机访问 Host 一定是 127.0.0.1/localhost。
-
-    设计依据：项目默认绑定 127.0.0.1（desktop_app.py 与本机 API 启动方式），
-    此时局域网本就无法访问，回环访问无需 token 以保证桌面版与浏览器直访体验；
-    而 Docker / 显式绑 0.0.0.0 的场景必须携带 token。
-    """
-    client_host = request.client.host if request.client else ""
-    host_header = request.headers.get("host", "")
-    # 用 urlsplit 解析 Host 头，正确处理 "127.0.0.1:8080" 与 "[::1]:8080"
-    # （不能用 host_header.count(":") == 1，IPv6 字面量含多个冒号）
-    from urllib.parse import urlsplit
-
-    try:
-        host_only = urlsplit(f"//{host_header}").hostname or ""
-    except ValueError:
-        host_only = ""
-    return _is_loopback_host(client_host) and _is_loopback_host(host_only)
-
-
-def require_token_for_external_access(request: Request) -> Optional[str]:
-    """Gradio `auth_dependency`：非回环访问必须携带正确 token。
-
-    【Gradio 6 约定】该依赖必须 **返回用户 ID 字符串** 表示认证通过、
-    返回 `None` 表示未通过（Gradio 自己会抛 401 "Not authenticated"）。
-    此处**不能**自己抛 HTTPException——那会被 Gradio 视为依赖异常。
-
-    【安全背景】此前的 token 中间件只覆盖 `/api/*`，而 Gradio UI 挂载在 `/`，
-    于是 UI 的全部事件回调（打开文件、写配置、触发分析）在对外暴露时均可被
-    无鉴权调用。本依赖挂在 Gradio 挂载点上，覆盖 UI 整体。
-
-    - 回环访问：返回 "local"（桌面版 pywebview 与本机浏览器无需 token）。
-    - 非回环：校验 X-API-Token 头（或 ?token= 查询参数），通过则返回用户标识。
-    """
-    if _request_is_local(request):
-        return "local"
-
-    token = settings.api_auth_token
-    if not token:
-        # 未配置 token 却对外暴露：fail closed（拒绝而非放行）
-        logger.error("服务对外暴露但未配置 API_AUTH_TOKEN，已拒绝非回环 UI 访问")
-        return None
-
-    provided = request.headers.get("x-api-token") or request.query_params.get("token") or ""
-    # 常量时间比较，避免逐字节时间侧信道
-    import hmac
-
-    if not hmac.compare_digest(str(provided), str(token)):
-        try:
-            get_audit_logger().log(
-                method=request.method, path=request.url.path, status_code=401,
-                duration_ms=0.0,
-                client_ip=request.client.host if request.client else "",
-                user_agent=request.headers.get("user-agent", "")[:200],
-                note="unauthorized UI access attempt")
-        except Exception as e:
-            logger.error(f"⚠️ 审计日志写入失败（UI 鉴权拒绝未能留痕）: {e}")
-        return None
-    return "api-token"
-
-
-# 供 mount_gradio_app(auth_dependency=...) 使用（与上面的包装保持同一实现）
-_require_token_for_external_access = require_token_for_external_access
-
-
-def _open_path_with_shell(path: str) -> tuple:
-    """用系统默认程序打开文件/目录——**默认禁用**，需显式开启。
-
-    【安全】`os.startfile()` 会以当前用户身份用 shell 打开任意路径。此前它在
-    4 个 UI 回调中被无条件调用，而这些回调在应用对外暴露时可能被无鉴权触发；
-    再叠加"递归搜索文件系统找文件再打开"的逻辑，等于把本机 shell 的执行入口
-    交给了调用方。安全工具不应自带这种能力。
-
-    现在：
-      · 默认**拒绝**执行，只返回路径与提示，由 UI 展示「复制路径」供用户自行打开；
-      · 仅当设置 `AI_NSA_ALLOW_OPEN_PATH=1` 时才真正调用 startfile；
-      · 无论如何都校验路径必须位于本程序的数据目录（data/reports 等）之内，
-        避免被诱导打开任意文件。
-
-    :return: (是否已打开, 给用户的提示文本)
-    """
-    import os as _os
-
-    try:
-        real = _os.path.realpath(path)
-    except Exception as e:
-        return False, f"❌ 路径无效：{e}"
-
-    # 路径必须落在项目 data/ 目录内
-    try:
-        data_root = _os.path.realpath(data_dir(""))
-        if _os.path.commonpath([real, data_root]) != data_root:
-            logger.warning(f"拒绝打开 data 目录之外的路径: {real}")
-            return False, f"❌ 出于安全考虑，仅允许打开程序数据目录内的文件：`{real}`"
-    except Exception as e:
-        return False, f"❌ 路径校验失败：{e}"
-
-    if not _os.path.exists(real):
-        return False, f"❌ 文件不存在：`{real}`"
-
-    if _os.environ.get("AI_NSA_ALLOW_OPEN_PATH", "").strip().lower() not in ("1", "true", "yes"):
-        # 默认路径：不执行，只给出可复制的路径
-        return False, (
-            f"ℹ️ 已跳过自动打开（默认禁用，设置 `AI_NSA_ALLOW_OPEN_PATH=1` 可启用）。\n"
-            f"📌 路径：`{real}`"
-        )
-
-    try:
-        if hasattr(_os, "startfile"):        # Windows
-            _os.startfile(real)
-        elif sys.platform == "darwin":        # macOS
-            import subprocess
-            subprocess.Popen(["open", real])
-        else:                                 # Linux
-            import subprocess
-            subprocess.Popen(["xdg-open", real])
-        return True, f"✅ 已用系统默认程序打开：`{real}`"
-    except Exception as e:
-        logger.warning(f"打开路径失败: {e}")
-        return False, f"❌ 打开失败：{e}\n📌 路径：`{real}`"
 
 
 @app.middleware("http")
@@ -607,78 +455,6 @@ async def add_knowledge(file: UploadFile = File(...)):
 BASELINE_DIR = data_dir("baselines")
 
 
-def _baseline_path(name: str) -> str:
-    """基线文件名安全化 + 路径
-
-    复用 `validate_baseline_name` 的字符策略（消除此前「内联过滤规则」与
-    「名称校验规则」两套并存的漂移），但文件名额外不允许空格与点。
-    """
-    safe = "".join(ch for ch in (name or "") if ch.isalnum() or ch in "-_")
-    if not safe:
-        safe = "baseline"
-    return os.path.join(BASELINE_DIR, f"{safe[:64]}.json")
-
-
-def _list_baselines() -> List[Dict[str, Any]]:
-    """列出所有已保存基线（P1-4: SQLite 为主，JSON 为兼容备份）"""
-    from src.storage.database import Database
-    db = Database()
-    items = db.list_baselines()
-    if not items:
-        # SQLite 为空时从 JSON 导入（向后兼容）
-        ensure_dir(BASELINE_DIR)
-        for fn in sorted(os.listdir(BASELINE_DIR)):
-            if fn.endswith(".json"):
-                path = os.path.join(BASELINE_DIR, fn)
-                b = TrafficBaseline.load(path)
-                if b and b.learned:
-                    # JSON 文件的 name 属不可信输入（文件可被手工编辑），
-                    # 非法名回退到文件名 stem；仍非法则跳过该条并记日志，
-                    # 不能让整个列表页因一条脏数据挂掉。
-                    raw_name = b.name or os.path.splitext(fn)[0]
-                    safe_name = safe_baseline_name(raw_name, fallback="")
-                    if not safe_name:
-                        safe_name = safe_baseline_name(os.path.splitext(fn)[0], fallback="")
-                    if not safe_name:
-                        logger.warning(f"跳过名称非法的基线文件: {fn}（name={raw_name!r}）")
-                        continue
-                    if safe_name != raw_name:
-                        logger.warning(f"基线名称非法，已回退为安全名: {raw_name!r} → {safe_name!r}")
-                    db.save_baseline(
-                        name=safe_name,
-                        profile=b.to_dict().get("profile", {}),
-                        window_sec=b.window_sec,
-                        total_packets=getattr(b, "packets_used", 0),
-                        description=getattr(b, "description", None),
-                    )
-        items = db.list_baselines()
-    # 转换为 UI 需要的格式
-    result = []
-    for item in items:
-        bl = db.get_baseline(item["name"])
-        profile_summary = {}
-        if bl and bl.get("profile"):
-            prof = bl["profile"].get("profile", bl["profile"])
-            if isinstance(prof, dict):
-                profile_summary = {k: {"median": v.get("median"), "mad": v.get("mad")}
-                                   for k, v in prof.items() if isinstance(v, dict)}
-        result.append({
-            "name": item["name"],
-            "file": f"{item['name']}.json",
-            "created_at": item.get("created_at", ""),
-            "packets_used": item.get("total_packets", 0),
-            "window_sec": item.get("window_sec", 5),
-            "profile": profile_summary,
-        })
-    return result
-
-
-def _baseline_names() -> List[str]:
-    """所有已保存基线名称（UI 下拉框选项）"""
-    return [b["name"] for b in _list_baselines()]
-
-
-
 @app.post("/api/baseline/learn")
 async def baseline_learn(file: UploadFile = File(...), name: str = Form("default")):
     """
@@ -797,57 +573,6 @@ async def baseline_delete(name: str = Form(...)):
 
 # 允许的上传文件类型
 ALLOWED_PCAP_EXTENSIONS = {".pcap", ".pcapng", ".cap", ".pcap.gz"}
-
-
-def _check_upload_file(filename: str, size: int):
-    """校验上传文件类型与大小——委托 src.utils.helpers，由 UI 层决定如何提示"""
-    err = validate_upload_file(filename, size, max_mb=settings.max_upload_mb)
-    if err:
-        status = 413 if "大小限制" in err else 400
-        raise HTTPException(status_code=status, detail=err)
-
-
-def _analyze_pcap_task(filepath: str, enable_ai: bool, baseline_name: str = "") -> Dict[str, Any]:
-    """在后台线程执行完整分析——委托 src/services/analysis_service.py（唯一实现）
-
-    本函数只做「服务结果 → API 契约」的字段映射，不再持有流水线逻辑。
-    此前这里与 UI 路径是两份副本，kwargs 与是否跑幻觉控制都不一致。
-    """
-    try:
-        outcome = _run_analysis(
-            filepath,
-            enable_ai=enable_ai,
-            baseline_name=baseline_name,
-            ai_mode="structured",   # API 路径：非流式，含流量概览
-            run_hallucination=True,  # 与 UI 路径统一（此前 API 不跑）
-            generate_report=True,
-        )
-    except ValueError as e:
-        # 解析失败/空文件 → 客户端错误
-        raise HTTPException(status_code=400, detail=str(e)) from e
-
-    result: Dict[str, Any] = {
-        "status": "success",
-        "packet_count": outcome.packet_count,
-        "analysis_report": outcome.report,
-        "evidence": outcome.evidence,
-        "report_html": outcome.html_path,
-        "case_id": outcome.case_id,
-    }
-    if enable_ai:
-        result["ai_threat_analysis"] = outcome.ai_text
-        result["ai_threat_structured"] = outcome.ai_structured
-        result["ai_threat_structured_ok"] = outcome.ai_structured_ok
-        if outcome.ai_failed:
-            result["ai_analysis_failed"] = True
-        if outcome.ai_traffic_summary is not None:
-            result["ai_traffic_summary"] = outcome.ai_traffic_summary
-        if outcome.ai_warning:
-            result["ai_warning"] = outcome.ai_warning
-    if outcome.hallucination:
-        result["hallucination_control"] = outcome.hallucination
-
-    return result
 
 
 @app.post("/api/pcap/analyze")
@@ -1065,68 +790,6 @@ async def config_status():
         raise HTTPException(status_code=500, detail=f"获取配置状态失败: {e}")
 
 
-def _assert_safe_llm_base_url(base_url: str) -> str:
-    """校验 LLM Base URL，拒绝 SSRF 目标，返回规范化后的 URL。
-
-    【安全】原实现直接把用户传入的 `base_url` 拼上 `/chat/completions` 发请求，
-    并把 `Authorization: Bearer <用户的真实 API Key>` 一同送出，仅检查了"非空"。
-    这意味着任意能调用该接口的人都可以：
-      · 让服务器向内网/云元数据地址发起请求（SSRF）；
-      · 把用户的真实 LLM Key 外带到自己的服务器（凭据泄露）。
-
-    本函数只允许 https、禁止回环/私网/链路本地/保留地址、禁止非标准端口，
-    并拒绝明显的内网主机名。
-    """
-    import ipaddress
-    import socket
-    from urllib.parse import urlparse
-
-    raw = (base_url or "").strip()
-    if not raw:
-        raise HTTPException(status_code=400, detail="base_url 不能为空")
-
-    parsed = urlparse(raw)
-    if parsed.scheme != "https":
-        raise HTTPException(
-            status_code=400,
-            detail="仅允许 https:// 的 Base URL（拒绝 http/其他协议，避免明文传输 API Key）",
-        )
-    host = (parsed.hostname or "").strip().lower()
-    if not host:
-        raise HTTPException(status_code=400, detail="Base URL 缺少主机名")
-
-    # 主机名黑名单（内网常用名与云元数据别名）
-    if host in {"localhost", "metadata", "metadata.google.internal"} or \
-            host.endswith((".local", ".internal", ".localhost")):
-        raise HTTPException(status_code=400, detail=f"Base URL 主机名不被允许: {host}")
-
-    # 端口：仅允许标准 HTTPS 端口
-    if parsed.port not in (None, 443):
-        raise HTTPException(status_code=400,
-                            detail=f"仅允许 443 端口（当前 {parsed.port}）")
-
-    # 解析主机名并检查所有解析结果，阻断内网 / 回环 / 链路本地 / 保留地址
-    try:
-        infos = socket.getaddrinfo(host, None)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Base URL 主机名无法解析: {e}") from e
-
-    for info in infos:
-        addr = info[4][0]
-        try:
-            ip = ipaddress.ip_address(addr)
-        except ValueError:
-            continue
-        if (ip.is_private or ip.is_loopback or ip.is_link_local
-                or ip.is_reserved or ip.is_multicast or ip.is_unspecified):
-            raise HTTPException(
-                status_code=400,
-                detail=f"Base URL 解析到内网/保留地址（{ip}），已拒绝以避免 SSRF",
-            )
-
-    return raw.rstrip("/")
-
-
 @app.post("/api/config/validate")
 async def config_validate(api_key: str = Form(...), base_url: str = Form(""),
                            model: str = Form("")):
@@ -1285,117 +948,8 @@ async def generate_incident_report(incident_data: Dict[str, Any]):
 # ===== Gradio Web UI 集成 =====
 
 # ---- 界面美化：蓝色 × 二次元主题（v1.3.0，与应用图标同风格） ----
-_GRADIO_CSS = """
-body {
-    background:
-        radial-gradient(circle at 18% 8%, rgba(96,165,250,0.14), transparent 42%),
-        radial-gradient(circle at 82% 92%, rgba(147,197,253,0.18), transparent 45%),
-        radial-gradient(circle at 55% 45%, rgba(219,234,254,0.35), transparent 60%),
-        linear-gradient(160deg, #eaf2ff 0%, #f7faff 50%, #eaf6ff 100%) !important;
-    background-attachment: fixed !important;
-}
-body::before {
-    content: "";
-    position: fixed; inset: 0; z-index: 0; pointer-events: none;
-    background-image:
-        radial-gradient(rgba(59,130,246,0.10) 1px, transparent 1.6px),
-        radial-gradient(rgba(147,197,253,0.16) 1px, transparent 1.6px);
-    background-size: 34px 34px, 51px 51px;
-    background-position: 0 0, 17px 17px;
-}
-.gradio-container { max-width: 1280px !important; }
-#app-hero {
-    display: flex; align-items: center; gap: 16px;
-    padding: 18px 24px; margin: 6px 0 14px;
-    background: linear-gradient(120deg, #1d4ed8 0%, #2563eb 45%, #3b82f6 75%, #60a5fa 100%);
-    border-radius: 18px; color: #fff;
-    box-shadow: 0 8px 24px rgba(37,99,235,0.28), inset 0 1px 0 rgba(255,255,255,0.25);
-}
-#app-hero .hero-logo {
-    width: 64px; height: 64px; border-radius: 50%; flex: none;
-    border: 3px solid rgba(255,255,255,0.92);
-    box-shadow: 0 0 0 5px rgba(255,255,255,0.18), 0 6px 16px rgba(0,0,0,0.25);
-    object-fit: cover;
-}
-#app-hero .hero-title { font-size: 21px; font-weight: 800; letter-spacing: 1px; text-shadow: 0 2px 8px rgba(0,0,0,0.18); }
-#app-hero .hero-sub { font-size: 12px; opacity: 0.95; margin-top: 3px; letter-spacing: 0.3px; }
-#app-hero .hero-star { font-size: 13px; opacity: 0.9; margin-top: 2px; }
-.tabs { border-radius: 14px; }
-.gr-button-primary {
-    background: linear-gradient(135deg, #2563eb, #60a5fa) !important;
-    border: none !important;
-    box-shadow: 0 4px 12px rgba(37,99,235,0.25) !important;
-}
-.gr-button-primary:hover { filter: brightness(1.06); }
-"""
 
 
-def _render_app_header() -> str:
-    """顶部 Hero：应用图标 + 标题（蓝色二次元风格，图标与快捷方式同源）"""
-    import base64
-    logo_b64 = None
-    cands = []
-    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    cands.append(os.path.join(root, 'assets', 'app_logo.png'))
-    meipass = getattr(sys, '_MEIPASS', None)
-    if meipass:
-        cands.append(os.path.join(meipass, 'assets', 'app_logo.png'))
-        cands.append(os.path.join(os.path.dirname(meipass), 'assets', 'app_logo.png'))
-    cands.append(os.path.join(os.getcwd(), 'assets', 'app_logo.png'))
-    for p in cands:
-        try:
-            if os.path.exists(p):
-                with open(p, 'rb') as f:
-                    logo_b64 = 'data:image/png;base64,' + base64.b64encode(f.read()).decode('utf-8')
-                    break
-        except Exception as e:
-            # 仅影响界面 logo（纯装饰），失败时回退到内置图标；留痕便于排查资源问题
-            logger.debug(f"加载界面 logo 失败，已回退内置图标: {p} ({type(e).__name__}: {e})")
-            continue
-    if logo_b64:
-        logo_html = '<img class="hero-logo" src="' + logo_b64 + '" alt="logo"/>'
-    else:
-        logo_html = '<div class="hero-logo" style="display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.3);font-size:30px;">🛡️</div>'
-    return (
-        '<div id="app-hero">' + logo_html
-        + '<div><div class="hero-title">AI 网络安全智能分析系统</div>'
-        + '<div class="hero-sub">流行为检测 × LLM 研判 × 证据溯源 ｜ 上传 PCAP，AI 自动分析威胁</div>'
-        + '<div class="hero-star">✦ 蓝白星光主题 · 桌面应用版 ✦</div></div></div>'
-    )
-
-
-
-def _load_custom_css() -> str:
-    """P2-6: 加载自定义 CSS（内联基础样式 + 外部蓝色二次元风格文件）"""
-    css = _GRADIO_CSS
-    try:
-        import os
-        css_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                                 "ui", "custom_style.css")
-        if os.path.exists(css_path):
-            with open(css_path, "r", encoding="utf-8") as f:
-                css += "\n\n/* ===== 外部自定义样式 ===== */\n" + f.read()
-    except Exception as e:
-        logger.warning(f"加载自定义 CSS 失败: {e}")
-    return css
-
-
-# 【重要】以下两项必须惰性求值，不能放在模块级：
-# 无 gradio 环境下 `gr` 为 None，模块级 `gr.themes.Soft(...)` 会抛
-# AttributeError，导致本模块（以及 re-export 它的 src/api/main.py）
-# 整体导入失败——"gradio 未安装时仅启动 API 服务"这条降级路径随之失效。
-_GRADIO_MAJOR: int = 0
-_UI_KWARGS: Dict[str, Any] = {}
-
-
-def _init_gradio_ui_kwargs() -> None:
-    """在确认 gradio 可用后初始化 UI kwargs（幂等）。"""
-    global _GRADIO_MAJOR, _UI_KWARGS
-    if _UI_KWARGS:
-        return
-    _GRADIO_MAJOR = int(getattr(gr, "__version__", "4").split(".")[0])
-    _UI_KWARGS = {"theme": gr.themes.Soft(primary_hue=gr.themes.colors.blue),
-                  "css": _load_custom_css()}
 
 
 def create_gradio_interface():
@@ -1409,7 +963,7 @@ def create_gradio_interface():
             "或仅使用 API 服务（不调用本函数）。"
         )
     # gradio 可用后再初始化依赖 gr 的 kwargs（模块级不能做，否则破坏"gradio 可选"）
-    _init_gradio_ui_kwargs()
+    _init_gradio_ui_kwargs(gr)
 
     # 初始化 i18n 管理器
     _default_lang = "zh"
@@ -1427,7 +981,7 @@ def create_gradio_interface():
         logger.info(f"i18n 管理器已初始化，默认语言: {_default_lang}")
 
     # P2-6: Gradio 6.x 也加载自定义 CSS
-    _blocks_kwargs = {"css": _load_custom_css()} if _GRADIO_MAJOR >= 6 else _UI_KWARGS
+    _blocks_kwargs = {"css": _load_custom_css()} if _get_gradio_major() >= 6 else _get_ui_kwargs()
     with gr.Blocks(title="AI网络安全分析系统", **_blocks_kwargs) as demo:
         gr.HTML(_render_app_header())
 
@@ -2969,7 +2523,7 @@ if GRADIO_AVAILABLE:
         except Exception as e:
             # 排队失败会导致并发行为退化（默认单并发），必须可见
             logger.warning(f"Gradio queue() 启用失败，并发处理可能退化为串行: {e}")
-        _mount_kwargs = _UI_KWARGS if _GRADIO_MAJOR >= 6 else {}
+        _mount_kwargs = _get_ui_kwargs() if _get_gradio_major() >= 6 else {}
 
         # 【安全】此前把 data/reports、data/uploads、data/history 放进
         # `allowed_paths`：Gradio 的 `/gradio_api/file=<绝对路径>` 会直接把这些

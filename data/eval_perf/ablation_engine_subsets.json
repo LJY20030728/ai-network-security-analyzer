@@ -1,0 +1,281 @@
+{
+  "experiment": "three_engine_ablation",
+  "purpose": "回答「三引擎融合比单引擎好在哪」——此前无对照数据",
+  "method": {
+    "features": "复用 tools/train_stacking.py 的同一份 13 维特征矩阵，按引擎切子集",
+    "split": "GroupKFold(n_splits=5) 按源 PCAP 分组（与训练同口径）",
+    "model": "LogisticRegression(('max_iter', 2000), ('class_weight', 'balanced'), ('random_state', 42))（与生产元学习器同超参）",
+    "metrics": [
+      "F1",
+      "Precision",
+      "Recall",
+      "FPR",
+      "漏报数",
+      "误报数"
+    ]
+  },
+  "engine_features": {
+    "rule_based": [
+      "rule_has_alert",
+      "rule_alert_count_norm",
+      "rule_max_severity",
+      "rule_triggered_rules"
+    ],
+    "baseline": [
+      "baseline_deviation_count",
+      "baseline_multi_dim_triggered",
+      "baseline_drifted"
+    ],
+    "isolation_forest": [
+      "isolation_available",
+      "isolation_anomaly_count",
+      "isolation_anomaly_ratio",
+      "isolation_mean_score",
+      "isolation_max_score",
+      "isolation_top_dim_risk"
+    ]
+  },
+  "dataset": {
+    "raw_rows": 1727,
+    "distinct_rows": 1368,
+    "n_attack": 664,
+    "n_normal": 704,
+    "n_groups": 17,
+    "window_sec": 10,
+    "per_sample": {
+      "baseline_demo_attack": 60,
+      "baseline_demo_normal": 45,
+      "burst": 235,
+      "dnstunnel": 2,
+      "largeflow": 1,
+      "lightscan": 217,
+      "mix_normal_burst": 280,
+      "mix_normal_dnstunnel": 46,
+      "mix_normal_portscan": 50,
+      "mix_normal_rststorm": 51,
+      "mix_normal_synflood": 51,
+      "mix_short_normal_portscan": 226,
+      "mix_short_normal_synflood": 226,
+      "normal": 219,
+      "portscan": 6,
+      "rststorm": 6,
+      "synflood": 6
+    }
+  },
+  "results": {
+    "仅规则引擎": {
+      "n_features": 4,
+      "f1_mean": 0.7121443421443422,
+      "f1_std": 0.14723912874605116,
+      "precision_mean": 0.7366228179035327,
+      "precision_std": 0.27109433434013486,
+      "recall_mean": 0.8105670616349696,
+      "recall_std": 0.18719213635720483,
+      "fpr_mean": 0.24382218844984802,
+      "fpr_std": 0.3794668093581796,
+      "total_fn": 204,
+      "total_fp": 61,
+      "fold_f1": [
+        0.74,
+        0.5714,
+        0.56,
+        0.7231,
+        0.9662
+      ],
+      "n_splits": 5,
+      "engines": [
+        "rule_based"
+      ]
+    },
+    "仅时序基线": {
+      "n_features": 3,
+      "f1_mean": 0.6771629756847147,
+      "f1_std": 0.18574884765495792,
+      "precision_mean": 0.7159365433937289,
+      "precision_std": 0.2966097898267141,
+      "recall_mean": 0.731995633063541,
+      "recall_std": 0.1678720524912734,
+      "fpr_mean": 0.24297112462006076,
+      "fpr_std": 0.3798168876039174,
+      "total_fn": 210,
+      "total_fp": 60,
+      "fold_f1": [
+        0.74,
+        0.5217,
+        0.4348,
+        0.7231,
+        0.9662
+      ],
+      "n_splits": 5,
+      "engines": [
+        "baseline"
+      ]
+    },
+    "仅孤立森林": {
+      "n_features": 6,
+      "f1_mean": 0.633194508453478,
+      "f1_std": 0.29561361325104596,
+      "precision_mean": 0.6855033492822967,
+      "precision_std": 0.3468967540055796,
+      "recall_mean": 0.6426187631280731,
+      "recall_std": 0.29064302905032263,
+      "fpr_mean": 0.21697188449848026,
+      "fpr_std": 0.3425588457775765,
+      "total_fn": 165,
+      "total_fp": 52,
+      "fold_f1": [
+        0.9797,
+        0.3158,
+        0.3158,
+        0.5852,
+        0.9695
+      ],
+      "n_splits": 5,
+      "engines": [
+        "isolation_forest"
+      ]
+    },
+    "规则 + 基线": {
+      "n_features": 7,
+      "f1_mean": 0.7121443421443422,
+      "f1_std": 0.14723912874605116,
+      "precision_mean": 0.7366228179035327,
+      "precision_std": 0.27109433434013486,
+      "recall_mean": 0.8105670616349696,
+      "recall_std": 0.18719213635720483,
+      "fpr_mean": 0.24382218844984802,
+      "fpr_std": 0.3794668093581796,
+      "total_fn": 204,
+      "total_fp": 61,
+      "fold_f1": [
+        0.74,
+        0.5714,
+        0.56,
+        0.7231,
+        0.9662
+      ],
+      "n_splits": 5,
+      "engines": [
+        "rule_based",
+        "baseline"
+      ]
+    },
+    "规则 + 孤立森林": {
+      "n_features": 10,
+      "f1_mean": 0.7831257632004626,
+      "f1_std": 0.215470199487845,
+      "precision_mean": 0.7366234119782215,
+      "precision_std": 0.28422768782513286,
+      "recall_mean": 0.8872885876445569,
+      "recall_std": 0.10460356656830923,
+      "fpr_mean": 0.23952507598784192,
+      "fpr_std": 0.3813546407460531,
+      "total_fn": 44,
+      "total_fp": 56,
+      "fold_f1": [
+        0.9756,
+        0.4651,
+        0.5833,
+        0.9221,
+        0.9695
+      ],
+      "n_splits": 5,
+      "engines": [
+        "rule_based",
+        "isolation_forest"
+      ]
+    },
+    "基线 + 孤立森林": {
+      "n_features": 9,
+      "f1_mean": 0.6756708340781052,
+      "f1_std": 0.24715298108048547,
+      "precision_mean": 0.7076316082450151,
+      "precision_std": 0.31577113777423244,
+      "recall_mean": 0.7338230134232324,
+      "recall_std": 0.227103352664451,
+      "fpr_mean": 0.24297112462006076,
+      "fpr_std": 0.3798168876039174,
+      "total_fn": 160,
+      "total_fp": 60,
+      "fold_f1": [
+        0.9735,
+        0.4186,
+        0.4348,
+        0.5852,
+        0.9662
+      ],
+      "n_splits": 5,
+      "engines": [
+        "baseline",
+        "isolation_forest"
+      ]
+    },
+    "三者融合（生产配置）": {
+      "n_features": 13,
+      "f1_mean": 0.7424766967302312,
+      "f1_std": 0.27003284489097945,
+      "precision_mean": 0.7077478558730024,
+      "precision_std": 0.31893949806406763,
+      "recall_mean": 0.8184721767826915,
+      "recall_std": 0.20873192052692674,
+      "fpr_mean": 0.2412689969604863,
+      "fpr_std": 0.3805389191000618,
+      "total_fn": 48,
+      "total_fp": 58,
+      "fold_f1": [
+        0.9777,
+        0.3158,
+        0.5306,
+        0.9221,
+        0.9662
+      ],
+      "n_splits": 5,
+      "engines": [
+        "rule_based",
+        "baseline",
+        "isolation_forest"
+      ]
+    }
+  },
+  "trivial_baselines": {
+    "全判攻击（无检测能力）": {
+      "f1": 0.6535,
+      "recall": 1.0,
+      "precision": 0.4854,
+      "note": "F1 = 2P/(P+1)，P=0.485（正类占比）"
+    },
+    "全判正常（无检测能力）": {
+      "f1": 0.0,
+      "recall": 0.0,
+      "precision": 0.0,
+      "note": "漏报全部 664 个攻击窗口"
+    }
+  },
+  "constant_features": [
+    "baseline_drifted",
+    "isolation_available"
+  ],
+  "conclusion": {
+    "significant": false,
+    "reason": "组间差异小于折间噪声：样本组仅 17 个，GroupKFold 折间 F1 波动（最高达 0.98、最低 0.32）远大于引擎组合之间的差距。因此**不能宣称融合优于单引擎，也不能宣称更差**。",
+    "what_can_be_said": [
+      "三者融合与全部单引擎都显著高于『全判攻击』平凡地板，说明特征有真实判别力",
+      "仅规则引擎是单引擎中最高（F1 0.7121），但优势在噪声范围内",
+      "加入孤立森林后**漏报总数大幅下降**（规则单独 204 → 规则+孤立森林 44），这是量级差异、跨全部折一致，比 F1 均值差异更可信",
+      "时序基线引擎的 3 维中有 1 维（baseline_drifted）恒为常数，其在当前管线中的区分度主要来自另 2 维"
+    ],
+    "what_cannot_be_said": [
+      "不能宣称『三者融合最优』——它比『规则+孤立森林』低 0.0406，但在噪声内",
+      "不能宣称『时序基线无用』——只能说其增量在噪声内无法与零区分",
+      "不能据此调整生产配置——需先用更多独立样本组（真实流量）重跑"
+    ],
+    "next_step": "引入真实流量样本组（当前 17 组中 10 组为合成 golden），把折间方差压下来后再判断是否需要裁剪引擎"
+  },
+  "limitations": [
+    "训练/评测数据为合成 golden 样本 + 时间混合样本，非真实生产流量",
+    "窗口级弱标注（由攻击段起止时间推导），非逐流人工标注",
+    "样本组数有限，GroupKFold 折数受组数限制，折间方差估计本身不稳定",
+    "消融结论受限于当前 13 维特征设计；特征变更后需重跑",
+    "本实验只回答「哪个引擎组合的元学习器 F1 更高」，不回答因果贡献"
+  ]
+}

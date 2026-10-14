@@ -12,7 +12,6 @@ import os
 import re
 import sys
 import json
-import secrets
 from typing import List, Dict, Any, Optional
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Request
 from fastapi.responses import JSONResponse
@@ -58,20 +57,17 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config.settings import settings, find_env_file
 from src.capture.pcap_parser import PcapParser
-from src.analysis.flow_extractor import TrafficAnalyzer
 from src.analysis.baseline import TrafficBaseline
 from src.ai.llm_client import get_llm_client
 from src.ai.rag_engine import get_rag_engine
 from src.ai.threat_analyzer import get_threat_analyzer
 from src.knowledge import get_all_knowledge
-from src.report.html_report import save_html_report
-from src.report.summary_formatter import format_analysis_summary, format_hallucination_block
+from src.report.summary_formatter import format_hallucination_block
 from src.utils.helpers import (
     setup_logging, ensure_dir, format_bytes, get_timestamp_str,
     calculate_file_sha256, validate_upload_file,
 )
 from src.utils.paths import data_dir, seed_assets
-from src.api.audit import AuditLogger
 from src.api.history_store import get_history_store
 from src.api.task_queue import get_task_queue
 # 图表构建已抽到 src/ui/charts.py（所有插值在模块内统一 html.escape）
@@ -106,7 +102,7 @@ from src.ui.ui_helpers import (
     get_ui_kwargs as _get_ui_kwargs,
     get_gradio_major as _get_gradio_major,
 )
-from src.storage.baseline_name import safe_baseline_name, validate_baseline_name
+from src.storage.baseline_name import validate_baseline_name
 # 分析流水线已抽到服务层（唯一实现，UI/API 共用），见 §4c 重构
 from src.services.analysis_service import (
     load_baseline_into as _load_baseline_into,

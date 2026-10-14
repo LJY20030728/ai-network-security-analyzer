@@ -6,7 +6,6 @@ PCAP 分析任务封装
 """
 from typing import Dict, Any
 from fastapi import HTTPException
-from loguru import logger
 
 from src.services.analysis_service import run_analysis as _run_analysis
 

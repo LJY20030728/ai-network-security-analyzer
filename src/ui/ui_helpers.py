@@ -16,7 +16,6 @@ from fastapi import HTTPException
 from loguru import logger
 
 from config.settings import settings
-from src.ui.ui_utils import _is_loopback_host
 from src.utils.helpers import validate_upload_file
 
 # 蓝色二次元风格基础 CSS

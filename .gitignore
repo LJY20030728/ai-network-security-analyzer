@@ -92,7 +92,19 @@ models/bge-small-zh-v1.5/
 data/knowledge/mitre_attck/
 
 # Large files - real evaluation data (large PCAP, not suitable for GitHub)
-data/eval_real/
+#
+# 注意：必须写成 `data/eval_real/*` 而**不是** `data/eval_real/`。
+# 后者会排除目录本身，git 便不会进入该目录，其内部的否定规则（`!...`）
+# 也就永远不会被求值 —— 实测表现为"加了 ! 规则仍被忽略"。
+# 写成 `dir/*` 则排除内容但保留目录可遍历，否定规则才能生效。
+data/eval_real/*
+
+# 例外：真实恶意流量的**评测结论**（体积极小、可复现、面试有说服力）
+# 背景：data/eval_real/ 下的大样本（19.6MB PCAP）不入库是对的，
+# 但这两份 JSON 是"用真实恶意样本验证过"的证据（合计约 5.3KB），
+# 被整目录规则一起挡在仓库外，等于让这份证据无法被看到/复现。
+!data/eval_real/ioc_crosscheck.json
+!data/eval_real/real_analysis_result.json
 
 # Old packaging files and temporary files
 *.zip

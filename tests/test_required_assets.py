@@ -83,6 +83,19 @@ REQUIRED_ASSETS = {
         "BGE 模型 sha256 白名单的唯一来源",
         "tools/verify_model_integrity.py、CI 校验步骤",
     ),
+    # 真实恶意流量的评测结论（体积小、可复现；大样本 PCAP 按设计不入库）
+    #
+    # 这两个文件曾被 `.gitignore` 的整目录规则 `data/eval_real/` 一起挡在仓库外。
+    # 注意该规则已改为 `data/eval_real/*` —— 排除目录本身会让 git 不进入该目录，
+    # 其内部的否定规则（`!...`）永远不会被求值（实测踩过：加了 `!` 仍被忽略）。
+    "data/eval_real/real_analysis_result.json": (
+        "真实恶意流量（Lumma Stealer 感染样本）的分析结论",
+        "README「真实流量验证」小节 —— 证明系统在非合成数据上可用",
+    ),
+    "data/eval_real/ioc_crosscheck.json": (
+        "IOC 交叉核对结果（PCAP 内 DNS 与威胁报告 IOC 的命中情况）",
+        "README「真实流量验证」小节",
+    ),
 }
 
 # 代码模块的结构性文件：包 `__init__.py` + 「被 import 但易漏提交」的业务模块。

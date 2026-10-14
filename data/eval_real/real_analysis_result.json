@@ -1,0 +1,193 @@
+{
+  "summary": {
+    "total_packets": 17013,
+    "total_flows": 102,
+    "time_range": {
+      "start": "2025-12-30 11:11:12.842",
+      "end": "2025-12-30 11:15:58.923"
+    },
+    "total_bytes": 19393172
+  },
+  "flow_stats": {
+    "total_flows": 102,
+    "top_flows": [
+      {
+        "flow": "10.12.30.101:53165 -> 172.67.203.237:443",
+        "protocol": "TCP",
+        "packets": 0,
+        "bytes": 15707224
+      },
+      {
+        "flow": "10.12.30.101:60510 -> 13.201.207.191:443",
+        "protocol": "TCP",
+        "packets": 0,
+        "bytes": 1405437
+      },
+      {
+        "flow": "10.12.30.101:63158 -> 13.201.207.191:443",
+        "protocol": "TCP",
+        "packets": 0,
+        "bytes": 527946
+      },
+      {
+        "flow": "10.12.30.101:60501 -> 13.201.207.191:443",
+        "protocol": "TCP",
+        "packets": 0,
+        "bytes": 326724
+      },
+      {
+        "flow": "10.12.30.101:56314 -> 172.67.152.119:443",
+        "protocol": "TCP",
+        "packets": 0,
+        "bytes": 184951
+      },
+      {
+        "flow": "10.12.30.101:54502 -> 46.8.227.214:443",
+        "protocol": "TCP",
+        "packets": 0,
+        "bytes": 126691
+      },
+      {
+        "flow": "10.12.30.101:53666 -> 23.219.160.240:443",
+        "protocol": "TCP",
+        "packets": 0,
+        "bytes": 84037
+      },
+      {
+        "flow": "10.12.30.101:60503 -> 13.201.207.191:443",
+        "protocol": "TCP",
+        "packets": 0,
+        "bytes": 63020
+      },
+      {
+        "flow": "10.12.30.101:54504 -> 104.18.21.213:80",
+        "protocol": "TCP",
+        "packets": 0,
+        "bytes": 62686
+      },
+      {
+        "flow": "10.12.30.101:56224 -> 13.201.207.191:443",
+        "protocol": "TCP",
+        "packets": 0,
+        "bytes": 46814
+      }
+    ]
+  },
+  "protocol_distribution": {
+    "TCP": 16847,
+    "DNS": 166
+  },
+  "top_talkers": [
+    {
+      "flow": "10.12.30.101:53165 -> 172.67.203.237:443",
+      "protocol": "TCP",
+      "packets": 0,
+      "bytes": 15707224
+    },
+    {
+      "flow": "10.12.30.101:60510 -> 13.201.207.191:443",
+      "protocol": "TCP",
+      "packets": 0,
+      "bytes": 1405437
+    },
+    {
+      "flow": "10.12.30.101:63158 -> 13.201.207.191:443",
+      "protocol": "TCP",
+      "packets": 0,
+      "bytes": 527946
+    },
+    {
+      "flow": "10.12.30.101:60501 -> 13.201.207.191:443",
+      "protocol": "TCP",
+      "packets": 0,
+      "bytes": 326724
+    },
+    {
+      "flow": "10.12.30.101:56314 -> 172.67.152.119:443",
+      "protocol": "TCP",
+      "packets": 0,
+      "bytes": 184951
+    },
+    {
+      "flow": "10.12.30.101:54502 -> 46.8.227.214:443",
+      "protocol": "TCP",
+      "packets": 0,
+      "bytes": 126691
+    },
+    {
+      "flow": "10.12.30.101:53666 -> 23.219.160.240:443",
+      "protocol": "TCP",
+      "packets": 0,
+      "bytes": 84037
+    },
+    {
+      "flow": "10.12.30.101:60503 -> 13.201.207.191:443",
+      "protocol": "TCP",
+      "packets": 0,
+      "bytes": 63020
+    },
+    {
+      "flow": "10.12.30.101:54504 -> 104.18.21.213:80",
+      "protocol": "TCP",
+      "packets": 0,
+      "bytes": 62686
+    },
+    {
+      "flow": "10.12.30.101:56224 -> 13.201.207.191:443",
+      "protocol": "TCP",
+      "packets": 0,
+      "bytes": 46814
+    }
+  ],
+  "anomaly_detection": {
+    "total_alerts": 3,
+    "alerts": [
+      {
+        "type": "DNS_TUNNEL_SUSPECTED",
+        "severity": "MEDIUM",
+        "src_ip": "10.12.30.101",
+        "suspicious_query_count": 7,
+        "detector": "dns-tunnel-query-length",
+        "rule_threshold": {
+          "dns_tunnel_max_query_len": 30
+        },
+        "time_window": "2025-12-30 11:11:33.169 ~ 2025-12-30 11:15:12.852",
+        "description": "源IP 10.12.30.101 发送了 7 个超长DNS查询（>30字符），疑似DNS隧道"
+      },
+      {
+        "type": "DNS_TUNNEL_SUSPECTED",
+        "severity": "MEDIUM",
+        "src_ip": "10.12.30.1",
+        "suspicious_query_count": 7,
+        "detector": "dns-tunnel-query-length",
+        "rule_threshold": {
+          "dns_tunnel_max_query_len": 30
+        },
+        "time_window": "2025-12-30 11:11:33.664 ~ 2025-12-30 11:15:12.853",
+        "description": "源IP 10.12.30.1 发送了 7 个超长DNS查询（>30字符），疑似DNS隧道"
+      },
+      {
+        "type": "LARGE_DATA_TRANSFER",
+        "severity": "MEDIUM",
+        "src_ip": "10.12.30.101",
+        "dst_ip": "172.67.203.237",
+        "bytes_transferred": 15707224,
+        "detector": "large-flow-bytes",
+        "rule_threshold": {
+          "large_flow_min_mb": 10.0
+        },
+        "time_window": "2025-12-30 11:11:42.308 ~ 2025-12-30 11:13:55.916",
+        "description": "流 10.12.30.101:53165 -> 172.67.203.237:443 传输了 15.0MB 数据，需关注是否为数据渗出"
+      }
+    ],
+    "severity_summary": {
+      "CRITICAL": 0,
+      "HIGH": 0,
+      "MEDIUM": 3,
+      "LOW": 0
+    }
+  },
+  "baseline_profile": null,
+  "baseline_drift": null,
+  "streaming": true
+}

@@ -37,10 +37,24 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# 事故中那个掩码（含 U+2026），以及真实 Key 的形态
+# 事故中那个掩码（含 U+2026）
 ACCIDENT_MASK = "0bf7\u20264U3u"
-REAL_KEY = "REDACTED_LEAKED_KEY_DO_NOT_USE"
-FAKE_REAL = "sk-" + "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6"
+
+# ----------------------------------------------------------------------
+# 【重要】本文件中的"真实 Key"必须是**构造的假值**，绝不可写入任何真 Key
+#
+# 教训：本文件初版为了构造"格式合法的真实 Key"样本，把用户的真 Key
+# 直接写了进来，随公开仓库一起提交（提交 05aec6b）→ 密钥公开泄漏。
+# 讽刺的是，这个文件本身的用途正是防范 API Key 类事故。
+#
+# 现在的做法：
+#   · 假 Key 只需满足"形态像真的"（够长、无掩码字符、纯 ASCII）
+#   · 断言全部从假 Key **推导**（而非硬编码真 Key 的首尾），
+#     这样换假值时无需再改断言，也就不会有人图省事把真值写回来
+# ----------------------------------------------------------------------
+FAKE_KEY = "sk-" + "testonly" + "0" * 24          # 合成，非任何真实凭据
+FAKE_REAL = FAKE_KEY                              # 向后兼容旧命名
+REAL_KEY = FAKE_KEY                               # 同上（"真实形态"之意，非真值）
 
 
 def _ga_src():
@@ -74,7 +88,10 @@ def test_looks_like_real_api_key(value, expected, why):
 def test_mask_key_never_returns_input_mask():
     """掩码函数对已是掩码的输入必须返回空串（避免掩码套掩码）。"""
     from src.ui.gradio_app import mask_key
-    assert mask_key(REAL_KEY) == "313c\u20260Jir"
+    # 期望值从假 Key 推导，而非硬编码某个具体凭据的首尾 ——
+    # 这样换假值时断言无需改动，也不会诱导后人把真值写回代码。
+    expected_mask = f"{FAKE_KEY[:4]}\u2026{FAKE_KEY[-4:]}"
+    assert mask_key(FAKE_KEY) == expected_mask
     assert mask_key(ACCIDENT_MASK) == ""
     assert mask_key("已配置") == ""
     assert mask_key("") == ""

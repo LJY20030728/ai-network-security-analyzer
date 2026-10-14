@@ -55,14 +55,11 @@ class InputValidator:
             return False, f"API Key 长度过短（{len(api_key)} 字符），可能不完整"
         return True, ""
 
-    @staticmethod
-    def validate_base_url(base_url: str) -> Tuple[bool, str]:
-        """校验 Base URL 格式"""
-        if not base_url:
-            return False, "Base URL 不能为空"
-        if not base_url.startswith(("http://", "https://")):
-            return False, "Base URL 必须以 http:// 或 https:// 开头"
-        return True, ""
+    # 注：此处曾有 `validate_base_url`，仅检查 `startswith(("http://","https://"))`，
+    # 不足以用于安全校验（放行 http 明文、私网、回环、云元数据地址）。
+    # 它生产与测试均零引用，已被以下更严格的实现取代，故直接删除：
+    #     src/ui/ui_helpers.py::assert_safe_llm_base_url
+    #     （仅 https、仅 443、拒绝私网/回环/链路本地/保留地址，生产在用）
 
     @staticmethod
     def validate_baseline_name(name: str) -> Tuple[bool, str]:
@@ -199,90 +196,26 @@ def safe_execute(context: str = "", fallback: Any = None) -> Callable:
 
 
 # ============================================================
-# 第三层：优雅降级
+# 说明：降级能力由各功能模块自身实现，不在本模块重复
+#
+# 此处曾有一个 `FallbackManager`（llm_analysis_fallback /
+# rag_search_fallback / baseline_detection_fallback）与两个便捷函数
+# （friendly_error / validate_or_raise），经全仓库核查后删除，理由：
+#
+#   · 三者**生产代码零引用、测试零引用**（删前用 AST 逐一核对）
+#   · 其宣称的能力已由更贴近上下文的实现取代：
+#       - LLM 降级  → src/ai/threat_analyzer.py 的"文本模式兜底"
+#                     + src/ai/hallucination_control.py 的"降级为参考意见"
+#       - RAG 降级  → src/ai/rag_engine.py 明确选择"不静默降级"（见该文件注释：
+#                     静默降级会掩盖故障）
+#       - 基线降级  → src/analysis/baseline.py 自身处理
+#   · `rag_search_fallback` 本身是**空壳**：构造 `results = []` 后只 `pass`，
+#     任何输入都返回空列表 —— 保留它会造成"看起来有降级机制"的假象，
+#     比没有更危险（故障时无人察觉）。
+#   · `friendly_error` 只是 `GlobalExceptionHandler.handle(...).to_dict()` 的
+#     三行包装，而 `.to_dict()` 在业务代码中已被直接调用 11 处。
+#
+# 保留的是真正在用的部分：ErrorInfo / GlobalExceptionHandler /
+# InputValidator（validate_baseline_name 被生产调用）。
 # ============================================================
 
-class FallbackManager:
-    """优雅降级管理器 — 关键功能失败时自动切换到备用方案"""
-
-    @staticmethod
-    def llm_analysis_fallback(analysis_result: Dict[str, Any]) -> str:
-        """LLM 分析失败时的降级：基于规则引擎结果生成简单摘要"""
-        alerts = analysis_result.get("anomaly_detection", {}).get("alerts", [])
-        severity = analysis_result.get("anomaly_detection", {}).get("severity_summary", {})
-        stacking = analysis_result.get("stacking_fusion") or {}
-
-        lines = ["⚠️ AI 分析暂时不可用，以下为规则引擎自动生成的基础分析：\n"]
-
-        # 主引擎判定
-        if stacking:
-            verdict = "检测到攻击" if stacking.get("is_attack") else "未检测到明显攻击"
-            confidence = stacking.get("confidence", 0)
-            lines.append(f"【主引擎判定】{verdict}（置信度: {confidence:.1%}）")
-            if stacking.get("attack_flows"):
-                lines.append(f"【融合攻击概率】{stacking['attack_flows']}")
-            lines.append("")
-
-        # 告警统计
-        if alerts:
-            lines.append(f"【告警统计】共 {len(alerts)} 条告警")
-            for sev, cnt in severity.items():
-                lines.append(f"  - {sev}: {cnt} 条")
-            lines.append("")
-            # 前 5 条告警
-            lines.append("【主要告警】")
-            for a in alerts[:5]:
-                lines.append(f"  - [{a.get('severity', '?')}] {a.get('type', '?')}: "
-                             f"{a.get('src_ip', '?')} → {a.get('dst_ip', '?')}")
-        else:
-            lines.append("【告警统计】未检测到异常告警")
-
-        lines.append("\n💡 建议：检查 API Key 配置后重试，可获得更详细的 AI 分析结果。")
-        return "\n".join(lines)
-
-    @staticmethod
-    def rag_search_fallback(query: str, knowledge_base) -> list:
-        """RAG 检索失败时的降级：关键词匹配"""
-        try:
-            results = []
-            query_lower = query.lower()
-            # 遍历知识库做简单关键词匹配
-            if hasattr(knowledge_base, "collection"):
-                # ChromaDB 回退到关键词匹配
-                pass
-            return results
-        except Exception:
-            return []
-
-    @staticmethod
-    def baseline_detection_fallback(windows: list) -> list:
-        """基线检测失败时的降级：简单阈值检测"""
-        alerts = []
-        for i, w in enumerate(windows):
-            packets = w.get("packets", 0) if isinstance(w, dict) else getattr(w, "packets", 0)
-            if packets > 1000:  # 简单阈值
-                alerts.append({
-                    "window_index": i,
-                    "type": "HIGH_TRAFFIC",
-                    "severity": "MEDIUM",
-                    "message": f"窗口 {i} 流量异常高（{packets} 包）",
-                })
-        return alerts
-
-
-# ============================================================
-# 便捷函数
-# ============================================================
-
-def friendly_error(exception: Exception, context: str = "") -> Dict[str, Any]:
-    """将异常转换为友好的字典格式（API 响应直接用）"""
-    return GlobalExceptionHandler.handle(exception, context).to_dict()
-
-
-def validate_or_raise(validator: Callable, value: Any, field_name: str = "") -> Any:
-    """校验输入，不合法则抛出 ValueError（带友好提示）"""
-    valid, msg = validator(value)
-    if not valid:
-        prefix = f"{field_name}: " if field_name else ""
-        raise ValueError(f"{prefix}{msg}")
-    return value

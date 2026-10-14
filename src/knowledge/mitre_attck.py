@@ -376,11 +376,6 @@ def _load_docs_dir(subdir: str, category: str) -> List[Dict[str, str]]:
     return items
 
 
-def _load_knowledge_docs() -> List[Dict[str, str]]:
-    """扫描 data/knowledge/docs/ 下的外部知识文档（向后兼容包装）"""
-    return _load_docs_dir("docs", "external_doc")
-
-
 def get_all_knowledge() -> List[Dict[str, str]]:
     """获取所有知识库条目（用于初始化 RAG）。
     聚合：内置 MITRE 精选技术 / 处置手册 / 协议知识 / docs 全量战术库 /

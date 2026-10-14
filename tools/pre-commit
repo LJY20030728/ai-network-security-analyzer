@@ -1,0 +1,56 @@
+#!/bin/sh
+# ============================================================================
+# pre-commit 钩子：提交前扫描暂存区中的密钥泄漏
+#
+# 背景：本仓库发生过真实泄漏 —— tests/test_api_key_mask_incident.py 里
+# 为了构造"格式合法的真实 Key"样本写入了用户真 Key，随公开仓库提交。
+# 事后虽改了代码、改写了 git 历史，但 GitHub 仍在相当长时间内保留
+# 不可达的旧对象（旧提交页面/`.patch` 仍可匿名访问），
+# 说明「事后补救」远不如「提交前拦截」。
+#
+# 安装（在仓库根执行，Windows Git Bash / macOS / Linux 通用）：
+#     sh tools/install_git_hooks.sh
+# 或手动：
+#     cp tools/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+#
+# 绕过（仅在确认是误报时使用，并请把该行加入扫描器白名单）：
+#     git commit --no-verify
+# ============================================================================
+
+PY=""
+for cand in "venv/Scripts/python.exe" "venv/bin/python" "python3" "python"; do
+    if command -v "$cand" >/dev/null 2>&1; then
+        PY="$cand"
+        break
+    fi
+    if [ -x "$cand" ]; then
+        PY="$cand"
+        break
+    fi
+done
+
+if [ -z "$PY" ]; then
+    echo "[pre-commit] 未找到 Python，跳过密钥扫描" >&2
+    exit 0
+fi
+
+"$PY" tools/scan_secrets.py --staged
+status=$?
+
+if [ $status -ne 0 ]; then
+    echo "" >&2
+    echo "============================================================" >&2
+    echo " 提交被拦截：暂存区中发现疑似密钥" >&2
+    echo "============================================================" >&2
+    echo " 处理方式：" >&2
+    echo "   1) 把密钥改为从环境变量读取（不要硬编码）" >&2
+    echo "   2) 测试用合成假值，例如：\"sk-\" + \"testonly\" + \"0\" * 24" >&2
+    echo "   3) 若确为误报，把该行加入 tools/scan_secrets.py 白名单" >&2
+    echo "" >&2
+    echo " 注意：密钥一旦提交，仅删除代码是不够的 ——" >&2
+    echo "       git 历史会保留，必须作废该密钥。" >&2
+    echo "============================================================" >&2
+    exit 1
+fi
+
+exit 0

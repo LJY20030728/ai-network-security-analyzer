@@ -65,6 +65,112 @@ GOLDEN = os.path.join(ROOT, "data", "samples", "golden")
 MIXED = os.path.join(ROOT, "data", "samples", "mixed")
 OUT_JSON = os.path.join(ROOT, "data", "eval_perf", "stacking_training.json")
 
+
+# ============================================================
+# 共线性诊断（VIF）
+# ============================================================
+#
+# 为什么需要它：元学习器在强共线特征上会给出**符号错误但预测正确**的系数
+# （两个相关特征可以学成 +5.0/-4.9 相互抵消）。实测本项目有 3 对 |r|>0.8：
+#     rule_alert_count_norm     ↔ baseline_deviation_count       +0.862
+#     baseline_multi_dim_triggered ↔ rule_max_severity           +0.803
+#     baseline_deviation_count  ↔ baseline_multi_dim_triggered   +0.843
+# 以及 5 个负系数，其中 rule_max_severity=-1.33 会让"越严重越正常"这种误读成立。
+#
+# VIF（方差膨胀因子）= 1/(1-R²_i)，R²_i 是第 i 维对其余维做回归的决定系数。
+# 学界经验线：VIF > 10 表示该维系数**不可单独解读**。
+#
+# 本项目训练标签是"样本级真值下推到窗口级"的弱标注，且样本仅 17 组，
+# 因此 VIF 只用于**诊断可解释性**，不作为特征剔除的自动依据
+# （自动剔除会引入选择偏差，且可能删掉真实有效的特征）。
+
+def compute_vif(X: np.ndarray, names: list) -> list:
+    """计算每维特征的 VIF。
+
+    :param X: 设计矩阵 (n_samples, n_features)
+    :param names: 特征名列表
+    :return: [(name, vif)]；常量列的 VIF 记为 inf（数学上完全共线）
+    """
+    X = np.asarray(X, dtype=np.float64)
+    n, p = X.shape
+    out = []
+    for i in range(p):
+        col = X[:, i]
+        # 常量列：无法计算 R²（方差为 0），数学上 VIF = ∞
+        if float(col.std()) < 1e-12:
+            out.append((names[i], float("inf")))
+            continue
+        others = np.delete(X, i, axis=1)
+        # 加截距列做最小二乘
+        A = np.column_stack([np.ones(n), others])
+        try:
+            coef, *_ = np.linalg.lstsq(A, col, rcond=None)
+            pred = A @ coef
+            ss_res = float(((col - pred) ** 2).sum())
+            ss_tot = float(((col - col.mean()) ** 2).sum())
+            r2 = 1.0 - ss_res / ss_tot if ss_tot > 1e-12 else 0.0
+            r2 = min(max(r2, 0.0), 1.0 - 1e-12)     # 数值保护，避免除零
+            out.append((names[i], 1.0 / (1.0 - r2)))
+        except Exception:
+            out.append((names[i], float("nan")))
+    return out
+
+
+def report_collinearity(X: np.ndarray, names: list) -> dict:
+    """打印并返回共线性诊断结果（含常量列与强相关对）"""
+    print("\n[共线性诊断]")
+    vifs = compute_vif(X, names)
+    constants, high_vif = [], []
+    print(f"    {'特征':32} {'VIF':>10}  {'std':>8}  判定")
+    for (name, vif), i in zip(vifs, range(len(names))):
+        std = float(X[:, i].std())
+        if not np.isfinite(vif):
+            verdict = "常量列（系数无意义）"
+            constants.append(name)
+        elif vif > 10:
+            verdict = "强共线（系数不可单独解读）"
+            high_vif.append(name)
+        elif vif > 5:
+            verdict = "中度共线（解读需谨慎）"
+        else:
+            verdict = ""
+        shown = "inf" if not np.isfinite(vif) else f"{vif:.1f}"
+        print(f"    {name:32} {shown:>10} {std:8.4f}  {verdict}")
+
+    # 强相关对（|r| > 0.8）
+    pairs = []
+    with np.errstate(invalid="ignore", divide="ignore"):
+        corr = np.corrcoef(X.T)
+    for i in range(len(names)):
+        for j in range(i + 1, len(names)):
+            r = corr[i, j]
+            if np.isfinite(r) and abs(r) > 0.8:
+                pairs.append((names[i], names[j], float(r)))
+    if pairs:
+        print("\n    强相关特征对（|r| > 0.8）:")
+        for a, b, r in pairs:
+            print(f"      {a:30} ↔ {b:30} r={r:+.3f}")
+    else:
+        print("\n    未发现 |r| > 0.8 的特征对")
+
+    if constants:
+        print(f"\n    ⚠️ 常量列 {len(constants)} 个: {constants}")
+        print("       注意：它们在**训练数据**上恒定，但在真实运行中可能非恒定")
+        print("       （例如关闭基线后 baseline_drifted 会变 0）。")
+        print("       是否可删取决于'生产环境是否允许关闭对应引擎'，不可仅凭此结果删除。")
+    if high_vif:
+        print(f"\n    ⚠️ VIF>10 的特征 {len(high_vif)} 个: {high_vif}")
+
+    return {
+        "vif": {n: (None if not np.isfinite(v) else round(v, 2)) for n, v in vifs},
+        "constant_columns": constants,
+        "high_vif_columns": high_vif,
+        "strong_correlated_pairs": [
+            {"a": a, "b": b, "r": round(r, 3)} for a, b, r in pairs
+        ],
+    }
+
+
 # 窗口标签：样本级真值下推到窗口级（弱标注，见 docstring）
 SAMPLE_LABELS = {
     "normal": 0,
@@ -259,7 +365,32 @@ def collect_features(analyzer, baseline, iso, packets, labels, window_sec):
     return rows, out_labels
 
 
-def main():
+def main(argv=None):
+    # ---- CLI 参数 ----
+    #
+    # 为什么需要 --out：原脚本无任何参数，直接运行会**覆盖生产模型**
+    # （models/stacking_meta_learner.joblib）。这导致无法安全地做对比实验：
+    # 想试不同的正则化强度，就得先把生产模型备份走。--out 让重训可指向临时路径。
+    #
+    # 为什么需要 --save-matrix：原脚本不保存设计矩阵 X / 标签 y / 分组 groups，
+    # 于是**无法事后计算 VIF、无法复现训练集**。这与项目"可复现"的主张相悖。
+    # 开启后落盘 .npz，供诊断脚本与人工复核使用。
+    import argparse
+    ap = argparse.ArgumentParser(
+        description="训练三引擎 Stacking 元学习器（默认写入生产模型路径）")
+    ap.add_argument("--out", default=DEFAULT_MODEL_PATH,
+                    help=f"模型输出路径（默认 {DEFAULT_MODEL_PATH}）")
+    ap.add_argument("--out-json", default=OUT_JSON,
+                    help=f"训练报告输出路径（默认 {OUT_JSON}）")
+    ap.add_argument("--save-matrix", action="store_true",
+                    help="把设计矩阵 X / 标签 y / 分组 groups 落盘为 .npz（供 VIF 诊断与复现）")
+    ap.add_argument("--matrix-out", default=None,
+                    help="设计矩阵输出路径（默认与 --out 同目录的 stacking_design_matrix.npz）")
+    ap.add_argument("--no-vif", action="store_true", help="跳过共线性（VIF）诊断")
+    ap.add_argument("--C", type=float, default=None,
+                    help="覆盖元学习器的 L2 正则化强度（默认沿用类内设置）")
+    args = ap.parse_args(argv)
+
     parser = PacketParser()
     normal_path = os.path.join(GOLDEN, "normal.pcap")
     if not os.path.exists(normal_path):
@@ -364,6 +495,25 @@ def main():
     print(f"    去重: 原始 {n_total} 行 → 唯一 {len(y)} 行（移除 {n_dup} 行重复）")
     print(f"    样本组数（GroupKFold 分组数）: {len(set(groups))}")
 
+    # 2.5) 共线性诊断（在训练前做：先看清特征关系，再决定是否需要调正则化）
+    collinearity = None
+    if not args.no_vif:
+        collinearity = report_collinearity(X, list(ThreeEngineStacking(model_path=None).feature_names))
+
+    # 2.6) 设计矩阵落盘（可选）：补上"训练集不可复现"的缺口
+    if args.save_matrix:
+        matrix_path = args.matrix_out or os.path.join(
+            os.path.dirname(args.out) or ".", "stacking_design_matrix.npz")
+        os.makedirs(os.path.dirname(matrix_path) or ".", exist_ok=True)
+        np.savez_compressed(
+            matrix_path,
+            X=X, y=y, groups=groups,
+            feature_names=np.array(ThreeEngineStacking(model_path=None).feature_names),
+        )
+        print(f"\n    设计矩阵已落盘: {matrix_path}")
+        print(f"      形状 X={X.shape} y={y.shape} groups={groups.shape}")
+        print("      用途：事后计算 VIF、复现训练集、对比不同正则化方案")
+
     # 3) 训练（按源 PCAP 分组交叉验证，避免同一样本窗口跨折导致泄漏）
     print("\n[3] 训练 LogisticRegression 元学习器（GroupKFold，按源 PCAP 分组）")
     fusion = ThreeEngineStacking(model_path=None)
@@ -403,7 +553,7 @@ def main():
     print(f"    数据指纹: {provenance['dataset_hash']} | 唯一行 {provenance['dataset_rows']}"
           f"/原始 {provenance['dataset_raw_rows']} | 组 {provenance['n_groups']}")
 
-    result = fusion.train_meta_learner(X, y, model_path=DEFAULT_MODEL_PATH, groups=groups)
+    result = fusion.train_meta_learner(X, y, model_path=args.out, groups=groups)
     print(f"    分组 CV F1: {result['cv_f1_mean']} ± {result['cv_f1_std']}"
           f"（{result['cv_splits']} 折，按样本分组）")
     if result.get("cv_f1_ungrouped_mean") is not None:
@@ -432,6 +582,7 @@ def main():
         "cv_f1_ungrouped_mean": result.get("cv_f1_ungrouped_mean"),
         "cv_f1_ungrouped_std": result.get("cv_f1_ungrouped_std"),
         "feature_importance": result["feature_importance"],
+        "collinearity": collinearity,
         "per_sample": per_sample,
         "provenance": provenance,
         "limitations": [
@@ -444,11 +595,11 @@ def main():
             "真实部署前请用自有标注流量重新运行本脚本",
         ],
     }
-    os.makedirs(os.path.dirname(OUT_JSON), exist_ok=True)
-    with io.open(OUT_JSON, "w", encoding="utf-8") as f:
+    os.makedirs(os.path.dirname(args.out_json) or ".", exist_ok=True)
+    with io.open(args.out_json, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)
     print(f"\n已保存模型: {DEFAULT_MODEL_PATH}")
-    print(f"已保存训练报告: {OUT_JSON}")
+    print(f"已保存训练报告: {args.out_json}")
     return 0
 
 

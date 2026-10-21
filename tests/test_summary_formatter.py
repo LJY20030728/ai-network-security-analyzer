@@ -98,11 +98,38 @@ class TestStackingVerdict:
             "is_attack": True, "confidence": 0.5,
             "contributions": {"rule_based": 0.6, "baseline": 0.0, "isolation_forest": 0.4},
         })
-        assert "引擎贡献" in text
+        # 标签已从"引擎贡献"改为"引擎归因"：后者才准确描述"模型系数分解"这一含义
+        assert "引擎归因" in text
         assert "rule_based:60%" in text
         assert "isolation_forest:40%" in text
         # 0 值贡献不展示
         assert "baseline" not in text
+
+    def test_attribution_source_is_labelled(self):
+        """归因来源必须显式标注，且两种来源的措辞要能区分。
+
+        这是防止"把人工兜底权重伪装成模型归因"的关键断言：
+        两者数值含义完全不同，只显示百分比会误导读者。
+        """
+        model_text = format_stacking_verdict({
+            "is_attack": True, "confidence": 0.5,
+            "contributions": {"rule_based": 0.5, "baseline": 0.1, "isolation_forest": 0.4},
+            "attribution_source": "model_coef",
+            "logit": 1.2345, "intercept_logit": -3.05,
+        })
+        assert "模型系数分解" in model_text
+        assert "logit" in model_text
+        assert "1.2345" in model_text
+
+        fb_text = format_stacking_verdict({
+            "is_attack": False, "confidence": 0.2,
+            "contributions": {"rule_based": 0.4, "baseline": 0.3, "isolation_forest": 0.3},
+            "attribution_source": "fallback_weights",
+        })
+        assert "人工权重" in fb_text
+        assert "非模型归因" in fb_text
+        # 兜底时不应渲染 logit（没有模型就没有 logit）
+        assert "logit" not in fb_text
 
     def test_confidence_source_labels_cover_known_values(self):
         """所有可能出现的来源都应有中文标签，避免 UI 露出英文枚举"""

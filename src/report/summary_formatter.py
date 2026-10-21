@@ -64,7 +64,23 @@ def format_stacking_verdict(fus: Dict[str, Any]) -> str:
     contrib = fus.get("contributions") or {}
     parts = " | ".join(f"{k}:{v:.0%}" for k, v in contrib.items() if v)
     if parts:
-        text += f"  • 引擎贡献: {parts}\n"
+        # 归因来源必须与数值一起展示：
+        #   model_coef       = 由元学习器系数把 logit 精确分解而来（可信）
+        #   fallback_weights = 元学习器不可用时的人工权重（不是模型判断）
+        # 两者含义完全不同，只显示数字会误导读者。
+        attr_src = fus.get("attribution_source")
+        if attr_src == "model_coef":
+            label = "引擎归因（模型系数分解）"
+        elif attr_src == "fallback_weights":
+            label = "引擎占比（人工权重，非模型归因）"
+        else:
+            label = "引擎归因"
+        text += f"  • {label}: {parts}\n"
+
+    # logit 分解的可核查中间量（便于复核归因是否算对）
+    if fus.get("logit") is not None:
+        text += (f"  • logit: {fus.get('logit')}"
+                 f"（截距 {fus.get('intercept_logit')} + 特征贡献之和）\n")
 
     return text
 

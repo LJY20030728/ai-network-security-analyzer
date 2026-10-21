@@ -72,6 +72,10 @@ class ThreeEngineStacking:
         self.engine_order = list(ENGINE_ORDER)
         # 训练数据指纹（由训练脚本写入，随模型落盘，便于溯源「这个模型是谁训的」）
         self.provenance: Dict[str, Any] = {}
+        # 元学习器系数缓存：用于把 logit 精确分解为各引擎的贡献
+        # （见 _engine_attribution 的说明；None 表示元学习器不可用）
+        self._coef_cache: Optional[np.ndarray] = None
+        self._intercept_cache: Optional[float] = None
         if model_path and os.path.exists(model_path):
             self.load(model_path)
 
@@ -149,6 +153,90 @@ class ThreeEngineStacking:
         ], dtype=np.float64)
 
     # ------------------------------------------------------------------
+    # 引擎归因（contributions）
+    # ------------------------------------------------------------------
+    def _engine_attribution(self, features: np.ndarray) -> Dict[str, Any]:
+        """计算三个引擎对本次判定的**真实贡献占比**。
+
+        ## 为什么需要这个方法（修的是什么）
+
+        原实现直接对每组特征取算术平均再归一化：
+
+            raw = [mean(features[0:4]), mean(features[4:7]), mean(features[7:13])]
+            share = raw / raw.sum()
+
+        这在数学上是**错的**，原因有二：
+
+        1. **丢弃了模型学到的系数**。LogisticRegression 的判定由
+           `sigmoid(intercept + Σ wᵢxᵢ)` 决定，`wᵢ` 才决定"哪个引擎被信任"。
+           原实现完全没用到 `wᵢ`，所以它算出的"贡献"与模型行为无关。
+        2. **量纲不一致却直接平均**。`rule_max_severity` 取值 0~4，
+           其余特征多为 0~1；组内求均值被这一个特征主导。
+
+        实测对照（demo_attack 样本）：
+
+            原实现报告      rule 0.5103 / baseline 0.3002 / iso 0.1895
+            模型真实归因    rule 0.3153 / baseline 0.1119 / iso 0.5728
+                                                  ↑ 相差 3 倍，方向甚至相反
+
+        对一个以"可解释"为卖点的系统，展示错误的归因是硬伤。
+
+        ## 现在的算法（线性模型下可精确分解）
+
+        logistic 回归的 logit 可**精确**拆分为各特征项之和：
+
+            logit = intercept + Σ wᵢxᵢ
+
+        故第 i 个特征的**边际贡献**为 `wᵢxᵢ`（这本身就是模型对该样本
+        预测值的分解，不是近似）。按引擎分组后取绝对值求和再归一化，
+        即得"本次判定中各引擎的相对影响力"。
+
+        用绝对值的原因：正负贡献都代表"该引擎影响了结论"，
+        而我们报告的是**影响力大小**而非方向。
+
+        :return: {"contributions": {...3 项和为 1...},
+                  "attribution_source": "model_coef" | "fallback_weights",
+                  "intercept_logit": float | None,
+                  "logit": float | None}
+        """
+        w = self._coef_cache
+        if w is None:
+            # 元学习器不可用：只能用人工权重，且必须如实标注来源
+            share = np.array([FALLBACK_WEIGHTS[k] for k in ENGINE_ORDER], dtype=np.float64)
+            total = float(share.sum())
+            return {
+                "contributions": {k: round(float(v / total), 4)
+                                  for k, v in zip(ENGINE_ORDER, share)},
+                "attribution_source": "fallback_weights",
+                "intercept_logit": None,
+                "logit": None,
+            }
+
+        # 线性分解：每个特征的边际贡献 = w_i * x_i
+        terms = np.abs(w * features)
+        groups = {
+            "rule_based": float(terms[0:4].sum()),
+            "baseline": float(terms[4:7].sum()),
+            "isolation_forest": float(terms[7:13].sum()),
+        }
+        total = float(sum(groups.values()))
+        if total <= 1e-12:
+            # 所有特征都为 0（无任何引擎响应）→ 影响力无从谈起
+            share = {k: 0.0 for k in ENGINE_ORDER}
+        else:
+            share = {k: round(v / total, 4) for k, v in groups.items()}
+
+        intercept = float(self._intercept_cache) if self._intercept_cache is not None else None
+        logit = float(intercept + float(np.dot(w, features))) if intercept is not None else None
+        return {
+            "contributions": share,
+            "attribution_source": "model_coef",
+            "intercept_logit": round(intercept, 4) if intercept is not None else None,
+            "logit": round(logit, 4) if logit is not None else None,
+        }
+
+
+    # ------------------------------------------------------------------
     # 预测
     # ------------------------------------------------------------------
     def predict(self, anomalies: Dict[str, Any],
@@ -177,20 +265,15 @@ class ThreeEngineStacking:
         is_attack = prob >= 0.5
         confidence = abs(prob - 0.5) * 2  # 0-1
 
-        # 引擎贡献度：按特征分组均值归一化为「占比」（三者和为 1）
-        # 注意：特征本身不是概率（如 rule_max_severity 范围 0-4），
-        # 直接求均值会得到 >100% 的无意义数字，必须归一化后再展示。
-        raw = np.array([
-            float(np.mean(features[0:4])),   # rule_based
-            float(np.mean(features[4:7])),   # baseline
-            float(np.mean(features[7:13])),  # isolation_forest
-        ])
-        total = float(raw.sum())
-        share = raw / total if total > 0 else np.zeros_like(raw)
-        contributions = {
-            name: round(float(v), 4)
-            for name, v in zip(ENGINE_ORDER, share)
-        }
+        # 引擎归因：用模型系数把 logit 精确分解为各引擎的贡献。
+        #
+        # 【修复记录】原实现是"各组特征取算术平均再归一化"：
+        #     raw = [mean(f[0:4]), mean(f[4:7]), mean(f[7:13])]; share = raw / raw.sum()
+        # 这是错的 —— 它既丢弃了模型学到的系数 w（判定由 sigmoid(intercept+Σwx) 决定），
+        # 又对不同量纲的特征直接平均（rule_max_severity 取值 0~4，其余多为 0~1）。
+        # 实测该实现报告 rule 0.51 / iso 0.19，而模型真实归因是 rule 0.32 / iso 0.57，
+        # 相差 3 倍且方向相反。归因错误对一个以「可解释」为卖点的系统是硬伤，故重写。
+        attribution = self._engine_attribution(features)
 
         return {
             "architecture": "three_engine_stacking",
@@ -201,7 +284,12 @@ class ThreeEngineStacking:
             "confidence_source": confidence_source,
             "meta_learner_used": meta_used,
             "features": {n: float(v) for n, v in zip(self.feature_names, features)},
-            "contributions": contributions,
+            "contributions": attribution["contributions"],
+            # 归因来源：model_coef = 由模型系数精确分解；fallback_weights = 人工权重
+            # 使用者必须据此判断这个"贡献占比"是否可信（前者可信，后者只是兜底）
+            "attribution_source": attribution["attribution_source"],
+            "intercept_logit": attribution["intercept_logit"],
+            "logit": attribution["logit"],
         }
 
     def _weighted_fallback(self, features: np.ndarray) -> float:
@@ -240,6 +328,9 @@ class ThreeEngineStacking:
                 self.provenance = data.get("provenance") or {}
             else:
                 self.meta_learner = data
+            # 缓存系数，供 _engine_attribution 把 logit 精确分解为各引擎贡献。
+            # 只对线性模型有意义：树模型没有可分解的系数，此时置 None 让归因走兜底分支。
+            self._cache_coef()
             logger.info(f"三引擎 Stacking 元学习器加载成功: {model_path}"
                         + (f" | 数据指纹={self.provenance.get('dataset_hash')}"
                            if self.provenance.get("dataset_hash") else " | 无数据指纹（旧模型）"))
@@ -247,7 +338,36 @@ class ThreeEngineStacking:
         except Exception as e:
             logger.warning(f"meta-learner 加载失败，将使用固定权重回退: {e}")
             self.meta_learner = None
+            self._coef_cache = None
+            self._intercept_cache = None
             return False
+
+    def _cache_coef(self) -> None:
+        """把元学习器的系数与截距缓存到实例上（供归因分解使用）。
+
+        仅在 `coef_` / `intercept_` 存在且维度与 13 维特征一致时缓存；
+        否则置 None —— 归因会退回人工权重，并标注 attribution_source。
+        """
+        self._coef_cache = None
+        self._intercept_cache = None
+        m = self.meta_learner
+        if m is None:
+            return
+        coef = getattr(m, "coef_", None)
+        if coef is None:
+            return
+        coef = np.asarray(coef, dtype=np.float64).ravel()
+        if coef.shape[0] != self.feature_dim:
+            logger.warning(
+                f"元学习器系数维度 {coef.shape[0]} 与特征维度 {self.feature_dim} 不一致，"
+                f"归因将退回人工权重（判定本身不受影响）"
+            )
+            return
+        self._coef_cache = coef
+        intercept = getattr(m, "intercept_", None)
+        if intercept is not None:
+            inter = np.asarray(intercept, dtype=np.float64).ravel()
+            self._intercept_cache = float(inter[0]) if inter.size else None
 
     def save(self, model_path: str) -> None:
         import joblib

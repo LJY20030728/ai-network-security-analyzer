@@ -673,6 +673,39 @@ class TrafficAnalyzer:
         stacking_result = self._stack_engines(anomalies, ml_profile)
 
         # 流统计摘要（轻量：只出 top 数量与字节，不再全量 flow_stats）
+        #
+        # 【修复记录 1】此前这里把 packets 硬编码为 0：
+        #     {"flow": ..., "packets": 0, "bytes": x["bytes"]}
+        # 导致 UI 的"流量排行"表在流式模式下包数整列为 0（看起来像数据缺失）。
+        # 实际上包数一直都有 —— 逐包聚合时已按方向记录在 x["dirs"][dir]["count"]，
+        # 只需把各方向求和即可（双向流两个方向都要计入）。
+        def _flow_packets(f: Dict[str, Any]) -> int:
+            dirs = f.get("dirs") or {}
+            if not dirs:
+                return 0
+            return int(sum(d.get("count", 0) for d in dirs.values()))
+
+        # 【修复记录 2】`_dom()` 此前定义了却从未被调用（死代码），
+        # 而报告里的 "flow" 字段用的是**排序后的端点**（lo -> hi），
+        # 不是真实数据流向 —— 与全量路径 NetworkFlow.dom_* 的语义不一致。
+        #
+        # 这里把主导方向作为**新增字段**输出（dominant_direction / dominant_bytes），
+        # 而**不改 "flow" 字符串本身** —— 因为该字符串会进入 LLM prompt
+        # （threat_analyzer 用 json.dumps 传给模型），改格式会带来不必要的风险。
+        def _flow_entry(f: Dict[str, Any]) -> Dict[str, Any]:
+            src_ip, src_port, dst_ip, dst_port = _dom(f)
+            dirs = f.get("dirs") or {}
+            dom_bytes = int(dirs.get((src_ip, src_port, dst_ip, dst_port), {}).get("bytes", 0))
+            return {
+                "flow": f"{f['src_ip']}:{f['src_port']} -> {f['dst_ip']}:{f['dst_port']}",
+                "protocol": f["protocol"],
+                "packets": _flow_packets(f),
+                "bytes": f["bytes"],
+                # 真实主导方向（按包数最多的方向；与全量路径 tie-break 一致）
+                "dominant_direction": f"{src_ip}:{src_port} -> {dst_ip}:{dst_port}",
+                "dominant_bytes": dom_bytes,
+            }
+
         top_flows = sorted(flows.values(), key=lambda x: x["bytes"], reverse=True)[:10]
         report = {
             "summary": {
@@ -683,19 +716,11 @@ class TrafficAnalyzer:
             },
             "flow_stats": {
                 "total_flows": len(flows),
-                "top_flows": [
-                    {"flow": f"{x['src_ip']}:{x['src_port']} -> {x['dst_ip']}:{x['dst_port']}",
-                     "protocol": x["protocol"], "packets": 0, "bytes": x["bytes"]}
-                    for x in top_flows
-                ],
+                "top_flows": [_flow_entry(x) for x in top_flows],
             },
             "protocol_distribution": dict(sorted(protocol_dist.items(),
                                                  key=lambda x: x[1], reverse=True)),
-            "top_talkers": [
-                {"flow": f"{x['src_ip']}:{x['src_port']} -> {x['dst_ip']}:{x['dst_port']}",
-                 "protocol": x["protocol"], "packets": 0, "bytes": x["bytes"]}
-                for x in top_flows
-            ],
+            "top_talkers": [_flow_entry(x) for x in top_flows],
             "anomaly_detection": anomalies,
             "window_series": window_series,
             "baseline_profile": baseline_profile,

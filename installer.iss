@@ -18,8 +18,8 @@
 [Setup]
 AppId={{8A2B9C31-4E7D-4F3A-9C21-5D6E7F8A9B0C}
 AppName=AI网络安全智能分析系统
-AppVersion=3.4.5
-AppVerName=AI网络安全智能分析系统 3.4.5
+AppVersion=3.4.6
+AppVerName=AI网络安全智能分析系统 3.4.6
 AppPublisher=AI Network Security Analyzer
 DefaultDirName={autopf}\AI网络安全智能分析系统
 DefaultGroupName=AI网络安全智能分析系统
@@ -27,13 +27,13 @@ DisableProgramGroupPage=no
 DisableDirPage=no
 PrivilegesRequired=lowest
 OutputDir=installer_output
-OutputBaseFilename=AI网络安全智能分析系统_Setup_3.4.5
+OutputBaseFilename=AI网络安全智能分析系统_Setup_3.4.6
 Compression=lzma2/ultra
 SolidCompression=yes
 WizardStyle=modern
 SetupIconFile=assets\app_icon.ico
 UninstallDisplayIcon={app}\AI网络安全分析系统.exe
-VersionInfoVersion=3.4.5.0
+VersionInfoVersion=3.4.6.0
 VersionInfoDescription=AI网络安全智能分析系统 安装程序
 ArchitecturesInstallIn64BitMode=x64compatible
 

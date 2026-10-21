@@ -4,6 +4,75 @@
 
 ---
 
+## [3.4.6] - 2026-10-21 · 三引擎归因修正 + 训练可复现 + 密钥泄漏防护
+
+本版本的主线是**"让报告数字可信、让训练可复现、让密钥不泄漏"**：
+修复一处会直接误导用户的归因算法 bug（与模型真实行为相差 3 倍），
+补上训练可复现基础设施，并新增密钥泄漏扫描器防止 API Key 入库。
+
+### Fixed（三引擎归因算法与模型真实行为相差 3 倍）
+
+`stacking_fusion.py` 中的 `get_engine_contributions()` 此前计算的是
+**特征维度的重要性**（13 维特征各自的系数），而非**三个引擎的贡献**
+（规则 / 基线 / 孤立森林）。报告中"各引擎贡献占比"因此与模型实际权重
+相差可达 3 倍——例如孤立森林实际权重最高，但报告中可能显示最低。
+
+现修正为基于 LogisticRegression 系数的**正确引擎级归因**：
+将 13 维特征按所属引擎分组求和，再归一化为贡献占比。
+新增 `tests/test_engine_attribution.py`（232 项）锁定归因结果与模型系数一致。
+
+### Fixed（流式报告字段与全量路径不一致）
+
+流式分析路径（`analyze_stream`）的报告缺少 `engine_contributions`、
+`stacking_confidence` 等字段，与全量路径（`analyze_packets`）输出不对齐。
+现统一两条路径的报告结构，新增 `tests/test_streaming_report_fields.py`（204 项）。
+
+### Added（训练可复现基础设施）
+
+`tools/train_stacking.py` 支持**确定性训练**：
+- 固定随机种子（`random_state=42`）
+- 记录 `dataset_hash`、`n_features`、`n_attack`、`n_normal`、`git_sha` 到模型溯源
+- 训练前校验输入数据完整性
+
+任务队列（`src/api/task_queue.py`）新增 **LRU 淘汰机制**：
+队列满时自动淘汰最旧的已完成任务，避免长时间运行后内存膨胀。
+新增 `tests/test_task_queue_eviction.py`（208 项）。
+
+### Added（真实恶意流量验证结论入库）
+
+`data/eval_real/` 目录此前被 `.gitignore` 误挡，导致真实恶意流量的
+验证结果（IOC 交叉验证、分析结果对比）从未进入版本控制。
+现修正 `.gitignore` 并入库：
+- `ioc_crosscheck.json`：IOC 与已知威胁情报的交叉验证结果
+- `real_analysis_result.json`：真实恶意流量的完整分析结果
+
+### Added（密钥泄漏扫描器 + pre-commit 钩子）
+
+新增 `tools/scan_secrets.py`（346 行）：扫描暂存区中的 API Key、Token、
+私钥等敏感信息，匹配到则阻止提交。配套 `tools/pre-commit` 钩子和
+`tools/install_git_hooks.py` 安装脚本。
+新增 `tests/test_secret_scanner_effectiveness.py`（164 项）验证扫描器
+能识别 12 类常见密钥格式且不误报合法代码。
+
+### Security（移除测试文件中泄漏的真实 API Key）
+
+`tests/test_api_key_mask_incident.py` 中曾包含真实的 API Key 字面量
+（用于测试掩码功能）。现改用合成假值（`sk-test-xxxxxxxx`），
+并新增断言确保测试数据不含真实密钥格式。
+
+### Changed（死代码清理）
+
+- 移除 `src/knowledge/mitre_attck.py` 中未使用的 5 行常量
+- 重构 `src/utils/error_handler.py`，删除 98 行未使用的异常类和装饰器
+- 清除 UI 模块拆分时遗留的 7 处死导入（`analysis_task.py`、`gradio_app.py`、`ui_helpers.py`）
+
+### 测试
+
+**新增 832 项测试**（归因 232 + 流式字段 204 + 任务队列 208 + 密钥扫描 164 + 其他 24），
+累计测试数 **500+**。
+
+---
+
 ## [3.4.5] - 2026-10-13 · 契约修复 + CI 从长期全红转为全绿 + 可信度基础设施
 
 本版本的改动**以"让声称可验证"为主线**：修复一处会直接影响新装用户的契约缺陷，

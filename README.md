@@ -8,7 +8,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.141-green.svg)](https://fastapi.tiangolo.com/)
 [![Gradio](https://img.shields.io/badge/Gradio-6.x-orange.svg)](https://www.gradio.app/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-475%20passed-brightgreen.svg)](#测试)
+[![Tests](https://img.shields.io/badge/tests-500%2B%20passed-brightgreen.svg)](#测试)
 [![CI](https://github.com/LJY20030728/ai-network-security-analyzer/actions/workflows/ci.yml/badge.svg)](https://github.com/LJY20030728/ai-network-security-analyzer/actions/workflows/ci.yml)
 
 **[中文版](#目录) | [English Version](README_EN.md)**
@@ -38,7 +38,7 @@
 传统网络取证分析依赖安全分析师用 Wireshark 逐包查看 PCAP 文件，效率极低且高度依赖个人经验。规则引擎虽然能自动化检测，但对未知攻击和大流量变种漏报严重（实测规则引擎在 UNSW-NB15 上攻击召回仅 0.0001）。
 
 本项目是一个 **AI 辅助的离线网络取证分析工具**，实现了：
-- **三引擎 Stacking 融合检测（13维特征）**：规则引擎（9类阈值规则，含TCP+UDP+QUIC）+ EWMA 时序基线 + 孤立森林，三者结论交由 Stacking 元学习器（LogisticRegression）融合；置信度来源始终如实标注。v3.4.0 修复孤立森林形同虚设 bug，孤立森林异常分获得元学习器最高权重
+- **三引擎 Stacking 融合检测（13维特征）**：规则引擎（11类阈值规则，含TCP+UDP+QUIC）+ EWMA 时序基线 + 孤立森林，三者结论交由 Stacking 元学习器（LogisticRegression）融合；置信度来源始终如实标注。v3.4.0 修复孤立森林形同虚设 bug，v3.4.6 修正引擎归因算法（此前与模型真实行为相差 3 倍）
 - **LLM 威胁研判**：大模型将技术告警翻译为人类可读的威胁分析，配套三层输出校验（失败哨兵 / 交叉验证 / 人工复核标记）—— **注意：是合理性校验而非事实核查，见下文能力边界**
 - **RAG 安全知识问答**：本地向量库（BGE ONNX + ChromaDB，1687 片段），混合检索（向量 + BM25 + RRF）+ 重排序
 - **全流程闭环**：检测 → 分析 → 取证报告（五要素）→ 历史知识库（跨样本关联/趋势分析）
@@ -51,7 +51,7 @@
 |------|------|
 | **算法深度** | 三引擎 Stacking 融合（规则/时序基线/无监督，13维特征）、孤立森林异常分统计+top维度风险、UDP/QUIC完整检测、自适应阈值、STL 时序分解、逐包流式特征聚合 |
 | **AI 工程** | 三层输出校验（含能力边界实测）、RAG 混合检索+重排序、本地向量推理 |
-| **工程质量** | 306 单元测试全绿、FastAPI + Pydantic、SQLite WAL、DPAPI 加密、全局异常处理、CI（含 Windows/DPAPI 专项 job）、依赖锁定 |
+| **工程质量** | 500+ 单元测试全绿、FastAPI + Pydantic、SQLite WAL、DPAPI 加密、全局异常处理、CI（含 Windows/DPAPI 专项 job）、依赖锁定、密钥泄漏扫描器 + pre-commit 钩子 |
 | **轻量可移植** | 平均内存峰值 23MB、本地推理不依赖外部服务、Windows .exe 打包 |
 | **可验证** | 所列指标均有对应评测脚本与结果文件；无法复现的旧指标已删除而非保留 |
 
@@ -79,7 +79,14 @@
 
 - **自适应阈值**：基于输入流量 P95 分位数动态调整，适应不同网络环境
 - **STL 高级模式**：零依赖轻量级时序分解（趋势+季节性+残差），捕捉周期性偏离
-- **可复现训练**：`python tools/train_stacking.py` 用仓库自带 golden + 混合样本逐窗口提取三引擎特征并训练元学习器（不依赖任何外部数据集）
+- **可复现训练**：`python tools/train_stacking.py` 用仓库自带 golden + 混合样本逐窗口提取三引擎特征并训练元学习器（不依赖任何外部数据集）。**v3.4.6 升级为确定性训练**：固定随机种子、记录 `dataset_hash`/`git_sha`/`n_features` 到模型溯源，重训可逐位复现权重
+- **引擎归因可信**：**v3.4.6 修正** `get_engine_contributions()` 此前计算的是特征维度重要性而非引擎贡献，导致报告中"各引擎占比"与模型实际权重相差 3 倍。现改为基于 LogisticRegression 系数的引擎级归因，新增 232 项测试锁定
+
+### 🔐 密钥安全与开发规范（v3.4.6 新增）
+
+- **密钥泄漏扫描器**：`tools/scan_secrets.py` 扫描暂存区中的 API Key / Token / 私钥，匹配到则阻止提交。配套 `pre-commit` 钩子和 `install_git_hooks.py` 一键安装
+- **测试数据脱敏**：所有测试文件中的 API Key 均改用合成假值（`sk-test-xxxxxxxx`），不含任何真实密钥
+- **任务队列 LRU 淘汰**：`src/api/task_queue.py` 支持队列满时自动淘汰最旧的已完成任务，避免长时间运行后内存膨胀
 
 ### 🛡️ 置信度诚信标注
 
@@ -1063,7 +1070,7 @@ BGE ONNX 模型加载后约占用 100-200MB，但可以按需加载。普通电�
 
 ```bat
 build_exe.bat        :: PyInstaller 打包 → dist\AI网络安全分析系统\
-制作安装程序.bat      :: Inno Setup 生成安装包 → installer_output\..._Setup_3.4.2.exe
+制作安装程序.bat      :: Inno Setup 生成安装包 → installer_output\..._Setup_3.4.6.exe
 ```
 
 前置条件：已执行 `安装依赖.bat` 建好 venv；做安装包还需 Inno Setup 6

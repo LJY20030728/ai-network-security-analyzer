@@ -6,7 +6,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110-green.svg)](https://fastapi.tiangolo.com/)
 [![Gradio](https://img.shields.io/badge/Gradio-6.x-orange.svg)](https://www.gradio.app/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-475%20passed-brightgreen.svg)](#test-coverage)
+[![Tests](https://img.shields.io/badge/tests-500%2B%20passed-brightgreen.svg)](#test-coverage)
 
 **[中文版 README](README.md) | English Version**
 
@@ -58,11 +58,30 @@ were deleted rather than left behind (see [Evaluation Results](#evaluation-resul
 
 | Engine | Method | What it targets |
 |---|---|---|
-| Rule engine | Threshold rules (9 classes, TCP + UDP + QUIC) | SYN flood, port scan, DNS tunnel, RST storm, large transfer, UDP flood, DNS amplification, QUIC flood, long-lived QUIC |
+| Rule engine | Threshold rules (11 classes, TCP + UDP + QUIC) | SYN flood, port scan, DNS tunnel, RST storm, large transfer, UDP flood, DNS amplification, QUIC connection flood, QUIC long-flow anomaly, QUIC initial ratio, QUIC unknown version |
 | Time-series baseline | EWMA + median/MAD robust z-score over 4 window dimensions | Magnitude shifts against a learned normal profile |
 | Isolation Forest | Unsupervised; jointly models the 4 window dimensions | Coupling anomalies that no single dimension reveals |
 
 Their outputs are fused by a `LogisticRegression` meta-learner over 13 features.
+
+**v3.4.6 fix — engine attribution was off by 3x**: `get_engine_contributions()`
+previously computed per-feature importance (13 dimensions) instead of per-engine
+contribution (rule / baseline / isolation). Reported "engine contribution %" could
+differ from actual model weights by up to 3x. Now correctly groups coefficients by
+engine and normalizes; locked by 232 attribution tests.
+
+**Reproducible training (v3.4.6)**: `tools/train_stacking.py` uses fixed random
+seeds and records `dataset_hash`, `git_sha`, `n_features` into model provenance.
+Retraining produces bit-identical weights.
+
+### 🔐 Secret Safety & Dev Hygiene (v3.4.6)
+
+- **Secret scanner**: `tools/scan_secrets.py` blocks commits containing API keys,
+  tokens, or private keys. Ships with a `pre-commit` hook and `install_git_hooks.py`.
+- **Test data sanitized**: all API keys in tests use synthetic placeholders
+  (`sk-test-xxxxxxxx`), no real secrets in the repo.
+- **Task queue LRU eviction**: `src/api/task_queue.py` evicts oldest completed
+  tasks when the queue is full, preventing memory growth in long-running sessions.
 
 ### 🛡️ Confidence Provenance Labeling
 
